@@ -16,6 +16,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { mayActOnUnit } from '../services/unitLeadership.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
@@ -35,6 +36,33 @@ type MaterialRow = {
 export function iqcRunRoutes() {
   const router = Router();
 
+  /**
+   * The unit a control belongs to, in the order the laboratory means it: the
+   * unit that performs it, else the unit it was filed under, else the unit
+   * that owns the instrument it runs on.
+   */
+  function controlSectionId(materialId: unknown): number | null {
+    const row = getDb().prepare(`SELECT COALESCE(m.performing_section_id, m.section_id, e.section_id) AS resolved
+        FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id WHERE m.id = ?`)
+      .get(materialId) as { resolved: number | null } | undefined;
+    return row?.resolved ?? null;
+  }
+
+  /**
+   * Running a control, and keeping the definition it is judged against.
+   *
+   * The Quality Control right answers for the whole laboratory. Where it does
+   * not, the person running the unit answers for that unit's own controls —
+   * which is the point: a control nobody may run is a control nobody runs.
+   */
+  function iqcUnitWrite(action: string, message: string) {
+    return (req: any, res: any, next: any) => {
+      const materialId = parseIntNullable(req.body?.iqcMaterialId) ?? parseIntNullable(req.params?.id);
+      if (mayActOnUnit(req, 'iqc', action, controlSectionId(materialId))) return next();
+      return res.status(403).json({ error: message });
+    };
+  }
+
   /* ---------------------------------------------------------------- analytes */
 
   router.get('/materials/:id/analytes', requirePermission('iqc', 'view'), (req, res) => {
@@ -44,7 +72,8 @@ export function iqcRunRoutes() {
   // Replace the whole analyte set in one call. Defining a control is a single
   // act — you do not add eight FBC parameters one request at a time — and the
   // form that does it submits the finished list.
-  router.put('/materials/:id/analytes', requirePermission('iqc', 'edit'), (req, res) => {
+  router.put('/materials/:id/analytes', iqcUnitWrite('edit',
+    'Changing what a control measures needs the edit right on Quality Control, or the running of the unit it belongs to.'), (req, res) => {
     const db = getDb();
     const material = db.prepare('SELECT id FROM iqc_materials WHERE id = ?').get(req.params.id);
     if (!material) return res.status(404).json({ error: 'IQC material not found' });
@@ -131,7 +160,8 @@ export function iqcRunRoutes() {
    * same call works for an eight-parameter FBC control and a single reactive
    * HBsAg control — the caller supplies readings, not judgements.
    */
-  router.post('/runs', requirePermission('iqc', 'create'), (req, res) => {
+  router.post('/runs', iqcUnitWrite('create',
+    'Recording a control run needs the create right on Quality Control, or the running of the unit the control belongs to.'), (req, res) => {
     const db = getDb();
     const materialId = parseIntNullable(req.body?.iqcMaterialId);
     if (!materialId) return res.status(400).json({ error: 'iqcMaterialId is required' });
@@ -242,7 +272,8 @@ export function iqcRunRoutes() {
    * system. `force` is what makes that second case possible, and it is the only
    * thing that will overwrite a figure somebody typed in.
    */
-  router.post('/materials/:id/establish-targets', requirePermission('iqc', 'edit'), (req, res) => {
+  router.post('/materials/:id/establish-targets', iqcUnitWrite('edit',
+    'Establishing a control\'s limits needs the edit right on Quality Control, or the running of the unit it belongs to.'), (req, res) => {
     const db = getDb();
     const material = db.prepare('SELECT id, material_name, control_type FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
@@ -262,7 +293,12 @@ export function iqcRunRoutes() {
   });
 
   /** One analyte, for a panel where only one parameter needs re-establishing. */
-  router.post('/analytes/:id/establish-targets', requirePermission('iqc', 'edit'), (req, res) => {
+  router.post('/analytes/:id/establish-targets', (req, res, next) => {
+    const row = getDb().prepare('SELECT iqc_material_id FROM iqc_analytes WHERE id = ?').get(req.params.id) as
+      { iqc_material_id: number } | undefined;
+    if (mayActOnUnit(req, 'iqc', 'edit', row ? controlSectionId(row.iqc_material_id) : null)) return next();
+    return res.status(403).json({ error: 'Establishing a control\'s limits needs the edit right on Quality Control, or the running of the unit it belongs to.' });
+  }, (req, res) => {
     const db = getDb();
     try {
       const force = req.body?.force === true || req.body?.force === 'true';

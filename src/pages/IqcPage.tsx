@@ -107,10 +107,20 @@ function useLookups() {
 
 export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
-  const { can } = usePermissions();
+  const { can, unitsLed } = usePermissions();
   const { user } = useAuth();
   const { sections, staff, equipment, mySectionId } = useLookups();
   const isAdmin = user?.isAdministrator === true;
+
+  // Two ways to reach this work. The Quality Control right carries the whole
+  // laboratory; running a unit carries that unit's own controls and no others,
+  // which is what the API allows and therefore what these screens offer.
+  const ledIds = useMemo(() => new Set(unitsLed.map(u => Number(u.id))), [unitsLed]);
+  const canCreateAll = can('iqc', 'create');
+  const canCreate = canCreateAll || ledIds.size > 0;
+  /** Does this control belong to a unit this account runs? */
+  const ownUnit = (m: { section_id: number | null }) => m.section_id != null && ledIds.has(Number(m.section_id));
+  const unitsForDefining = canCreateAll ? sections : sections.filter(sec => ledIds.has(Number(sec.id)));
 
   const [tab, setTab] = useState(embedded ? 'Controls' : 'Dashboard');
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -171,20 +181,21 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
           materials={materials} onChanged={load}
           onRun={() => setTab('Run Control')}
           onChart={() => setTab('Levey-Jennings')}
-          canEdit={can('iqc', 'edit')}
+          canEdit={can('iqc', 'edit')} ownUnit={ownUnit}
           sections={sections} staff={staff} equipment={equipment}
           isAdmin={isAdmin} onError={setError} onNotice={setNotice}
         />
       )}
 
       {tab === 'New Control' && (
-        can('iqc', 'create')
+        canCreate
           ? <>
-              <ImportControls onImported={async (n) => {
+              {can('iqc', 'import') && <ImportControls onImported={async (n) => {
                 await load();
                 if (n > 0) setNotice(`${n} control${n === 1 ? '' : 's'} brought in from Excel. Check the register.`);
-              }} />
-              <DefineControlForm sections={sections} staff={staff} equipment={equipment} mySectionId={mySectionId}
+              }} />}
+              <DefineControlForm sections={unitsForDefining} staff={staff} equipment={equipment}
+                mySectionId={mySectionId ?? (unitsLed[0]?.id ?? null)}
                 onSaved={async () => { await load(); setNotice('Control defined. It is ready to run.'); setTab('Controls'); }}
                 onError={setError} />
             </>
@@ -192,8 +203,8 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       )}
 
       {tab === 'Run Control' && (
-        can('iqc', 'create')
-          ? <RunControl materials={materials.filter(m => m.is_active)} equipment={equipment} staff={staff}
+        canCreate
+          ? <RunControl materials={materials.filter(m => m.is_active && (canCreateAll || ownUnit(m)))} equipment={equipment} staff={staff}
               onRecorded={async (msg) => { await load(); setNotice(msg); }} onError={setError} />
           : <p className="muted">You do not have permission to record control runs.</p>
       )}
@@ -256,8 +267,10 @@ function ControlReadiness({ materials, runs, onOpen }: { materials: Material[]; 
 
 /* --------------------------------------------------------------- register */
 
-function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, sections, staff, equipment, isAdmin, onError, onNotice }: {
+function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, ownUnit, sections, staff, equipment, isAdmin, onError, onNotice }: {
   materials: Material[]; onChanged: () => void; onRun: () => void; onChart: () => void; canEdit: boolean;
+  /** A control this account may work on because it runs the unit that owns it. */
+  ownUnit: (m: Material) => boolean;
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[]; isAdmin: boolean;
   onError: (m: string) => void; onNotice: (m: string) => void;
 }) {
@@ -323,7 +336,7 @@ function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, sectio
               </tr>
               {open === m.id && (
                 <tr key={`${m.id}-d`}><td colSpan={9}>
-                  <ControlDetail material={m} analytes={analytes[m.id] ?? []} canEdit={canEdit}
+                  <ControlDetail material={m} analytes={analytes[m.id] ?? []} canEdit={canEdit || ownUnit(m)}
                     onChanged={async () => { setAnalytes(a => { const n = { ...a }; delete n[m.id]; return n; }); onChanged(); }}
                     sections={sections} staff={staff} equipment={equipment} isAdmin={isAdmin}
                     onError={onError} onNotice={onNotice} />

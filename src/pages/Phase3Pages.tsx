@@ -1965,6 +1965,9 @@ export function InventoryPage() {
         reasons={issueReasons} destinations={issueDestinations}
         onIssued={() => { setStockKey(k => k + 1); void load(); }} />
       <IssueRegister refreshKey={stockKey} canVoid={can('supplier_inventory.stock', 'void_archive')}
+        canCorrect={can('supplier_inventory.stock', 'edit') || can('supplier_inventory.stock', 'void_archive')}
+        sections={sections} staff={staff} departments={departments}
+        reasons={issueReasons} destinations={issueDestinations}
         onChanged={() => { setStockKey(k => k + 1); void load(); }} />
     </>}
 

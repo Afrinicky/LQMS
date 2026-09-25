@@ -94,7 +94,7 @@ export function seedDefaults() {
     // note beside the application loop for why this exists.
     // Both the routine-work tiers and the bulk-import reservation below have to
     // reach a laboratory that is already running, so the marker moves past both.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.9-routine-tiers-bulk-io';
+    const ROLE_DEFAULTS_VERSION = '2026.09-features.10-stock-corrections';
 
     // ── Bulk export and import ─────────────────────────────────────────────
     // Downloading a whole register as a spreadsheet, or loading one back in,
@@ -113,6 +113,18 @@ export function seedDefaults() {
     const BULK_IO_MODULES = new Set(['equipment', 'supplier_inventory']);
     const reservesBulkIo = (permKey: string) =>
       BULK_IO_MODULES.has(permKey) || BULK_IO_MODULES.has(permKey.split('.')[0]);
+
+    // ── Putting the store right after the fact ─────────────────────────────
+    // Cancelling a voucher issued in error, reversing a movement, abandoning a
+    // count: none of these is storekeeping, and all of them rewrite what the
+    // register says happened. They are settled the same way as bulk export —
+    // by exact action rather than by level — and held by the three posts
+    // accountable for the laboratory's records. The Quality Manager reads the
+    // store rather than running it, and still holds this, because a mistaken
+    // issue is a record to correct, not stock to manage.
+    const STOCK_CORRECTION_ACTION = 'void_archive';
+    const STOCK_CORRECTION_KEY = 'supplier_inventory.stock';
+    const STOCK_CORRECTION_HOLDERS = new Set(['System Administrator', 'Laboratory Manager', 'Quality Manager']);
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
@@ -645,6 +657,9 @@ export function seedDefaults() {
         // is, not by the level it happens to sit at.
         if (BULK_IO_ACTIONS.has(permission.action) && reservesBulkIo(permission.module_key)) {
           allowed = BULK_IO_HOLDERS.has(roleName) ? 1 : 0;
+        }
+        if (permission.module_key === STOCK_CORRECTION_KEY && permission.action === STOCK_CORRECTION_ACTION) {
+          allowed = STOCK_CORRECTION_HOLDERS.has(roleName) ? 1 : 0;
         }
         if (reapply) {
           // Write the whole position, allowed AND denied, so a right this role

@@ -6,6 +6,7 @@ import { getDb } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { audit } from '../services/auditService.js';
 import { getEffectivePermissions } from '../services/permissionResolver.js';
+import { unitsLedBy } from '../services/unitLeadership.js';
 import { createRequest, statusForClaim, completeReset, notifyApprovers } from '../services/passwordResetService.js';
 const router = Router();
 
@@ -24,6 +25,7 @@ router.post('/login', (req, res) => {
     // permission matrix does not grant. The server refuses them regardless.
     user: { id: user.id, username: user.username, fullName: user.full_name, roleId: user.role_id, roleName: user.role_name, isAdministrator: isAdministrator(user.id), staffId: user.staff_id ?? null, staffName: user.staff_name ?? null, isActive: true, mustChangePassword: user.must_change_password === 1 },
     permissions: getEffectivePermissions(user.id),
+    unitsLed: unitsLedBy(user.id),
   });
 });
 router.get('/me', requireAuth, (req, res) => {
@@ -35,14 +37,19 @@ router.get('/me', requireAuth, (req, res) => {
     // would disagree the moment a position mapping applied.
     user.isAdministrator = isAdministrator(Number(user.id));
   }
-  res.json({ user, permissions: getEffectivePermissions(req.user!.id) });
+  res.json({ user, permissions: getEffectivePermissions(req.user!.id), unitsLed: unitsLedBy(req.user!.id) });
 });
 
 // The caller's effective permissions on their own. The client hides every
 // feature that is absent from this map, so it is refreshed whenever the app
 // regains focus and after any change that could alter a user's rights.
+// `unitsLed` rides along because running a unit is a standing the screens have
+// to draw from: the person who heads a unit — or is standing in for its head —
+// prepares that unit's bench schedule and defines and runs its controls, and
+// the server allows exactly that much. Sending it with the permission map is
+// what stops a screen offering the button for a unit the API would refuse.
 router.get('/permissions', requireAuth, (req, res) => {
-  res.json({ permissions: getEffectivePermissions(req.user!.id) });
+  res.json({ permissions: getEffectivePermissions(req.user!.id), unitsLed: unitsLedBy(req.user!.id) });
 });
 router.post('/logout', requireAuth, (req, res) => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');

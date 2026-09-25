@@ -45,6 +45,7 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
 import { resolvePermission } from '../services/permissionResolver.js';
+import { mayActOnUnit, leadsAnyUnit } from '../services/unitLeadership.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import {
@@ -65,9 +66,13 @@ export function iqcPortalRoutes() {
   router.use(requireAuth);
   const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
-  function mayPerform(req: any): boolean {
+  function mayPerform(req: any, sectionId?: number | null): boolean {
     return resolvePermission(req.user!.id, tierFeatureKey(PERFORM_TIER), TIER_ACTION).allowed
-      || resolvePermission(req.user!.id, 'iqc', 'create').allowed;
+      || resolvePermission(req.user!.id, 'iqc', 'create').allowed
+      // Whoever runs the unit runs its controls. The tier is a competence
+      // record and a unit head who has not been ticked on it is still the
+      // person accountable for the unit's quality control.
+      || (sectionId != null ? mayActOnUnit(req, 'iqc', 'create', sectionId) : leadsAnyUnit(req));
   }
   function mayReview(req: any): boolean {
     return resolvePermission(req.user!.id, 'iqc', 'approve').allowed
@@ -243,7 +248,7 @@ export function iqcPortalRoutes() {
         id: m.id, materialName: m.material_name, equipmentName: m.equipment_name,
         why: `${m.equipment_name} does not report results. Move the control to the analyser, or correct the equipment category.`,
       })),
-      canPerform: mayPerform(req),
+      canPerform: mayPerform(req, sectionId),
       canReview: mayReview(req),
       canDefine: mayDefine(req),
       sectionName: (db.prepare('SELECT name FROM sections WHERE id = ?').get(sectionId) as any)?.name ?? null,
@@ -277,12 +282,7 @@ export function iqcPortalRoutes() {
    * for that unit alone, which is the narrower and more honest grant.
    */
   function mayDefineFor(req: any, sectionId: number | null): boolean {
-    if (resolvePermission(req.user!.id, 'iqc', 'create').allowed) return true;
-    if (!sectionId) return false;
-    const staffId = getCurrentStaffId(req);
-    if (staffId === null) return false;
-    const head = getDb().prepare('SELECT head_staff_id FROM sections WHERE id = ?').get(sectionId) as any;
-    return Boolean(head?.head_staff_id && Number(head.head_staff_id) === Number(staffId));
+    return mayActOnUnit(req, 'iqc', 'create', sectionId);
   }
 
   router.get('/portal/coverage', (req, res) => {
@@ -537,6 +537,7 @@ export function iqcPortalRoutes() {
         FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id
         LEFT JOIN sections s ON s.id = COALESCE(m.performing_section_id, m.section_id) WHERE m.id = ?`).get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
+    const controlSection = material.performing_section_id ?? material.section_id ?? null;
 
     // The bench sees the limits the run will actually be judged against: what
     // was entered, or what this laboratory established from its own runs. A
@@ -572,7 +573,7 @@ export function iqcPortalRoutes() {
       },
       analytes, recent, layout, feed,
       feedWaiting: Number(waiting?.n ?? 0),
-      canPerform: mayPerform(req),
+      canPerform: mayPerform(req, controlSection),
       canReview: mayReview(req),
     });
   });

@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook } from '../utils/xlsxRegister.js';
+import { printSheet, htmlEscape, signatureBlock } from '../utils/printLayout.js';
 import {
   stockPositions, planFor, allocateFefo, issuableQuantity, postMovement, storagePathMap,
   monthWindow, isOutMovement, syncItemQuantity, WASTAGE,
@@ -23,6 +25,23 @@ import { STOCK_STATUS_LABELS, VEN_CLASSES, NEEDS_ACTION, sum } from '../../share
  */
 export function stockControlRoutes() {
   const router = Router();
+
+  /**
+   * Putting a voucher right after the fact.
+   *
+   * Two rights reach this, and deliberately so. The storekeeper who holds
+   * `edit` on the store corrects the paperwork they wrote — a unit chosen in
+   * haste, a collector recorded as the wrong person. The posts that hold
+   * `void_archive` correct the record itself, and they are the ones a mistaken
+   * issue is escalated to; they read the store rather than run it, so `edit`
+   * alone would shut them out of the very thing they are there for.
+   */
+  const mayCorrectIssue = (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    if (resolvePermission(req.user.id, 'supplier_inventory.stock', 'edit').allowed
+      || resolvePermission(req.user.id, 'supplier_inventory.stock', 'void_archive').allowed) return next();
+    return res.status(403).json({ error: 'Permission denied' });
+  };
 
   /* ─────────────────────────────────────────── the stock control ledger */
 
@@ -58,28 +77,39 @@ export function stockControlRoutes() {
   });
 
   /**
-   * One item's bin card.
+   * One item's bin card — the tally card that hangs on the shelf.
    *
-   * The tally card that hangs on the shelf: every movement in date order with
-   * the balance it left behind, the balance the register believes now, and
-   * whether the two agree. When they do not, something posted out of order and
-   * somebody needs to know.
+   * Every movement in date order with the balance it left behind, the balance
+   * the register believes now, and whether the two agree. When they do not,
+   * something posted out of order and somebody needs to know.
+   *
+   * It is gathered here once because the screen, the printed card and the
+   * spreadsheet are three renderings of one record. Anything else and the card
+   * on paper eventually stops matching the card on screen, which is the one
+   * thing a tally card may never do.
    */
-  router.get('/ledger/:itemId', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
+  function binCard(id: number) {
     const db = getDb();
-    const id = Number(req.params.itemId);
-    const item = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(id) as any;
-    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+    const item = db.prepare(`SELECT it.*, sup.name AS supplier_name
+      FROM inventory_items it
+      LEFT JOIN suppliers sup ON sup.id = it.supplier_id
+      WHERE it.id = ?`).get(id) as any;
+    if (!item) return null;
 
     const movements = db.prepare(`SELECT m.*, b.batch_number, b.lot_number, b.expiry_date AS batch_expiry,
+        b.supplier_name AS batch_supplier_name, b.source_name AS batch_source_name, bsup.name AS batch_supplier,
         sec.name AS issued_to_section_name, st.full_name AS received_by_name, u.full_name AS recorded_by_name,
-        iss.issue_number
+        iss.issue_number, iss.destination_name AS issue_destination_name,
+        dep.name AS issue_department_name, isec.name AS issue_section_name
       FROM inventory_movements m
       LEFT JOIN inventory_batches b ON b.id = m.batch_id
+      LEFT JOIN suppliers bsup ON bsup.id = b.supplier_id
       LEFT JOIN sections sec ON sec.id = m.issued_to_section_id
       LEFT JOIN staff st ON st.id = m.received_by_staff_id
       LEFT JOIN users u ON u.id = m.created_by
       LEFT JOIN stock_issues iss ON iss.id = m.issue_id
+      LEFT JOIN departments dep ON dep.id = iss.department_id
+      LEFT JOIN sections isec ON isec.id = iss.section_id
       WHERE m.item_id = ? ORDER BY date(m.movement_date), m.id`).all(id) as any[];
 
     // Older rows predate the balance column; the card is still readable, so the
@@ -92,14 +122,153 @@ export function stockControlRoutes() {
     });
     const onHand = Number((db.prepare('SELECT COALESCE(SUM(quantity_available), 0) AS n FROM inventory_batches WHERE item_id = ?').get(id) as { n: number }).n) || 0;
     const position = stockPositions({ includeInactive: true }).rows.find(r => r.id === id) ?? null;
+    const storagePath = position?.storage_path
+      ?? (item.storage_location_id ? storagePathMap(db).get(Number(item.storage_location_id)) ?? null : null);
+
+    return { db, item, lines, onHand, position, storagePath };
+  }
+
+  /**
+   * Where a movement went, or where it came from, in one phrase.
+   *
+   * Out: the unit, department, facility or person it went to. In: the store or
+   * supplier it came from — not the person who keyed it, who is already named
+   * under "posted by" and is not where the stock came from.
+   */
+  function counterparty(line: any): string {
+    if (line.direction === 'out') {
+      return line.issue_destination_name || line.issued_to_section_name || line.issue_section_name
+        || line.issue_department_name || line.received_by_name || '';
+    }
+    return line.batch_source_name || line.batch_supplier_name || line.batch_supplier || '';
+  }
+
+  router.get('/ledger/:itemId', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
+    const card = binCard(Number(req.params.itemId));
+    if (!card) return res.status(404).json({ error: 'Inventory item not found' });
+    const { item, lines, onHand, position } = card;
 
     res.json({
       item: { id: item.id, itemCode: item.item_code, name: item.name, unit: item.unit },
       position,
-      lines: lines.reverse(),
+      lines: [...lines].reverse(),
       onHand,
-      reconciles: lines.length === 0 || Math.abs((lines[0]?.running_balance ?? 0) - onHand) < 0.001,
+      reconciles: lines.length === 0 || Math.abs((lines[lines.length - 1]?.running_balance ?? 0) - onHand) < 0.001,
     });
+  });
+
+  /**
+   * The bin card as it hangs on the shelf, ready for a printer or a PDF.
+   *
+   * A bin card is a stock record with a fixed shape, and the shape is the
+   * point: an assessor picks the card off the shelf and expects to read, in
+   * one place, what the item is, where it is kept, what the laboratory holds
+   * of it, and then every receipt and issue in date order with the reference
+   * it came from and the balance it left behind. Anybody signing at the bottom
+   * is vouching for that column of balances.
+   */
+  router.get('/ledger/:itemId/print', requirePermission('supplier_inventory.stock', 'print'), (req, res) => {
+    const card = binCard(Number(req.params.itemId));
+    if (!card) return res.status(404).send('Inventory item not found');
+    const { item, lines, onHand, position, storagePath } = card;
+
+    const num = (v: unknown) => (v == null || v === '' ? '' : String(Math.round(Number(v) * 100) / 100));
+    const dash = (v: unknown) => (v == null || String(v).trim() === '' ? '<span class="none">—</span>' : htmlEscape(v));
+    const day = (v: unknown) => String(v ?? '').slice(0, 10);
+
+    const detail = `<table class="meta">
+      <tr><th>Item</th><td colspan="3">${htmlEscape(item.name)}</td></tr>
+      <tr><th>Item code</th><td>${dash(item.item_code)}</td><th>Unit of issue</th><td>${dash(item.unit)}</td></tr>
+      <tr><th>Category</th><td>${dash(item.category)}</td><th>Catalogue number</th><td>${dash(item.catalogue_number)}</td></tr>
+      <tr><th>Manufacturer</th><td>${dash(item.manufacturer)}</td><th>Supplier</th><td>${dash(item.supplier_name)}</td></tr>
+      <tr><th>Storage place</th><td>${dash(storagePath)}</td><th>Storage condition</th><td>${dash(item.storage_requirement)}</td></tr>
+      <tr><th>Minimum</th><td>${dash(num(position?.minimum_stock ?? item.minimum_stock))}</td><th>Reorder level</th><td>${dash(num(position?.reorder_level ?? item.reorder_level))}</td></tr>
+      <tr><th>Maximum</th><td>${dash(num(position?.maximum_stock))}</td><th>Balance on this card</th><td><strong>${htmlEscape(num(onHand))} ${htmlEscape(item.unit ?? '')}</strong></td></tr>
+    </table>`;
+
+    const receipts = lines.filter(l => l.direction === 'in').reduce((n, l) => n + Math.abs(Number(l.quantity) || 0), 0);
+    const issues = lines.filter(l => l.direction === 'out').reduce((n, l) => n + Math.abs(Number(l.quantity) || 0), 0);
+
+    const body = lines.length === 0
+      ? '<p class="none">Nothing has moved on this card yet.</p>'
+      : `<table class="grid"><thead><tr>
+          <th>Date</th><th>Reference</th><th>Movement</th><th>To / from</th>
+          <th>Batch / lot</th><th>Expiry</th><th class="n">Received</th><th class="n">Issued</th>
+          <th class="n">Balance</th><th>Posted by</th><th>Remarks</th>
+        </tr></thead><tbody>
+        ${lines.map(l => `<tr>
+          <td>${htmlEscape(day(l.movement_date))}</td>
+          <td>${dash(l.issue_number)}</td>
+          <td>${htmlEscape(MOVEMENT_LABELS[l.movement_type as keyof typeof MOVEMENT_LABELS] ?? String(l.movement_type).replace(/_/g, ' '))}</td>
+          <td>${dash(counterparty(l))}</td>
+          <td>${dash(l.batch_number || l.lot_number)}</td>
+          <td>${dash(day(l.batch_expiry))}</td>
+          <td class="n">${l.direction === 'in' ? htmlEscape(num(l.quantity)) : ''}</td>
+          <td class="n">${l.direction === 'out' ? htmlEscape(num(l.quantity)) : ''}</td>
+          <td class="n"><strong>${htmlEscape(num(l.running_balance))}</strong></td>
+          <td>${dash(l.recorded_by_name)}</td>
+          <td>${dash(l.reason)}</td>
+        </tr>`).join('')}
+        </tbody><tfoot><tr>
+          <th colspan="6">Totals</th><th class="n">${htmlEscape(num(receipts))}</th><th class="n">${htmlEscape(num(issues))}</th>
+          <th class="n">${htmlEscape(num(onHand))}</th><th colspan="2"></th>
+        </tr></tfoot></table>`;
+
+    const signatures = `<div class="signatures two">
+      ${signatureBlock('Storekeeper')}
+      ${signatureBlock('Checked by')}
+    </div>`;
+
+    audit(req, { action: 'print', entity: 'inventory_items', entityId: item.id, newValue: { binCard: true } });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printSheet({
+      title: `${item.item_code} — Bin card`,
+      documentTitle: 'Bin card',
+      reference: item.item_code,
+      referenceLabel: 'Item code',
+      autoprint: req.query.autoprint !== '0',
+      footerNote: 'Bin card — keep with the stock it records.',
+      body: `${detail}<h2>Movements</h2>${body}${signatures}
+        <style>
+          table.grid td, table.grid th { font-size: 10px; }
+          table.grid .n { text-align: right; }
+          table.grid tfoot th { background: #eef3fb; }
+        </style>`,
+    }));
+  });
+
+  /** The same card as a spreadsheet: the detail block, then every movement. */
+  router.get('/ledger/:itemId/export', requirePermission('supplier_inventory.stock', 'export'), (req, res) => {
+    const card = binCard(Number(req.params.itemId));
+    if (!card) return res.status(404).json({ error: 'Inventory item not found' });
+    const { item, lines, onHand, position, storagePath } = card;
+    const day = (v: unknown) => String(v ?? '').slice(0, 10);
+
+    const headers = ['Date', 'Reference', 'Movement', 'To / from', 'Batch / lot', 'Expiry',
+      'Received', 'Issued', 'Balance', 'Posted by', 'Remarks'];
+    const detail: unknown[][] = [
+      ['BIN CARD', item.name], ['Item code', item.item_code], ['Unit of issue', item.unit ?? ''],
+      ['Category', item.category ?? ''], ['Catalogue number', item.catalogue_number ?? ''],
+      ['Manufacturer', item.manufacturer ?? ''], ['Supplier', item.supplier_name ?? ''],
+      ['Storage place', storagePath ?? ''], ['Storage condition', item.storage_requirement ?? ''],
+      ['Minimum', position?.minimum_stock ?? item.minimum_stock ?? 0],
+      ['Reorder level', position?.reorder_level ?? item.reorder_level ?? 0],
+      ['Maximum', position?.maximum_stock ?? ''],
+      ['Balance on this card', onHand],
+      [], headers,
+    ];
+    const rows = lines.map(l => [
+      day(l.movement_date), l.issue_number ?? '',
+      MOVEMENT_LABELS[l.movement_type as keyof typeof MOVEMENT_LABELS] ?? String(l.movement_type).replace(/_/g, ' '),
+      counterparty(l), l.batch_number || l.lot_number || '', day(l.batch_expiry),
+      l.direction === 'in' ? Math.abs(Number(l.quantity) || 0) : '',
+      l.direction === 'out' ? Math.abs(Number(l.quantity) || 0) : '',
+      l.running_balance, l.recorded_by_name ?? '', l.reason ?? '',
+    ]);
+
+    audit(req, { action: 'export', entity: 'inventory_items', entityId: item.id, newValue: { binCard: true } });
+    sendWorkbook(res, buildWorkbook(['Bin card', ''], [...detail, ...rows], 'BIN CARD'),
+      `Bin_Card-${String(item.item_code).replace(/[^A-Za-z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   /* ───────────────────────────────────────────────────────── issuing out */
@@ -164,7 +333,17 @@ export function stockControlRoutes() {
       planned.push({ itemId, quantity, name: item.name, unit: item.unit, unitCost: item.unit_cost, alloc });
     }
 
-    const issueDate = req.body.issueDate || new Date().toISOString().slice(0, 10);
+    // The date the stock actually left the store, which is not always the day
+    // it is keyed in: a voucher written at the counter on Friday is often
+    // entered on Monday, and posting it as Monday moves the balance on the bin
+    // card to the wrong day. It is taken as given, with two floors — a real
+    // date, and not one in the future, because a movement cannot have happened
+    // yet.
+    const issueDate = String(req.body.issueDate ?? '').trim() || new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) return res.status(400).json({ error: 'Give the date the stock was issued.' });
+    if (issueDate > new Date().toISOString().slice(0, 10)) {
+      return res.status(400).json({ error: 'The date of issue cannot be in the future.' });
+    }
     const createdAt = new Date().toISOString();
     const issueNumber = generateRecordNumber(db, 'stock_issues', 'ISS', createdAt);
     const receivedBy = collectorId;
@@ -194,7 +373,7 @@ export function stockControlRoutes() {
 
     audit(req, { action: 'create', entity: 'stock_issues', entityId: issueId, newValue: { issueNumber, lines: planned.length } });
     res.status(201).json({
-      id: issueId, issueNumber,
+      id: issueId, issueNumber, issueDate,
       lines: planned.map(p => ({ itemId: p.itemId, name: p.name, quantity: p.quantity, unit: p.unit, allocation: p.alloc })),
     });
   });
@@ -301,7 +480,7 @@ export function stockControlRoutes() {
    * chosen in haste, a reason left blank, a collector recorded as the wrong
    * person. Those are corrections to the paperwork, not to the shelf.
    */
-  router.put('/issues/:id', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+  router.put('/issues/:id', mayCorrectIssue, (req, res) => {
     const db = getDb();
     const issue = db.prepare('SELECT * FROM stock_issues WHERE id = ?').get(req.params.id) as any;
     if (!issue) return res.status(404).json({ error: 'Issue voucher not found' });
@@ -321,19 +500,35 @@ export function stockControlRoutes() {
       ? (String(req.body.issuedToName).trim() || collector?.full_name || null)
       : (collector?.full_name ?? issue.issued_to_name);
 
+    // The date the stock left the store is part of the record, and the one
+    // most often keyed wrong — a Friday voucher entered on Monday. Correcting
+    // it has to reach the movements as well, or the voucher and the bin card
+    // would date the same event differently.
+    let issueDate = issue.issue_date;
+    if (req.body?.issueDate !== undefined) {
+      const asked = String(req.body.issueDate ?? '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(asked)) return res.status(400).json({ error: 'Give the date the stock was issued.' });
+      if (asked > new Date().toISOString().slice(0, 10)) return res.status(400).json({ error: 'The date of issue cannot be in the future.' });
+      issueDate = asked;
+    }
+
     db.transaction(() => {
-      db.prepare(`UPDATE stock_issues SET section_id = ?, department_id = ?, destination_type = ?, destination_name = ?,
+      db.prepare(`UPDATE stock_issues SET issue_date = ?, section_id = ?, department_id = ?, destination_type = ?, destination_name = ?,
         issued_to_name = ?, received_by_staff_id = ?, purpose = ?, note = ? WHERE id = ?`)
-        .run(destination.sectionId, destination.departmentId, destination.type, destination.name,
+        .run(issueDate, destination.sectionId, destination.departmentId, destination.type, destination.name,
           collectedBy, collectorId,
           req.body?.purpose !== undefined ? (req.body.purpose || null) : issue.purpose,
           req.body?.note !== undefined ? (req.body.note || null) : issue.note,
           issue.id);
-      // The movements carry the unit and the collector too, so a correction to
-      // the voucher that did not reach them would leave the bin card saying
-      // something the voucher no longer says.
+      // The movements carry the unit, the collector and the date too, so a
+      // correction to the voucher that did not reach them would leave the bin
+      // card saying something the voucher no longer says.
       db.prepare('UPDATE inventory_movements SET issued_to_section_id = ?, received_by_staff_id = ? WHERE issue_id = ?')
         .run(destination.sectionId, collectorId, issue.id);
+      // Only the issue lines are re-dated: a return or a cancellation posted
+      // against this voucher happened on its own day and keeps it.
+      db.prepare("UPDATE inventory_movements SET movement_date = ? WHERE issue_id = ? AND movement_type = 'issue'")
+        .run(issueDate, issue.id);
     })();
 
     audit(req, { action: 'edit', entity: 'stock_issues', entityId: issue.id, oldValue: issue, newValue: req.body });

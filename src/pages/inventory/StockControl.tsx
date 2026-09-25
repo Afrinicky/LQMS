@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, ClipboardList, PackageCheck, Printer, Lock, LockOpen, Undo2, FileText, X } from 'lucide-react';
+import { Plus, Trash2, ClipboardList, PackageCheck, Printer, Lock, LockOpen, Undo2, FileText, Pencil, X } from 'lucide-react';
 import { api, API_BASE, getToken, ApiError, errorText } from '../../services/api';
 import { DetailModal, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, RowMenu, RegisterSearch, CHART_COLORS } from '../../components/ui';
 import BarcodeScanner from '../../components/BarcodeScanner';
@@ -59,6 +59,16 @@ export const qty = (n: number | null | undefined) =>
 const dateOnly = (d?: string | null) => String(d ?? '').slice(0, 10) || '—';
 /** Cover in words: "3.4 months" reads better than a bare number in a column. */
 const cover = (m: number | null) => m == null ? '—' : m < 1 ? `${Math.round(m * 30)} days` : `${m} months`;
+
+/** Open a server-rendered sheet in its own window, ready for a printer or a PDF. */
+async function openPrintable(path: string) {
+  const res = await fetch(`${API_BASE}${path}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined });
+  if (!res.ok) throw new Error(await res.text() || res.statusText);
+  const html = await res.text();
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('Pop-up blocked. Allow pop-ups to open the printable card.');
+  w.document.open(); w.document.write(html); w.document.close();
+}
 
 async function download(path: string, fallback: string) {
   const res = await fetch(`${API_BASE}${path}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined });
@@ -201,6 +211,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
  * than having one worked out afterwards.
  */
 export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClose: () => void; onOpenItem: (id: number) => void }) {
+  const { can } = usePermissions();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -214,6 +225,16 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
     subtitle={data?.item.itemCode}
     header={data && <>
       {p && <StatusBadge status={p.status} />}
+      {/* The card as it hangs on the shelf: the item, where it is kept, what
+          is held, and every movement with the balance it left behind. */}
+      {can('supplier_inventory.stock', 'print') && <button type="button" className="secondary"
+        onClick={() => void openPrintable(`/supplier-inventory/ledger/${itemId}/print`).catch(e => setError(errorText(e)))}>
+        <Printer size={14} /> Print / PDF
+      </button>}
+      {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary"
+        onClick={() => void download(`/supplier-inventory/ledger/${itemId}/export`, 'Bin_Card.xlsx').catch(e => setError(errorText(e)))}>
+        Export
+      </button>}
       <button type="button" className="secondary" onClick={() => { onClose(); onOpenItem(itemId); }}>Open the item</button>
     </>}>
     {error && <Notice kind="error">{error}</Notice>}
@@ -278,6 +299,12 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
   // picker that only lists units forces all of that into the wrong box.
   const [destination, setDestination] = useState('');
   const [destinationName, setDestinationName] = useState('');
+  // The day the stock actually left the store. It defaults to today because
+  // that is nearly always right, and it is editable because it is sometimes
+  // not: a voucher written at the counter on Friday and keyed in on Monday
+  // belongs on Friday's line of the bin card, not Monday's.
+  const today = new Date().toISOString().slice(0, 10);
+  const [issueDate, setIssueDate] = useState(today);
   const [receivedByStaffId, setReceivedByStaffId] = useState('');
   // "Other" for the collector too: somebody from outside the laboratory has no
   // staff record, and issuing to nobody at all is not a record of anything.
@@ -351,6 +378,8 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
     if (!destination) { setError('Say where this is going.'); return; }
     if (needsDestinationName && !destinationName.trim()) { setError('You chose “Other” — say who or where it is going to.'); return; }
     if (!receivedByStaffId && !collectedByName.trim()) { setError('Say who is collecting it.'); return; }
+    if (!issueDate) { setError('Give the date the stock was issued.'); return; }
+    if (issueDate > today) { setError('The date of issue cannot be in the future.'); return; }
     // Nothing is sent while a line asks for more than can go out: the whole
     // voucher would be refused, and the storekeeper would be told at the
     // counter rather than on the screen in front of them.
@@ -360,6 +389,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
       const r = await api<any>('/supplier-inventory/issues', {
         method: 'POST',
         body: JSON.stringify({
+          issueDate,
           destination,
           destinationName: needsDestinationName ? destinationName.trim() : '',
           sectionId: chosen.type === 'unit' ? chosen.id : null,
@@ -369,7 +399,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
         }),
       });
       setVoucher(r);
-      setLines([{ itemId: '', quantity: '' }]); setPurpose(''); setNote('');
+      setLines([{ itemId: '', quantity: '' }]); setPurpose(''); setNote(''); setIssueDate(today);
       onIssued();
     } catch (err) { setError(errorText(err)); }
     finally { setBusy(false); }
@@ -387,6 +417,8 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
 
       <form onSubmit={submit}>
         <div className="issue-head">
+          <label>Date issued<input type="date" value={issueDate} max={today}
+            onChange={e => setIssueDate(e.target.value)} required /></label>
           {/* Not everything goes to a bench. The groups are what a storekeeper
               would say out loud: one of our units, a department of the
               hospital, another facility, or something else entirely. */}
@@ -486,6 +518,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
 /** What was just issued, ready to hand over or print. */
 function IssueVoucher({ voucher, onClose }: { voucher: any; onClose: () => void }) {
   return <DetailModal open onClose={onClose} width="narrow" title={`Issued — ${voucher.issueNumber}`}
+    subtitle={voucher.issueDate ? dateOnly(voucher.issueDate) : undefined}
     header={<button type="button" className="secondary" onClick={() => window.print()}><Printer size={14} /> Print</button>}
     footer={<button type="button" onClick={onClose}>Done</button>}>
     <Notice kind="success" silent>Stock has left the store and the balances are updated.</Notice>
@@ -502,12 +535,16 @@ function IssueVoucher({ voucher, onClose }: { voucher: any; onClose: () => void 
 }
 
 /** Every voucher the store has written. */
-export function IssueRegister({ refreshKey, canVoid, onChanged }: {
-  refreshKey: number; canVoid?: boolean; onChanged?: () => void;
+export function IssueRegister({ refreshKey, canVoid, canCorrect, sections, staff, departments, reasons, destinations, onChanged }: {
+  refreshKey: number; canVoid?: boolean; canCorrect?: boolean;
+  sections: Section[]; staff: Staff[]; departments: Department[];
+  reasons: ConfigOption[]; destinations: ConfigOption[];
+  onChanged?: () => void;
 }) {
   const [rows, setRows] = useState<any[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [cancelling, setCancelling] = useState<any>(null);
+  const [correcting, setCorrecting] = useState<any>(null);
   const [deferred, setDeferred] = useState('');
 
   const load = () => api<any[]>('/supplier-inventory/issues').then(setRows).catch(() => setRows([]));
@@ -546,6 +583,11 @@ export function IssueRegister({ refreshKey, canVoid, onChanged }: {
           <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
             <RowMenu label={`Manage ${r.issue_number}`}>{close => <>
               <button type="button" role="menuitem" onClick={() => { close(); setOpen(r.id); }}><FileText size={14} /> Open the voucher</button>
+              {/* Putting right what the voucher says — the date it went out,
+                  the unit, the collector. The lines are the stock movement and
+                  are not touched here; a wrong line is cancelled and reissued. */}
+              {canCorrect && r.status !== 'cancelled' && <button type="button" role="menuitem"
+                onClick={() => { close(); setCorrecting(r); }}><Pencil size={14} /> Correct this voucher…</button>}
               {/* Cancelling puts every line back on the lot it came from. It
                   is not offered to everyone, and it costs a written reason. */}
               {canVoid && r.status !== 'cancelled' && <button type="button" role="menuitem" className="danger"
@@ -558,9 +600,14 @@ export function IssueRegister({ refreshKey, canVoid, onChanged }: {
         Showing the most recent {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} vouchers.
       </p>}
       </div>}
-    {open != null && <IssueDetail id={open} onClose={() => setOpen(null)} onChanged={() => { void load(); onChanged?.(); }} canVoid={canVoid} />}
+    {open != null && <IssueDetail id={open} onClose={() => setOpen(null)} onChanged={() => { void load(); onChanged?.(); }}
+      canVoid={canVoid} canCorrect={canCorrect} sections={sections} staff={staff} departments={departments}
+      reasons={reasons} destinations={destinations} />}
     {cancelling && <CancelVoucherPrompt voucher={cancelling} onClose={() => setCancelling(null)}
       onDone={() => { setCancelling(null); void load(); onChanged?.(); }} />}
+    {correcting && <CorrectVoucherPrompt voucher={correcting} sections={sections} staff={staff} departments={departments}
+      reasons={reasons} destinations={destinations} onClose={() => setCorrecting(null)}
+      onDone={() => { setCorrecting(null); void load(); onChanged?.(); }} />}
   </div>;
 }
 
@@ -602,14 +649,128 @@ function CancelVoucherPrompt({ voucher, onClose, onDone }: { voucher: any; onClo
   </DetailModal>;
 }
 
-function IssueDetail({ id, onClose, onChanged, canVoid }: {
-  id: number; onClose: () => void; onChanged?: () => void; canVoid?: boolean;
+/**
+ * Putting right what a voucher SAYS.
+ *
+ * Stock that went out on the wrong day, to the wrong unit, or against the
+ * wrong collector is a record with a mistake in it, not stock to move again —
+ * so the header is corrected and the lines are left alone. A wrong line is a
+ * different thing entirely and is cancelled and reissued, which is why this
+ * form cannot touch one.
+ *
+ * It is not on the voucher in plain sight. Correcting a posted record is a
+ * deliberate act for the people accountable for the store, so it lives behind
+ * the voucher's own menu and nowhere else.
+ */
+function CorrectVoucherPrompt({ voucher, sections, staff, departments, reasons, destinations, onClose, onDone }: {
+  voucher: any; sections: Section[]; staff: Staff[]; departments: Department[];
+  reasons: ConfigOption[]; destinations: ConfigOption[];
+  onClose: () => void; onDone: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const current = voucher.destination_type === 'other'
+    ? 'other'
+    : voucher.destination_type === 'department' && voucher.department_id
+      ? encodeDestination('department', voucher.department_id)
+      : voucher.destination_type === 'facility'
+        ? (destinations.find(d => d.label === voucher.destination_name)
+            ? encodeDestination('facility', destinations.find(d => d.label === voucher.destination_name)!.value) : 'other')
+        : voucher.section_id ? encodeDestination('unit', voucher.section_id) : '';
+
+  const [issueDate, setIssueDate] = useState(String(voucher.issue_date ?? '').slice(0, 10) || today);
+  const [destination, setDestination] = useState(current);
+  const [destinationName, setDestinationName] = useState(voucher.destination_type === 'other' ? (voucher.destination_name ?? '') : '');
+  const [receivedByStaffId, setReceivedByStaffId] = useState(voucher.received_by_staff_id ? String(voucher.received_by_staff_id) : '');
+  const [collectedByName, setCollectedByName] = useState(voucher.received_by_staff_id ? '' : (voucher.issued_to_name ?? ''));
+  const [collectorOther, setCollectorOther] = useState(!voucher.received_by_staff_id && Boolean(voucher.issued_to_name));
+  const [purpose, setPurpose] = useState(voucher.purpose ?? '');
+  const [note, setNote] = useState(voucher.note ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!issueDate) { setError('Give the date the stock was issued.'); return; }
+    if (issueDate > today) { setError('The date of issue cannot be in the future.'); return; }
+    if (!destination) { setError('Say where this went.'); return; }
+    if (destination === 'other' && !destinationName.trim()) { setError('You chose “Other” — say who or where it went to.'); return; }
+    setBusy(true); setError(null);
+    try {
+      await api(`/supplier-inventory/issues/${voucher.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          issueDate,
+          destination,
+          destinationName: destination === 'other' ? destinationName.trim() : '',
+          receivedByStaffId: collectorOther ? null : (receivedByStaffId || null),
+          issuedToName: collectorOther ? collectedByName.trim() : '',
+          purpose, note,
+        }),
+      });
+      onDone();
+    } catch (e) { setError(errorText(e)); setBusy(false); }
+  }
+
+  return <DetailModal open onClose={onClose} width="narrow" title={`Correct ${voucher.issue_number}`}
+    footer={<>
+      <button type="button" className="secondary" onClick={onClose}>Leave it as it is</button>
+      <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save the correction'}</button>
+    </>}>
+    {error && <Notice kind="error">{error}</Notice>}
+    <p className="muted" style={{ marginTop: 0 }}>
+      The items and quantities stay as issued — cancel the voucher to put those back. What is corrected here is what
+      the voucher says: when it went out, where, to whom and why.
+    </p>
+    <div className="form">
+      <label>Date issued<input type="date" value={issueDate} max={today} onChange={e => setIssueDate(e.target.value)} /></label>
+      <label>Issued to<select value={destination} onChange={e => { setDestination(e.target.value); setDestinationName(''); }}>
+        <option value="">Select where it went</option>
+        {sections.length > 0 && <optgroup label="Laboratory units">
+          {sections.map(sec => <option key={sec.id} value={encodeDestination('unit', sec.id)}>{sec.name}</option>)}
+        </optgroup>}
+        {departments.length > 0 && <optgroup label="Hospital departments">
+          {departments.map(d => <option key={d.id} value={encodeDestination('department', d.id)}>{d.name}</option>)}
+        </optgroup>}
+        {destinations.length > 0 && <optgroup label="Other facilities">
+          {destinations.map(d => <option key={d.id} value={encodeDestination('facility', d.value)}>{d.label}</option>)}
+        </optgroup>}
+        <optgroup label="Anything else"><option value="other">Other — say who</option></optgroup>
+      </select></label>
+      {destination === 'other' && <label>Who or where
+        <TextField value={destinationName} onValue={nextValue => setDestinationName(nextValue)} placeholder="Name the unit, facility or programme" /></label>}
+      <label>Collected by
+        {collectorOther
+          ? <TextField value={collectedByName} onValue={nextValue => setCollectedByName(nextValue)} placeholder="Name the person who collected it" />
+          : <select value={receivedByStaffId} onChange={e => {
+              if (e.target.value === '__other') { setCollectorOther(true); setReceivedByStaffId(''); setCollectedByName(''); return; }
+              setReceivedByStaffId(e.target.value);
+            }}>
+              <option value="">Select the member of staff</option>
+              {staff.map(st => <option key={st.id} value={st.id}>{st.fullName}</option>)}
+              <option value="__other">Other — someone not on the staff register</option>
+            </select>}
+        {collectorOther && <button type="button" className="linklike" style={{ alignSelf: 'start' }}
+          onClick={() => { setCollectorOther(false); setCollectedByName(''); }}>Pick from the staff register instead</button>}
+      </label>
+      <label>Reason for issue<select value={purpose} onChange={e => setPurpose(e.target.value)}>
+        <option value="">Select a reason</option>
+        {reasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
+      </select></label>
+      <label>Remarks<TextField value={note} onValue={nextValue => setNote(nextValue)} placeholder="Optional — anything the voucher should carry" /></label>
+    </div>
+  </DetailModal>;
+}
+
+function IssueDetail({ id, onClose, onChanged, canVoid, canCorrect, sections, staff, departments, reasons, destinations }: {
+  id: number; onClose: () => void; onChanged?: () => void; canVoid?: boolean; canCorrect?: boolean;
+  sections: Section[]; staff: Staff[]; departments: Department[];
+  reasons: ConfigOption[]; destinations: ConfigOption[];
 }) {
   const [data, setData] = useState<any>(null);
   const [returning, setReturning] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
   const load = () => api(`/supplier-inventory/issues/${id}`).then(setData).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, [id]);
 
@@ -631,10 +792,13 @@ function IssueDetail({ id, onClose, onChanged, canVoid }: {
     header={data && <>
       {data.status === 'cancelled' && <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>cancelled</span>}
       <button type="button" className="secondary" onClick={() => window.print()}><Printer size={14} /> Print</button>
-      {canVoid && data.status !== 'cancelled' && <RowMenu label={`Manage ${data.issue_number}`}>{close => <>
-        <button type="button" role="menuitem" className="danger" onClick={() => { close(); setCancelling(true); }}>
+      {(canVoid || canCorrect) && data.status !== 'cancelled' && <RowMenu label={`Manage ${data.issue_number}`}>{close => <>
+        {canCorrect && <button type="button" role="menuitem" onClick={() => { close(); setCorrecting(true); }}>
+          <Pencil size={14} /> Correct this voucher…
+        </button>}
+        {canVoid && <button type="button" role="menuitem" className="danger" onClick={() => { close(); setCancelling(true); }}>
           <Undo2 size={14} /> Cancel this voucher…
-        </button>
+        </button>}
       </>}</RowMenu>}
     </>}>
     {error && <Notice kind="error">{error}</Notice>}
@@ -644,6 +808,7 @@ function IssueDetail({ id, onClose, onChanged, canVoid }: {
         to the lot it came from.{data.cancellation_reason ? ` Reason: ${data.cancellation_reason}` : ''}
       </Notice>}
       <dl className="fact-grid">
+        <div><dt>Date issued</dt><dd>{dateOnly(data.issue_date)}</dd></div>
         <div><dt>Issued to</dt><dd>{data.destination_label || data.section_name || '—'}</dd></div>
         <div><dt>Collected by</dt><dd>{data.received_by_name || data.issued_to_name || '—'}</dd></div>
         <div><dt>Reason for issue</dt><dd>{data.purpose_label || data.purpose || '—'}</dd></div>
@@ -665,6 +830,9 @@ function IssueDetail({ id, onClose, onChanged, canVoid }: {
       </tbody></table></div>
       {cancelling && <CancelVoucherPrompt voucher={data} onClose={() => setCancelling(false)}
         onDone={() => { setCancelling(false); void load(); onChanged?.(); }} />}
+      {correcting && <CorrectVoucherPrompt voucher={data} sections={sections} staff={staff} departments={departments}
+        reasons={reasons} destinations={destinations} onClose={() => setCorrecting(false)}
+        onDone={() => { setCorrecting(false); void load(); onChanged?.(); }} />}
       {data.status !== 'cancelled' && <div className="reg-head-actions" style={{ marginTop: 12 }}>
         <button type="button" className="secondary" disabled={busy} onClick={sendReturn}>
           {busy ? 'Returning…' : 'Put the returned stock back'}
