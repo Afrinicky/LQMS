@@ -13,6 +13,7 @@ import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
   EnvEscalationRule, EnvNotificationQueueItem, EnvChannel, EnvInsight, EnvReportType,
+  EnvAssetParameter,
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
@@ -229,7 +230,8 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
         : <p className="muted">Choose an asset to view its temperature trend. Exports available as CSV; PDF/Excel reporting is on the roadmap.</p>}
     </div>}
 
-    {tab === 'Settings' && <SettingsTab settings={settings} onSaved={() => { loadSettings(); loadDashboard(); }} onError={setError} onFlash={flash} />}
+    {tab === 'Settings' && <SettingsTab settings={settings} assets={assets}
+      onSaved={() => { loadSettings(); loadDashboard(); loadAssets(); }} onError={setError} onFlash={flash} />}
   </div>;
 }
 
@@ -484,7 +486,7 @@ function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
   </div>;
 }
 
-function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
+function SettingsTab({ settings, assets, onSaved, onError, onFlash }: any) {
   const { can } = usePermissions();
   const [f, setF] = useState<any>(null);
   useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices, webhookUrl: (settings as any).webhook_url ?? '',
@@ -497,7 +499,8 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
   }); }, [settings]);
   if (!f) return <p>Loading settings…</p>;
   async function save(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/settings', { method: 'PUT', body: JSON.stringify(f) }); onFlash('Settings saved.'); onSaved(); } catch (err) { onError(errorText(err)); } }
-  return <div className="card">
+  return <>
+  <div className="card">
     <h3>Monitoring settings</h3>
     {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={save}>
       {/* How this laboratory logs its environment. Everything below obeys it:
@@ -536,6 +539,111 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
       <button type="submit">Save settings</button>
     </form>}
     <p className="muted" style={{ marginTop: 12 }}>Configure who gets notified under the <strong>Notifications</strong> tab. The interactive floor plan, predictive maintenance and Dennis analysis build on this data in later phases.</p>
+  </div>
+  <RangesPanel assets={assets ?? []} onSaved={onSaved} onError={onError} onFlash={onFlash} />
+  </>;
+}
+
+/**
+ * The acceptable range for every thing the laboratory monitors.
+ *
+ * A fridge registered at 2–8 °C and later revalidated at 2–6, a new incubator
+ * that arrived set wrongly, a humidity limit taken from the wrong insert —
+ * every one of those is a range that has to change, and until now none of them
+ * could: the limits were asked for once, when the asset was registered, and
+ * never offered again.
+ *
+ * A change here reaches the live dashboard, the alarms and the chart the bench
+ * is filling in this month. Months already completed keep the range that was
+ * actually in force while they ran.
+ */
+function RangesPanel({ assets, onSaved, onError, onFlash }: {
+  assets: EnvAsset[];
+  onSaved: () => void; onError: (m: string | null) => void; onFlash: (m: string) => void;
+}) {
+  const { can } = usePermissions();
+  const mayEdit = can(ENV, 'edit');
+  const [assetId, setAssetId] = useState('');
+  const [rows, setRows] = useState<EnvAssetParameter[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!assetId) { setRows(null); return; }
+    api<EnvAssetParameter[]>(`/environmental/assets/${assetId}/parameters`)
+      .then(list => setRows(list.filter(p => p.is_active)))
+      .catch(e => onError(errorText(e)));
+  }, [assetId]);
+
+  const set = (i: number, patch: Partial<EnvAssetParameter>) =>
+    setRows(list => (list ?? []).map((r, n) => (n === i ? { ...r, ...patch } : r)));
+
+  async function save() {
+    if (!rows) return;
+    setBusy(true); onError(null);
+    try {
+      const saved = await api<EnvAssetParameter[]>(`/environmental/assets/${assetId}/parameters`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          parameters: rows.map(r => ({
+            parameter: r.parameter || undefined, label: r.label, unit: r.unit,
+            minValue: r.min_value, maxValue: r.max_value, decimalPlaces: r.decimal_places,
+          })),
+        }),
+      });
+      setRows(saved.filter(p => p.is_active));
+      onFlash('Ranges saved. The live dashboard and this month\u2019s chart follow them from now.');
+      onSaved();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="card" style={{ marginTop: 16 }}>
+    <h3>Acceptable ranges</h3>
+    <p className="muted" style={{ marginTop: 0 }}>
+      What each asset is monitored for, and the range it must stay inside. Completed months keep the range that was in force while they ran.
+    </p>
+    <label style={{ maxWidth: 420, display: 'block' }}>Asset
+      <select value={assetId} onChange={e => setAssetId(e.target.value)}>
+        <option value="">Select an asset</option>
+        {assets.map(a => <option key={a.id} value={a.id}>{a.name}{a.section_name ? ` — ${a.section_name}` : ''}</option>)}
+      </select>
+    </label>
+
+    {rows && <>
+      <div className="table-scroll" style={{ marginTop: 12 }}>
+        <table className="data-table"><thead><tr>
+          <th style={{ width: '32%' }}>Parameter</th><th>Unit</th><th>Lowest</th><th>Highest</th><th>Decimals</th><th></th>
+        </tr></thead><tbody>
+          {rows.map((r, i) => <tr key={r.id ?? `new-${i}`}>
+            <td><TextField value={r.label ?? ''} onValue={v => set(i, { label: v })} placeholder="e.g. Temperature" /></td>
+            <td><TextField value={r.unit ?? ''} onValue={v => set(i, { unit: v })} placeholder="°C" /></td>
+            <td><input type="number" step="any" style={{ width: 90 }} value={r.min_value ?? ''}
+              onChange={e => set(i, { min_value: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+            <td><input type="number" step="any" style={{ width: 90 }} value={r.max_value ?? ''}
+              onChange={e => set(i, { max_value: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+            <td><input type="number" min={0} max={3} style={{ width: 70 }} value={r.decimal_places ?? 1}
+              onChange={e => set(i, { decimal_places: Number(e.target.value) })} /></td>
+            <td>{mayEdit && rows.length > 1 && <button type="button" className="tiny danger"
+              onClick={() => setRows(list => (list ?? []).filter((_, n) => n !== i))}>Remove</button>}</td>
+          </tr>)}
+          {rows.length === 0 && <tr><td colSpan={6} className="muted">Nothing is charted for this asset yet.</td></tr>}
+        </tbody></table>
+      </div>
+      {mayEdit && <div className="reg-head-actions" style={{ marginTop: 12 }}>
+        <button type="button" className="secondary" onClick={() => setRows(list => [...(list ?? []), {
+          id: 0, asset_id: Number(assetId), parameter: '', label: '', unit: '',
+          min_value: null, max_value: null, decimal_places: 1, display_order: (rows?.length ?? 0), is_active: 1,
+        }])}>Add a parameter</button>
+        <button type="button" disabled={busy} style={{ marginLeft: 'auto' }} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save ranges'}
+        </button>
+      </div>}
+      {/* A parameter taken off the list is kept against the months already
+          charted for it — it stops being asked for, it is not erased. */}
+      <p className="muted" style={{ marginTop: 10 }}>
+        A parameter removed here stops being charted from now on; the months already recorded against it keep it.
+      </p>
+    </>}
   </div>;
 }
 

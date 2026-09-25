@@ -546,6 +546,12 @@ export type EnvDashboard = { summary:{ totalAssets:number; normal:number; warnin
 export type EnvSettings = { id:number; polling_enabled:number; default_poll_interval_seconds:number; excursion_nc_minutes:number; battery_low_threshold:number; no_comm_minutes:number; prevent_expired_devices:number; floor_plan_file_id?:number|null; email_enabled:number; updated_at?:string };
 export type EnvEscalationRule = { id:number; name:string; severity:string; delay_minutes:number; channel:string; recipients?:string; is_active:number; created_at:string; updated_at?:string };
 export type EnvNotificationQueueItem = { id:number; alert_id?:number|null; rule_id?:number|null; rule_name?:string; channel:string; recipients?:string; subject?:string; body?:string; severity?:string; status:string; attempts:number; error?:string; scheduled_at?:string; sent_at?:string; created_at:string };
+/** What one asset is charted for, and the range it must stay inside. */
+export type EnvAssetParameter = {
+  id:number; asset_id:number; parameter:string; label:string; unit?:string|null;
+  min_value?:number|null; max_value?:number|null; decimal_places?:number|null;
+  display_order:number; is_active:number;
+};
 export type EnvChannel = { key:string; label:string; ready:boolean };
 export type EnvInsight = { asset_id:number|null; asset_name:string; category:string; severity:string; message:string; recommendation?:string; maintenance:boolean };
 export type EnvReportType = { key:string; label:string };
@@ -696,8 +702,10 @@ export type LogSheetCell = {
   confidence?:number|null; needs_review:number;
   recorded_by_staff_id?:number|null; recorded_by_name?:string|null;
   recorded_at:string; reading_time?:string|null;
+  /** When the entry was first made — what the correction window is measured from. */
+  first_recorded_at?:string|null;
   excursion_id?:number|null; environmental_reading_id?:number|null;
-  /** How many times this entry has been changed after the day it belongs to. */
+  /** How many times this entry has been changed after it had settled. */
   amendment_count?:number|null;
   last_amended_at?:string|null;
   last_amend_reason?:string|null;

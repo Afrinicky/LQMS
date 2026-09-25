@@ -25,6 +25,7 @@
  */
 import {
   daysInMonth, monthLabel, weekSlotForDay, cellIsBreach, sheetIsLocked,
+  cellWithinCorrectionWindow,
   type SheetKind, type CellSlot,
 } from '../../shared/constants/routineWork.js';
 import { deconTimesPerDay } from '../../shared/constants/routineWork.js';
@@ -295,7 +296,7 @@ export function effectiveDecontaminant(db: DB, definition: any, sectionId: numbe
  * because a row that already carries entries is a record. An open sheet accepts
  * this; a signed one does not.
  */
-export function refreshSheetRows(db: DB, sheet: any): void {
+export function refreshSheetRows(db: DB, sheet: any, options: { relimit?: boolean } = {}): void {
   if (sheetIsLocked(sheet.status)) return;
   const built = buildSheetDefinition(db, {
     kind: sheet.sheet_kind, subjectId: sheet.subject_id, month: sheet.month, sectionId: sheet.section_id,
@@ -307,11 +308,46 @@ export function refreshSheetRows(db: DB, sheet: any): void {
   const insertRow = db.prepare(`INSERT INTO routine_log_rows
       (sheet_id, row_key, label, row_type, unit, min_value, max_value, slots, cadence, source_ref, display_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  // Re-stating an existing row's limits is asked for explicitly, and only ever
+  // for a month that has not finished. A corrected fridge range has to reach
+  // the chart the bench is filling in now — otherwise "configurable" means
+  // "configurable from next month" — but a month already run under the old
+  // range keeps it, which is the whole point of snapshotting rows.
+  const relimit = options.relimit
+    ? db.prepare(`UPDATE routine_log_rows SET label = ?, unit = ?, min_value = ?, max_value = ?
+        WHERE sheet_id = ? AND row_key = ?`)
+    : null;
   for (const r of built.rows) {
-    if (have.has(r.rowKey)) continue;
+    if (have.has(r.rowKey)) {
+      relimit?.run(r.label, r.unit ?? null, r.minValue ?? null, r.maxValue ?? null, sheet.id, r.rowKey);
+      continue;
+    }
     insertRow.run(sheet.id, r.rowKey, r.label, r.rowType, r.unit ?? null, r.minValue ?? null,
       r.maxValue ?? null, JSON.stringify(r.slots), r.cadence, r.sourceRef ?? null, order++);
   }
+}
+
+/**
+ * Push a changed acceptable range onto the charts still being filled in.
+ *
+ * The month in progress and any month opened ahead of it take the new limits;
+ * a month that has already run does not, because it was run under the range
+ * that was actually in force at the time and its chart has to keep saying so.
+ * Entries already recorded keep the status they were given when they were
+ * taken — re-judging a reading somebody has signed for is an amendment, not a
+ * setting.
+ */
+export function applyRangeChange(db: DB, kind: SheetKind, subjectId: number): number {
+  const fromMonth = new Date().toISOString().slice(0, 7);
+  const sheets = db.prepare(`SELECT * FROM routine_log_sheets
+      WHERE sheet_kind = ? AND subject_id = ? AND month >= ?`).all(kind, subjectId, fromMonth) as any[];
+  let touched = 0;
+  for (const sheet of sheets) {
+    if (sheetIsLocked(sheet.status)) continue;
+    refreshSheetRows(db, sheet, { relimit: true });
+    touched++;
+  }
+  return touched;
 }
 
 /* ============================================================================
@@ -657,11 +693,15 @@ export function sheetTrends(db: DB, sheet: any, rows: any[], cells: any[]): Shee
    that reminds you at one time and accepts at another is telling you two
    different things.
 
-   TODAY IS CORRECTABLE; YESTERDAY IS AMENDABLE. Correcting or withdrawing an
-   entry on the day it belongs to is ordinary work — a wrong box, a transposed
-   digit, a re-read after the door was found ajar. Once the day has ended the
-   record has been relied on, so changing it takes somebody senior, a reason,
-   and an amendment trail that keeps the original legible (ISO 15189:2022 §8.4).
+   A FRESH ENTRY IS CORRECTABLE; A SETTLED ONE IS AMENDABLE. Correcting or
+   withdrawing what you have just written is ordinary work — a wrong box, a
+   transposed digit, a re-read after the door was found ajar — and stays
+   ordinary for a day, whichever day the reading itself belongs to. That last
+   part matters: somebody typing Monday's readings on Wednesday is catching up,
+   and holding them to Monday's calendar meant their entry was closed the
+   instant it landed. Once an entry has stood a day the record has been relied
+   on, so changing it takes somebody senior, a reason, and an amendment trail
+   that keeps the original legible (ISO 15189:2022 §8.4).
    ========================================================================= */
 
 /** Local calendar date, which is the date the bench is standing in. */
@@ -757,7 +797,7 @@ export interface CellInput {
   needsReview?: boolean;
   /** Withdraw the entry altogether rather than change it. */
   clear?: boolean;
-  /** Why a closed day's entry is being changed. Required once the day has ended. */
+  /** Why a settled entry is being changed. Required once it has stood a day. */
   amendReason?: string | null;
 }
 
@@ -836,13 +876,17 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
 
   const upsert = db.prepare(`INSERT INTO routine_log_cells
       (sheet_id, row_id, day, slot, value_num, value_text, status, initials, note, source, confidence,
-       needs_review, recorded_by_staff_id, recorded_at, reading_time, excursion_id, environmental_reading_id, created_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       needs_review, recorded_by_staff_id, recorded_at, first_recorded_at, reading_time, excursion_id,
+       environmental_reading_id, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(sheet_id, row_id, day, slot) DO UPDATE SET
         value_num = excluded.value_num, value_text = excluded.value_text, status = excluded.status,
         initials = excluded.initials, note = excluded.note, source = excluded.source,
         confidence = excluded.confidence, needs_review = excluded.needs_review,
         recorded_by_staff_id = excluded.recorded_by_staff_id, recorded_at = CURRENT_TIMESTAMP,
+        -- When the entry was FIRST made. Kept, never refreshed: correcting an
+        -- entry must not hand out another day in which to correct it again.
+        first_recorded_at = COALESCE(routine_log_cells.first_recorded_at, excluded.first_recorded_at),
         reading_time = excluded.reading_time,
         excursion_id = COALESCE(excluded.excursion_id, routine_log_cells.excursion_id),
         environmental_reading_id = COALESCE(excluded.environmental_reading_id, routine_log_cells.environmental_reading_id),
@@ -874,10 +918,23 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
       if (window.open === false) { refuse(window.reason); continue; }
 
       const prior = existing.get(sheetId, row.id, day, slotKey) as any;
-      // A day that has ended, on a cell that already says something. Filling a
-      // blank for last Tuesday is not this — that is recording an observation
-      // that was made and not yet typed, which is ordinary and necessary.
-      const dayClosed = Boolean(prior) && !window.sameDay && !context.backfill;
+      /**
+       * An entry that has settled: one that already says something, made long
+       * enough ago that other people have read it.
+       *
+       * It is the age of the ENTRY that decides, not the age of the day it
+       * describes. Somebody typing Monday's reading on Wednesday is catching
+       * up, which is ordinary and necessary, and used to produce an entry that
+       * was "closed" the instant it landed — so a mistyped digit could not be
+       * fixed by the person who had just made it. For a day after writing it,
+       * it is theirs to put right. After that, changing it is an amendment.
+       *
+       * Filling a BLANK for last Tuesday is not this either: there is nothing
+       * to amend, only an observation being written down.
+       */
+      const settled = Boolean(prior)
+        && !cellWithinCorrectionWindow(prior.first_recorded_at ?? prior.recorded_at)
+        && !context.backfill;
 
       /**
        * Whether writing this would change what the record SAYS.
@@ -890,7 +947,7 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
        * makes, is the record being altered.
        */
       const amendmentGate = (nextStatus: string, nextNum: number | null, nextText: string | null): boolean | 'refused' => {
-        if (!dayClosed) return false;
+        if (!settled) return false;
         const sameValue = Number(prior.value_num ?? NaN) === Number(nextNum ?? NaN)
           || (prior.value_num == null && nextNum == null);
         const sameText = (prior.value_text ?? null) === (nextText ?? null);
@@ -899,7 +956,7 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
 
         const reason = String(input.amendReason ?? '').trim();
         if (!context.mayAmendClosedDays) {
-          refuse(`${row.label}, day ${day}: the day has closed. Changing the value requires a supervisor. A note can still be added.`);
+          refuse(`${row.label}, day ${day}: this entry has stood for more than a day. Changing the value now requires a supervisor. A note can still be added.`);
           return 'refused';
         }
         if (reason.length < 10) {
@@ -911,17 +968,17 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
 
       // ---- Withdrawing an entry -------------------------------------------
       // A deletion is the largest change there is, so it is always gated once
-      // the day has ended, whatever it used to say.
+      // the entry has settled, whatever it used to say.
       if (input.clear) {
         if (!prior) continue;
-        if (dayClosed) {
+        if (settled) {
           const reason = String(input.amendReason ?? '').trim();
           if (!context.mayAmendClosedDays) {
-            refuse(`${row.label}, day ${day}: withdrawing a closed entry requires a supervisor.`);
+            refuse(`${row.label}, day ${day}: withdrawing an entry that has stood for more than a day requires a supervisor.`);
             continue;
           }
           if (reason.length < 10) {
-            refuse(`${row.label}, day ${day}: a reason is required to withdraw a closed entry.`);
+            refuse(`${row.label}, day ${day}: a reason is required to withdraw a settled entry.`);
             continue;
           }
           recordAmendment.run(sheetId, row.id, day, slotKey, 'delete',

@@ -4,23 +4,57 @@
  * Everything here follows from that one sentence. A cell for a day that has not
  * happened is not an early entry, it is a reading nobody took. An afternoon
  * reading typed at 08:05 measures the morning twice and hides the afternoon.
- * And an entry whose day has ended has been relied on — the handover read it,
- * the excursion register counted it — so changing it is an amendment with a
- * name and a reason on it, not an edit.
+ * And an entry that has stood for a day has been relied on — the handover read
+ * it, the excursion register counted it — so changing it is an amendment with
+ * a name and a reason on it, not an edit.
+ *
+ * What decides is the age of the ENTRY, not the age of the day it describes:
+ * somebody typing Monday's readings on Wednesday is catching up, and the digit
+ * they mistyped is theirs to fix. The checks that need a settled entry age the
+ * row directly, so they run only against a database this process can open.
  *
  * Also checked: the trends a month shows that no single reading does, which is
  * the case where every value is in range and the fridge is failing anyway.
  *
  *   node scripts/log-sheet-time-check.mjs
+ *   DB=/path/to/sech_lims.sqlite node scripts/log-sheet-time-check.mjs
  */
+import path from 'node:path';
+import fs from 'node:fs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4432/api';
 const PW = 'Passw0rd!test';
 
-let pass = 0, fail = 0;
+/** The database the API is using, when this process can reach it. */
+const DB_PATH = (() => {
+  const candidates = [
+    process.env.DB,
+    process.env.SECH_LIMS_DB_PATH,
+    process.env.SECH_LIMS_DATA_DIR && path.join(process.env.SECH_LIMS_DATA_DIR, 'sech_lims.sqlite'),
+    path.join(process.cwd(), 'local-data', 'sech_lims.sqlite'),
+  ].filter(Boolean);
+  return candidates.find(c => fs.existsSync(c)) ?? null;
+})();
+
+/** Push an entry back in time, so the correction window has run out on it. */
+async function settle(sheetId, rowId, day, slot, hours = 30) {
+  if (!DB_PATH) return false;
+  const { default: Database } = await import('better-sqlite3');
+  const db = new Database(DB_PATH);
+  const when = new Date(Date.now() - hours * 3600_000).toISOString().replace('T', ' ').slice(0, 19);
+  db.prepare(`UPDATE routine_log_cells SET first_recorded_at = ?, recorded_at = ?
+      WHERE sheet_id = ? AND row_id = ? AND day = ? AND slot = ?`)
+    .run(when, when, sheetId, rowId, day, slot);
+  db.close();
+  return true;
+}
+
+let pass = 0, fail = 0, skipped = 0;
 const check = (name, ok, detail = '') => {
   if (ok) { pass++; console.log(`  PASS  ${name}`); }
   else { fail++; console.log(`  FAIL  ${name}${detail ? ` — ${detail}` : ''}`); }
 };
+const skip = name => { skipped++; console.log(`  SKIP  ${name} — no reachable database to age the entry in`); };
 const j = async (p, o = {}) => {
   const r = await fetch(`${BASE}${p}`, {
     method: o.method || 'GET',
@@ -126,8 +160,31 @@ const noted = await write([{
 check('adding a note to a past day needs no authorisation — it is the habit worth encouraging',
   noted.json?.saved === 1 && noted.json?.amended === 0, JSON.stringify(noted.json?.refused));
 
-/* ============================================ 5. changing it IS an amendment */
-console.log('\n[5] Changing what a past entry says takes a reason, and keeps the original');
+/* ================================ 5a. a fresh entry is the writer's to correct */
+console.log('\n[5] A fresh entry is the writer\u2019s own to put right');
+const selfFix = await write([{ rowId: tempRow.id, day: pastDay, slot: 'am', value: 4.8 }]);
+check('correcting what was just typed for a past day needs no ceremony',
+  selfFix.json?.saved === 1 && (selfFix.json?.refused ?? []).length === 0,
+  JSON.stringify(selfFix.json?.refused));
+check('and it is not counted as an amendment', selfFix.json?.amended === 0, String(selfFix.json?.amended));
+await write([{ rowId: tempRow.id, day: pastDay, slot: 'am', value: 4.6 }]);
+
+/* ============================================ 5b. changing a settled one IS */
+console.log('\n[6] Changing what a settled entry says takes a reason, and keeps the original');
+if (!(await settle(sheetId, tempRow.id, pastDay, 'am'))) {
+  for (const name of [
+    'changing it without a reason is refused', 'and the refusal asks for the reason',
+    'the original value is untouched', 'a one-word reason is not a reason',
+    'with a supervisor and a real reason it goes through',
+    'and is counted as an amendment, not an ordinary entry',
+    'the cell carries the amendment on its face', 'and the reason with it',
+    'the amendment trail is readable', 'the original value stays legible in it',
+    'beside the value that replaced it', 'with who made the change',
+    'withdrawing a settled entry without a reason is refused',
+    'with a reason it is withdrawn',
+    'and the withdrawal is on the trail with what it used to say',
+  ]) skip(name);
+} else {
 const noReason = await write([{ rowId: tempRow.id, day: pastDay, slot: 'am', value: 6.9 }]);
 check('changing it without a reason is refused', noReason.json?.saved === 0, JSON.stringify(noReason.json?.saved));
 check('and the refusal asks for the reason', /a reason is required/.test(noReason.json?.refused?.[0]?.reason ?? ''),
@@ -155,20 +212,20 @@ check('the original value stays legible in it', Number(trail.json[0]?.old_value_
 check('beside the value that replaced it', Number(trail.json[0]?.new_value_num) === 6.9, String(trail.json[0]?.new_value_num));
 check('with who made the change', Boolean(trail.json[0]?.amended_by_name), JSON.stringify(trail.json[0]?.amended_by_name));
 
-/* =============================================== 6. withdrawal is gated too */
-console.log('\n[6] Withdrawing a past entry is the largest change there is');
+/* =============================================== withdrawal is gated too */
 const wipeNoReason = await write([{ rowId: tempRow.id, day: pastDay, slot: 'am', clear: true }]);
-check('withdrawing a past entry without a reason is refused', wipeNoReason.json?.cleared === 0, String(wipeNoReason.json?.cleared));
+check('withdrawing a settled entry without a reason is refused', wipeNoReason.json?.cleared === 0, String(wipeNoReason.json?.cleared));
 
 const wiped = await write([{
   rowId: tempRow.id, day: pastDay, slot: 'am', clear: true,
   amendReason: 'Recorded against the wrong fridge; the reading belongs to Refrigerator 2 and has been entered there.',
 }]);
-check('with a reason it is withdrawn', wiped.json?.cleared === 1, JSON.stringify(wiped.json));
+check('with a reason it is withdrawn', wiped.json?.cleared === 1, JSON.stringify(wiped.json?.refused));
 const trail2 = await j(`/routine-sheets/${sheetId}/amendments`, { token: A });
 check('and the withdrawal is on the trail with what it used to say',
   trail2.json.some(a => a.action === 'delete' && Number(a.old_value_num) === 6.9),
   JSON.stringify(trail2.json.map(a => a.action)));
+}
 
 /* ================================================= 7. an import may backfill */
 console.log('\n[7] A month loaded from the laboratory’s own paper chart is not typing the future');
@@ -262,5 +319,5 @@ const steady = await j(`/routine-sheets/${steadySheet.json.sheet.id}`, { token: 
 check('a steady, centred month raises nothing', (steady.json?.trends ?? []).length === 0,
   JSON.stringify((steady.json?.trends ?? []).map(t => t.kind)));
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
 process.exit(fail ? 1 : 0);

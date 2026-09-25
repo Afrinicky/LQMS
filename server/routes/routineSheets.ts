@@ -326,9 +326,10 @@ export function routineSheetRoutes() {
     const initials = typeof req.body?.initials === 'string' ? req.body.initials.trim().slice(0, 8) : defaultInitials(db, staffId);
 
     try {
-      // Changing an entry whose day has ended is a supervisor's act. The same
-      // right that signs the month off is the one that authorises a correction
-      // to it, which keeps a single idea of who is senior to the bench.
+      // Changing an entry that has stood for more than a day is a
+      // supervisor's act. The same right that signs the month off is the one
+      // that authorises a correction to it, which keeps a single idea of who is
+      // senior to the bench.
       const result = saveCells(db, sheet.id, cells, {
         staffId, userId: req.user!.id, initials,
         mayAmendClosedDays: mayVerify(req, sheet),

@@ -121,6 +121,43 @@ export function cellIsBreach(status?: string | null): boolean {
   return status === 'out_of_range' || status === 'critical' || status === 'not_done';
 }
 
+/**
+ * How long somebody may put right what they have just written.
+ *
+ * The rule used to be the calendar: once the day a reading belonged to had
+ * ended, changing it took a supervisor. That is right for a reading charted at
+ * the time and wrong for the ordinary case of catching up — somebody typing
+ * Monday's reading on Wednesday was writing an entry that was already "closed"
+ * the moment it landed, so a mistyped digit could not be fixed by the person
+ * who had just made it, and the chart collected supervisor amendments for
+ * typing errors.
+ *
+ * What matters is the age of the ENTRY, not the age of the day it describes.
+ * For a day after making it, the person who wrote it may correct it as their
+ * own work. After that it has been read, acted on and relied upon, and
+ * changing it is an amendment: a supervisor, a reason, and a trail.
+ */
+export const CELL_CORRECTION_HOURS = 24;
+
+/**
+ * Is this entry still the writer's own to correct?
+ *
+ * Measured from when it was first recorded, not from the last time it was
+ * touched, so correcting an entry does not buy another day to correct it
+ * again. An entry with no first-recorded time predates the column and is past
+ * the window by any reckoning.
+ */
+export function cellWithinCorrectionWindow(firstRecordedAt?: string | null, now: number = Date.now()): boolean {
+  if (!firstRecordedAt) return false;
+  // SQLite's CURRENT_TIMESTAMP is UTC without a zone marker; say so, or the
+  // browser reads it as local time and the window drifts by the offset.
+  const raw = String(firstRecordedAt).trim();
+  const iso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`;
+  const at = new Date(iso).getTime();
+  if (Number.isNaN(at)) return false;
+  return now - at < CELL_CORRECTION_HOURS * 3600_000;
+}
+
 /** Where a cell's value came from. Matters for an assessor and for trust. */
 export const CELL_SOURCES = ['manual', 'device', 'import', 'extraction', 'instrument'] as const;
 export type CellSource = (typeof CELL_SOURCES)[number];

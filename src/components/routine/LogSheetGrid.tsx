@@ -11,6 +11,7 @@ import TextField from '../ui/TextField';
 import {
   SLOT_LABELS, CELL_STATUS_LABELS, CELL_SOURCE_LABELS, SHEET_STATUS_LABELS, SHEET_STATUS_HINTS,
   EXTRACTION_STATUS_LABELS, SHEET_KIND_MODULE, monthLabel, cellIsBreach,
+  cellWithinCorrectionWindow, CELL_CORRECTION_HOURS,
   type CellSlot, type SheetKind,
 } from '../../../shared/constants/routineWork';
 import type {
@@ -49,9 +50,10 @@ import type {
  * entry, it is a reading nobody took, so those cells are not clickable and say
  * why. The PM column of today opens when the afternoon reading is actually due,
  * because two readings taken together at 08:05 measure one moment twice and
- * hide the whole afternoon. Correcting or withdrawing today's entry is ordinary
- * work; changing one whose day has ended takes a supervisor and a written
- * reason, and the original stays legible beside it.
+ * hide the whole afternoon. Correcting or withdrawing an entry is ordinary
+ * work for a day after making it — including one typed in retrospectively,
+ * which is when a mistyped digit is most likely; after that it takes a
+ * supervisor and a written reason, and the original stays legible beside it.
  *
  * The server decides all of that — this only stops somebody typing into a cell
  * that would be refused, which is a courtesy, not the control.
@@ -246,7 +248,7 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
                         editable={editable} onSave={save} wide
                         closed={!weekStarted}
                         closedReason={`Week ${week} has not started`}
-                        sameDay={false} mayAmend={mayAmend}
+                        mayAmend={mayAmend}
                         noteFor={noteFor} setNoteFor={setNoteFor} />
                     );
                   })}
@@ -354,7 +356,6 @@ function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, lastOpenDa
                 closedReason={future
                   ? 'Not yet due'
                   : `Afternoon reading due at ${clockLabel(pmDueAt)} — opens from ${clockLabel(pmOpensAt)}`}
-                sameDay={day === todayDay}
                 mayAmend={mayAmend}
                 noteFor={noteFor} setNoteFor={setNoteFor} />
             );
@@ -369,20 +370,27 @@ function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, lastOpenDa
    One cell
    ------------------------------------------------------------------------- */
 function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed, closedReason,
-  sameDay, mayAmend, noteFor, setNoteFor }: {
+  mayAmend, noteFor, setNoteFor }: {
   row: LogSheetRow; day: number; slot: CellSlot; cell?: LogSheetCell;
   editable: boolean; onSave: (cells: LogCellInput[]) => void;
   isToday?: boolean; wide?: boolean;
   /** The day, or the afternoon, has not arrived. Nothing may be written here. */
   closed?: boolean;
   closedReason?: string;
-  /** Whether this cell belongs to today, which decides correction vs amendment. */
-  sameDay?: boolean;
-  /** Whether the reader may change an entry whose day has ended. */
+  /** Whether the reader may change an entry that has stood for more than a day. */
   mayAmend?: boolean;
   noteFor: string | null; setNoteFor: (key: string | null) => void;
 }) {
   const key = `${row.id}:${day}:${slot}`;
+  /**
+   * Still the writer's own to put right.
+   *
+   * It is the age of the entry that decides, not the age of the day it
+   * describes: somebody typing Monday's reading on Wednesday has just made it
+   * and can fix a mistyped digit without troubling a supervisor. A blank cell
+   * has nothing to amend, so it is always open.
+   */
+  const fresh = !cell || cellWithinCorrectionWindow(cell.first_recorded_at ?? cell.recorded_at);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
   const [amending, setAmending] = useState<{ value: string; clear: boolean } | null>(null);
@@ -443,10 +451,10 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed
     setEditing(false);
     const text = value.trim();
     if (!text) return;
-    // Changing an entry whose day has ended is an amendment, not a correction:
-    // ask for the reason here rather than letting the server refuse it and
-    // making somebody retype the number.
-    if (cell && !sameDay) {
+    // Changing an entry that has stood for more than a day is an amendment,
+    // not a correction: ask for the reason here rather than letting the server
+    // refuse it and making somebody retype the number.
+    if (cell && !fresh) {
       if (!mayAmend) return;
       setAmending({ value: text, clear: false });
       return;
@@ -458,13 +466,14 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed
   /**
    * Withdraw the entry.
    *
-   * On the day, that is ordinary: the wrong box, a value typed against the
-   * wrong fridge. Afterwards it takes the reason and the amendment trail, the
-   * same as changing it — a deletion is the largest change there is.
+   * While the entry is still the writer's own that is ordinary: the wrong box,
+   * a value typed against the wrong fridge. Afterwards it takes the reason and
+   * the amendment trail, the same as changing it — a deletion is the largest
+   * change there is.
    */
   function withdraw() {
     if (!cell || !writable) return;
-    if (sameDay) { onSave([{ rowId: row.id, day, slot, clear: true }]); return; }
+    if (fresh) { onSave([{ rowId: row.id, day, slot, clear: true }]); return; }
     if (mayAmend) setAmending({ value: '', clear: true });
   }
 
@@ -474,8 +483,8 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed
   function cycleTick() {
     if (!writable) return;
     if (!cell) { onSave([{ rowId: row.id, day, slot, done: true }]); return; }
-    if (!sameDay) {
-      // A tick recorded on a day that has ended is a record like any other.
+    if (!fresh) {
+      // A tick that has stood for more than a day is a record like any other.
       if (!mayAmend) return;
       const next = cell.status === 'done' ? 'N' : cell.status === 'not_done' ? 'NA' : 'Y';
       setAmending({ value: next, clear: false });
@@ -511,7 +520,7 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed
       onClick={() => {
         if (!writable) return;
         if (row.row_type === 'tick') cycleTick();
-        else if (cell && !sameDay) {
+        else if (cell && !fresh) {
           if (!mayAmend) return;
           setAmending({ value: cell.value_num != null ? String(cell.value_num) : cell.value_text ?? '', clear: false });
         } else { setDraft(cell?.value_num != null ? String(cell.value_num) : cell?.value_text ?? ''); setEditing(true); }
@@ -531,7 +540,7 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed
       {amended && <span className="ls-amended" title={`Amended: ${cell?.last_amend_reason ?? ''}`}>△</span>}
       {noteFor === key && cell && (
         <NotePopover
-          cell={cell} sameDay={Boolean(sameDay)} mayAmend={Boolean(mayAmend)}
+          cell={cell} fresh={fresh} mayAmend={Boolean(mayAmend)}
           onClose={() => setNoteFor(null)}
           onWithdraw={() => { setNoteFor(null); withdraw(); }}
           onSave={note => {
@@ -563,12 +572,12 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed
   );
 }
 
-function NotePopover({ cell, sameDay, mayAmend, onSave, onWithdraw, onClose }: {
-  cell: LogSheetCell; sameDay: boolean; mayAmend: boolean;
+function NotePopover({ cell, fresh, mayAmend, onSave, onWithdraw, onClose }: {
+  cell: LogSheetCell; fresh: boolean; mayAmend: boolean;
   onSave: (note: string) => void; onWithdraw: () => void; onClose: () => void;
 }) {
   const [note, setNote] = useState(cell.note ?? '');
-  const canWithdraw = sameDay || mayAmend;
+  const canWithdraw = fresh || mayAmend;
   return (
     <div className="ls-note-pop" onClick={e => e.stopPropagation()}>
       <label>
@@ -588,7 +597,7 @@ function NotePopover({ cell, sameDay, mayAmend, onSave, onWithdraw, onClose }: {
         <button type="button" onClick={() => onSave(note.trim())}>Save note</button>
         {canWithdraw && (
           <button type="button" className="ls-withdraw" onClick={onWithdraw}
-            title={sameDay ? 'Withdraw this entry' : 'Withdraw — a reason is recorded'}>
+            title={fresh ? 'Withdraw this entry' : 'Withdraw — a reason is recorded'}>
             <Trash2 size={12} /> Withdraw
           </button>
         )}
@@ -599,7 +608,7 @@ function NotePopover({ cell, sameDay, mayAmend, onSave, onWithdraw, onClose }: {
 }
 
 /**
- * Changing, or withdrawing, an entry whose day has ended.
+ * Changing, or withdrawing, an entry that has settled.
  *
  * The reason is not a formality and the wording says so. The record has already
  * been read — the morning handover saw it, the excursion register counted it,
@@ -623,7 +632,7 @@ function AmendPopover({ rowLabel, day, slot, cell, clear, value, numeric, onConf
       <p className="ls-amend-head">
         <History size={12} />
         <span>
-          Day {day} {SLOT_LABELS[slot] ?? slot} has closed. The current entry ({was}) is kept on record.
+          This entry has stood for more than {CELL_CORRECTION_HOURS} hours. The current value ({was}) is kept on record.
         </span>
       </p>
 
