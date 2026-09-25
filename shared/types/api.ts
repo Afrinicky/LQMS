@@ -595,6 +595,39 @@ export type JobDescriptionDoc = {
   owner_name?:string|null; created_at?:string; updated_at?:string|null;
 };
 
+/* ── Staff files ─────────────────────────────────────────────────────────
+   One folder per member of staff: the papers held on file and the records the
+   system produced about them, each with the means to open it. */
+export type StaffFileOpen =
+  | { kind:'file'; fileId:number; fileName?:string|null; mimeType?:string|null }
+  | { kind:'document'; documentId:number; versionId:number }
+  | { kind:'sheet'; path:string };
+
+export type StaffFileItem = {
+  key:string; id:number; category:string; record_type:string; reference?:string|null;
+  title:string; date?:string|null; expiry?:string|null; status?:string|null;
+  source:'uploaded'|'system'; file_name?:string|null; detail?:string|null; version?:string|null;
+  can_open:boolean; open:StaffFileOpen;
+};
+
+export type StaffFileRegisterRow = {
+  id:number; employee_no?:string|null; full_name:string; designation?:string|null; job_title?:string|null;
+  unit?:string|null; section_name?:string|null; personnel_category?:string|null; appointment_type?:string|null;
+  appointment_date?:string|null; professional_licence?:string|null; licence_expiry_date?:string|null;
+  availability_status?:string|null; is_active:number; staff_file_location?:string|null;
+  document_count:number; pending_verification:number; expired_documents:number; record_count:number;
+};
+
+export type StaffFile = {
+  staff:Record<string, any>;
+  positions:Array<{ title:string; assignment_type:string; is_active:number }>;
+  items:StaffFileItem[];
+  counts:Record<string, number>;
+  categories:string[];
+  visibility:Record<string, boolean>;
+  mayPrintFile:boolean;
+};
+
 /** The register view: what exists, and which active posts have nothing. */
 export type JobDescriptionRegister = {
   documents: JobDescriptionDoc[];
