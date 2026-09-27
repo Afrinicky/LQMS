@@ -19,7 +19,7 @@ import type {
   StaffDeclaration, DutyRoster, EquipmentItem,
   PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
 } from '../../shared/types/api';
-import { isTemporaryCategory, PLACEMENT_GRACE_DAYS } from '../../shared/constants/personnel';
+import { isTimeLimited, PLACEMENT_GRACE_DAYS } from '../../shared/constants/personnel';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 
@@ -341,15 +341,15 @@ export function PersonnelManagementPage() {
           <label>Qualifications<TextField value={staffForm.qualifications} onValue={nextValue => setStaffForm({ ...staffForm, qualifications: nextValue })} placeholder="Separate several with |" /></label>
           <label>Personnel category<select value={staffForm.personnelCategory} onChange={e => setStaffForm({ ...staffForm, personnelCategory: e.target.value })}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>Appointment type<select value={staffForm.appointmentType} onChange={e => setStaffForm({ ...staffForm, appointmentType: e.target.value })}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-          <label>{isTemporaryCategory(staffForm.personnelCategory) ? 'Placement starts' : 'Date of appointment'}
+          <label>{isTimeLimited(staffForm.personnelCategory, staffForm.appointmentType) ? 'Engagement starts' : 'Date of appointment'}
             <input type="date" value={staffForm.appointmentDate} onChange={e => setStaffForm({ ...staffForm, appointmentDate: e.target.value })} /></label>
-          {/* A student or an intern is here for a stated period and then gone.
-              Saying when it ends is what lets the system close the record on
-              time instead of leaving somebody on the register for months. */}
-          {isTemporaryCategory(staffForm.personnelCategory) && <label>Placement ends
+          {/* Anybody here for a stated period — student, intern, national
+              service, locum, contract — carries the date it ends, which is
+              what lets the system close the record on the day. */}
+          {isTimeLimited(staffForm.personnelCategory, staffForm.appointmentType) && <label>Engagement ends
             <input type="date" value={staffForm.placementEndDate} min={staffForm.appointmentDate || undefined}
               onChange={e => setStaffForm({ ...staffForm, placementEndDate: e.target.value })} />
-            <span className="muted">Access is withdrawn {PLACEMENT_GRACE_DAYS} days after this date unless it is extended. The record is kept.</span>
+            <span className="muted">Access is withdrawn {PLACEMENT_GRACE_DAYS} days later unless extended.</span>
           </label>}
           <label>National ID type<select value={staffForm.nationalIdType} onChange={e => setStaffForm({ ...staffForm, nationalIdType: e.target.value })}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>National ID number<TextField value={staffForm.nationalIdNumber} onValue={nextValue => setStaffForm({ ...staffForm, nationalIdNumber: nextValue })} /></label>

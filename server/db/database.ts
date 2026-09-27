@@ -7185,12 +7185,12 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
   /* ==========================================================================
      Changing a log sheet entry after the day it belongs to
      --------------------------------------------------------------------------
-     A reading is an assertion about a moment. Correcting one on the day is
-     ordinary work — the wrong box, a transposed digit, a re-read after the
-     door was found ajar — and needs no ceremony beyond the audit trail every
-     write already leaves.
+     A reading is an assertion about a moment. Correcting one you have just
+     written is ordinary work — the wrong box, a transposed digit, a re-read
+     after the door was found ajar — and needs no ceremony beyond the audit
+     trail every write already leaves.
 
-     Changing one after its day has ended is a different act. The record has
+     Changing one that has stood for more than a day is a different act. The record has
      been relied on: the morning handover read it, the excursion register
      counted it, somebody may have released results against it. ISO 15189:2022
      §8.4 and §7.5 both say the same thing about a record altered after the
@@ -7231,11 +7231,23 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
 
   // A cell carries the count of times it has been amended, so the grid can mark
   // it without joining the trail for every one of a thousand cells.
+  //
+  // `first_recorded_at` is when the entry was FIRST made, which is a different
+  // question from `recorded_at` and the one that decides whether the person
+  // who typed it may still correct it. `recorded_at` moves every time the cell
+  // is written, so measuring the correction window from it would hand out a
+  // fresh window with every edit; this one is set once and kept.
   {
     const cols = new Set((database.prepare('PRAGMA table_info(routine_log_cells)').all() as Array<{ name: string }>).map(c => c.name));
     if (!cols.has('amendment_count')) database.exec('ALTER TABLE routine_log_cells ADD COLUMN amendment_count INTEGER NOT NULL DEFAULT 0');
     if (!cols.has('last_amended_at')) database.exec('ALTER TABLE routine_log_cells ADD COLUMN last_amended_at TEXT');
     if (!cols.has('last_amend_reason')) database.exec('ALTER TABLE routine_log_cells ADD COLUMN last_amend_reason TEXT');
+    if (!cols.has('first_recorded_at')) {
+      database.exec('ALTER TABLE routine_log_cells ADD COLUMN first_recorded_at TEXT');
+      // Entries written before this column existed are given the only first
+      // time known about them. They are all long past the window anyway.
+      database.exec('UPDATE routine_log_cells SET first_recorded_at = recorded_at WHERE first_recorded_at IS NULL');
+    }
   }
 
   /* ==========================================================================

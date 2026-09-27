@@ -12,7 +12,7 @@ import { getDriver, listDrivers, COMMUNICATION_METHODS } from '../services/envir
 import { listChannels, getChannels, processQueue } from '../services/environmental/notifications.js';
 import { computeInsights } from '../services/environmental/insights.js';
 import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../services/environmental/reports.js';
-import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
+import { openSheet, refreshSheetRows, sheetsForSection, applyRangeChange } from '../services/routineSheets.js';
 import { LOGGING_MODES, MAX_ATTACHMENT_MB } from '../../shared/constants/routineWork.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
@@ -646,10 +646,27 @@ export function environmentalRoutes() {
     if (!rows) return res.status(400).json({ error: 'parameters must be an array' });
 
     const num = (v: unknown) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v));
+
+    // A range with neither end is not a range: nothing could ever be outside
+    // it, and the chart would record numbers rather than control.
+    for (const p of rows) {
+      const label = String(p?.label ?? p?.parameter ?? '').trim();
+      if (!label) return res.status(400).json({ error: 'Every parameter needs a name.' });
+      const min = num(p?.minValue), max = num(p?.maxValue);
+      if (min === null && max === null) {
+        return res.status(400).json({ error: `${label} has no acceptable range. Give it a lowest value, a highest value, or both.` });
+      }
+      if (min !== null && max !== null && min > max) {
+        return res.status(400).json({ error: `${label}: the lowest acceptable value is above the highest.` });
+      }
+    }
+
     const tx = db.transaction(() => {
       const keep = new Set<string>();
       rows.forEach((p: any, i: number) => {
-        const key = String(p.parameter ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+        // A parameter added here arrives with a label and no key; it is named
+        // from the label, the same way the one added at registration is.
+        const key = String(p.parameter ?? p.label ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
         if (!key) return;
         keep.add(key);
         db.prepare(`INSERT INTO environmental_asset_parameters
@@ -670,7 +687,24 @@ export function environmentalRoutes() {
       }
     });
     tx();
-    audit(req, { action: 'edit', entity: 'environmental_asset_parameters', entityId: req.params.id, newValue: { count: rows.length } });
+
+    // The asset's own temperature and humidity band is what the live dashboard,
+    // the trend chart and the device ingest are judged against, so it follows
+    // the parameter it belongs to rather than drifting apart from it. A
+    // laboratory correcting a fridge's range in one place corrects it.
+    const bands = db.prepare(`SELECT parameter, min_value, max_value FROM environmental_asset_parameters
+        WHERE asset_id = ? AND is_active = 1 AND parameter IN ('temperature', 'humidity')`).all(req.params.id) as any[];
+    for (const band of bands) {
+      const cols = band.parameter === 'temperature' ? ['temp_min', 'temp_max'] : ['humidity_min', 'humidity_max'];
+      db.prepare(`UPDATE environmental_assets SET ${cols[0]} = ?, ${cols[1]} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(band.min_value, band.max_value, req.params.id);
+    }
+
+    // And the charts the bench is filling in now take the new limits; a month
+    // already run keeps the range that was in force while it ran.
+    const charts = applyRangeChange(db, 'environmental', Number(req.params.id));
+
+    audit(req, { action: 'edit', entity: 'environmental_asset_parameters', entityId: req.params.id, newValue: { count: rows.length, charts } });
     res.json(db.prepare('SELECT * FROM environmental_asset_parameters WHERE asset_id = ? ORDER BY display_order, id').all(req.params.id));
   });
 

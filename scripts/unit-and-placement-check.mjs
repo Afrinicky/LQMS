@@ -12,10 +12,12 @@
  * area for area, action for action — with the blood registers on top, and runs
  * the blood bank the way every other supervisor runs their unit.
  *
- * A PLACEMENT. A student, an intern, a national service person or a locum is
- * enrolled with an end date. On the day it passes the laboratory is told; a
- * week later, if nobody extended it, their access is withdrawn and they leave
- * the active register — with the whole record kept under Former staff.
+ * AN ENGAGEMENT THAT RUNS OUT. A student, an intern, a national service
+ * person, a locum, a contractor, and anybody on a CONTRACT appointment however
+ * their category is recorded, is enrolled with an end date. On the day it
+ * passes the laboratory is told; a week later, if nobody extended it, their
+ * access is withdrawn and they leave the active register — with the whole
+ * record kept under Former staff.
  */
 const BASE = process.env.API || 'http://127.0.0.1:4460/api';
 const PW = 'Passw0rd!test';
@@ -102,7 +104,7 @@ const control = await j('/iqc/materials', { token: BB, method: 'POST', body: {
 } });
 check('and defines its own controls', control.status === 201, `status ${control.status} ${JSON.stringify(control.json)}`);
 
-console.log('\n[3] A placement is enrolled with a start and an end');
+console.log('\n[3] Every fixed-term engagement is enrolled with a start and an end');
 const intern = await mkStaff(`INT-${stamp}`, 'Ida', 'Intern', bloodBank, {
   personnelCategory: 'INTERN', appointmentType: 'INTERN', appointmentDate: day(-90), placementEndDate: day(-1),
 });
@@ -111,10 +113,33 @@ const readBack = ((await j('/staff', { token: A })).json ?? []).find(s => Number
 check('the register carries its end date', readBack?.placementEndDate === day(-1), JSON.stringify(readBack?.placementEndDate));
 
 const permanent = await mkStaff(`PRM-${stamp}`, 'Peter', 'Permanent', bloodBank, {
-  personnelCategory: 'STAFF', appointmentDate: day(-400), placementEndDate: day(-1),
+  personnelCategory: 'STAFF', appointmentType: 'FULL TIME', appointmentDate: day(-400), placementEndDate: day(-1),
 });
 const permBack = ((await j('/staff', { token: A })).json ?? []).find(s => Number(s.id) === Number(permanent.id));
-check('a permanent member of staff carries no placement end', !permBack?.placementEndDate, JSON.stringify(permBack?.placementEndDate));
+check('a permanent member of staff carries no end date', !permBack?.placementEndDate, JSON.stringify(permBack?.placementEndDate));
+
+// The case a category-only rule misses: a scientist on the permanent roll of
+// the register, engaged on a fixed-term CONTRACT.
+const onContract = await mkStaff(`CON-${stamp}`, 'Cora', 'Contract', bloodBank, {
+  personnelCategory: 'STAFF', appointmentType: 'CONTRACT', appointmentDate: day(-200), placementEndDate: day(-9),
+});
+const conBack = ((await j('/staff', { token: A })).json ?? []).find(s => Number(s.id) === Number(onContract.id));
+check('contract staff keep their end date, whatever their category', conBack?.placementEndDate === day(-9),
+  JSON.stringify(conBack?.placementEndDate));
+
+// Part time is how often somebody works, not how long they stay.
+const partTime = await mkStaff(`PT-${stamp}`, 'Pat', 'Parttime', bloodBank, {
+  personnelCategory: 'STAFF', appointmentType: 'PART TIME', appointmentDate: day(-200), placementEndDate: day(-9),
+});
+const ptBack = ((await j('/staff', { token: A })).json ?? []).find(s => Number(s.id) === Number(partTime.id));
+check('part-time staff are not treated as fixed-term', !ptBack?.placementEndDate, JSON.stringify(ptBack?.placementEndDate));
+
+// Moving somebody onto the permanent staff takes the end date with them, even
+// when only the appointment type is edited.
+await j(`/staff/${onContract.id}`, { token: A, method: 'PUT', body: { appointmentType: 'FULL TIME' } });
+const madePermanent = ((await j('/staff', { token: A })).json ?? []).find(s => Number(s.id) === Number(onContract.id));
+check('making a contract permanent clears the end date', !madePermanent?.placementEndDate, JSON.stringify(madePermanent?.placementEndDate));
+await j(`/staff/${onContract.id}`, { token: A, method: 'PUT', body: { appointmentType: 'CONTRACT', placementEndDate: day(-9) } });
 
 console.log('\n[4] The day it ends, the laboratory is told — and nothing is taken away');
 const tick = await j('/staff/placement-tick', { token: A, method: 'POST', body: {} });
@@ -153,9 +178,18 @@ check('and they are not counted as active staff', !active.some(s => Number(s.id)
 const former = (await j('/staff?status=retired', { token: A })).json ?? [];
 check('they are found under former staff', former.some(s => Number(s.id) === Number(leaver.id)), `${former.length} former`);
 
-console.log('\n[7] A permanent member of staff is never withdrawn by this');
-const permActive = active.some(s => Number(s.id) === Number(permanent.id));
-check('the permanent member of staff is untouched', permActive);
+console.log('\n[7] Contract staff are withdrawn the same way');
+check('the contract scientist is off the active register',
+  !active.some(s => Number(s.id) === Number(onContract.id)));
+const conGone = all.find(s => Number(s.id) === Number(onContract.id));
+check('and the record says the contract ended', conGone?.exitReason === 'End of contract', JSON.stringify(conGone?.exitReason));
+const stuGone = all.find(s => Number(s.id) === Number(leaver.id));
+check('while a student\'s says the placement ended',
+  stuGone?.exitReason === 'End of internship / national service', JSON.stringify(stuGone?.exitReason));
+
+console.log('\n[8] Permanent and part-time staff are never withdrawn by this');
+check('the permanent member of staff is untouched', active.some(s => Number(s.id) === Number(permanent.id)));
+check('and so is the part-time one', active.some(s => Number(s.id) === Number(partTime.id)));
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -8,8 +8,10 @@
 export const GENDERS = ['MALE', 'FEMALE', 'OTHER'] as const;
 export const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'] as const;
 
+export const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'] as const;
+
 /**
- * The people who are in the laboratory for a stated period and then gone.
+ * Everybody who is in the laboratory for a stated period and then gone.
  *
  * A student, an intern, a national service person, a locum, a contractor — all
  * of them arrive with an end date and leave on it. Recorded as ordinary staff
@@ -17,28 +19,49 @@ export const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT
  * they had gone, and their login kept working, because closing the record was
  * something a person had to remember to do.
  *
- * So the category decides: these carry a placement period, and the system ends
- * it. Everybody else is permanent until the laboratory says otherwise.
+ * It is read from BOTH columns, because a register uses them differently and
+ * either one on its own leaves people out. Some laboratories record a
+ * fixed-term scientist as category STAFF on a CONTRACT appointment; others put
+ * the whole thing in the category. Somebody engaged for a year is engaged for
+ * a year whichever box it was written in, so either answer is enough.
+ *
+ * PART TIME is deliberately absent: that is how often somebody works, not how
+ * long they stay.
  */
 export const TEMPORARY_CATEGORIES = ['INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'] as const;
-export function isTemporaryCategory(category?: string | null): boolean {
-  return TEMPORARY_CATEGORIES.includes(String(category ?? '').trim().toUpperCase() as never);
+export const TEMPORARY_APPOINTMENT_TYPES = ['CONTRACT', 'INTERN', 'NSS', 'LOCUM'] as const;
+
+const upper = (v?: string | null) => String(v ?? '').trim().toUpperCase();
+
+/** Is this engagement one that runs out, by category or by appointment type? */
+export function isTimeLimited(category?: string | null, appointmentType?: string | null): boolean {
+  return TEMPORARY_CATEGORIES.includes(upper(category) as never)
+    || TEMPORARY_APPOINTMENT_TYPES.includes(upper(appointmentType) as never);
 }
 
 /**
- * How long after the placement ends before access is withdrawn.
+ * How long after the engagement ends before access is withdrawn.
  *
- * Not on the day itself. A placement is extended at the last minute more often
- * than anybody plans for, and an intern locked out on the morning their
- * supervisor meant to sign another month is a support call, not a control. The
- * laboratory is told the day the placement ends and the withdrawal runs a week
- * later, which is long enough to extend it and short enough to mean something.
+ * Not on the day itself. These are extended at the last minute more often than
+ * anybody plans for, and an intern locked out on the morning their supervisor
+ * meant to sign another month is a support call, not a control. The laboratory
+ * is told the day it ends and the withdrawal runs a week later, which is long
+ * enough to extend it and short enough to mean something.
  */
 export const PLACEMENT_GRACE_DAYS = 7;
 
-/** The exit reason written when a placement is closed by the system. */
-export const PLACEMENT_EXIT_REASON = 'End of internship / national service';
-export const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'] as const;
+/**
+ * Why the record says they left, when the system closes it.
+ *
+ * A placement and a contract end differently on paper even though they end the
+ * same way in the software, and the register has to be able to say which.
+ */
+const TRAINING_PLACEMENTS = ['INTERN', 'STUDENT', 'NSS'];
+export function placementExitReason(category?: string | null, appointmentType?: string | null): string {
+  return TRAINING_PLACEMENTS.includes(upper(category)) || TRAINING_PLACEMENTS.includes(upper(appointmentType))
+    ? 'End of internship / national service'
+    : 'End of contract';
+}
 export const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS LICENCE', 'OTHER'] as const;
 export const CADRES = ['Scientist', 'Technician', 'Assistant', 'Other'] as const;
 export const AVAILABILITY_STATUSES = ['available', 'on_leave', 'transferred', 'inactive', 'unavailable'] as const;
