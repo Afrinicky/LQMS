@@ -958,7 +958,17 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/positions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
+  // The organogram is read in two places: Settings, where it is edited, and the
+  // Organisation & Leadership module's own Organogram tab, whose readers hold
+  // the structure right rather than a settings right. Either one may read it.
+  const canReadOrganogram = (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const ok = ['settings', 'organisation.structure'].some(k => resolvePermission(req.user.id, k, 'view').allowed);
+    if (!ok) return res.status(403).json({ error: 'Permission denied' });
+    next();
+  };
+
+  router.get('/positions', canReadOrganogram, (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
   router.post('/positions', requirePermission('settings', 'create'), (req, res) => {
     const { title, description, reportsToPositionId } = req.body;
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'A position title is required.' });
@@ -1032,7 +1042,7 @@ export function commonRoutes() {
   // AUTOMATIC vertical chain of that unit's technical staff ordered by cadre
   // (Scientist → Technician → Assistant) then professional rank, with
   // deputy/succession and acting-when-absent logic.
-  router.get('/organogram/tree', requirePermission('settings', 'view'), (_req, res) => {
+  router.get('/organogram/tree', canReadOrganogram, (_req, res) => {
     const db = getDb();
     const positions = db.prepare('SELECT id, title, reports_to_position_id AS reportsTo, is_active AS isActive FROM positions').all() as any[];
     const occ = db.prepare(`SELECT spa.position_id AS pid, spa.staff_id AS sid, s.full_name AS name, spa.assignment_type AS type

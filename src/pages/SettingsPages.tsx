@@ -20,6 +20,7 @@ import type { ConfigOption } from '../../shared/constants/configLists';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { DetailModal, NumberField } from '../components/ui';
+import { OrgCard, OrgChartBoard } from '../components/ui/OrgChart';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
@@ -32,7 +33,7 @@ import type {
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
   SectionConfigRow, SectionConfigDetail, SectionTestRow,
-  LaboratoryDocument, QualityPolicy, QualityObjective,
+  LaboratoryDocument, QualityPolicy, QualityObjective, LaboratoryConfig,
   EquipmentPattern, EquipmentSegment,
   SystemConnectivity, AppMode, SyncStatus, SyncResult, RemoteCloudUser,
 } from '../../shared/types/api';
@@ -528,14 +529,13 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const [newRoot,setNewRoot]=useState('');
-  const [zoom,setZoom]=useState(1);
-  const viewportRef=useRef<HTMLDivElement>(null);
-  const chartRef=useRef<HTMLDivElement>(null);
+  const [facility,setFacility]=useState<string>('');
   const load=()=>{
     api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError(errorText(e)));
     api<OrgTree>('/organogram/tree').then(t=>setTree(t.roots)).catch(e=>setError(errorText(e)));
   };
   useEffect(()=>{void load()},[]);
+  useEffect(()=>{ api<LaboratoryConfig>('/laboratory-config').then(c=>setFacility(c.profile?.facility_name || '')).catch(()=>undefined); },[]);
 
   function refresh(){ load(); onChanged(); }
   async function call(path:string, options:RequestInit, okMsg?:string){
@@ -554,91 +554,33 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
 
   async function applyStandard(){ await call('/organogram/apply-standard',{method:'POST',body:JSON.stringify({})},'Standard laboratory structure applied.'); }
   async function addRoot(e:FormEvent){ e.preventDefault(); if(!newRoot.trim()) return; const ok=await call('/positions',{method:'POST',body:JSON.stringify({ title:newRoot.trim(), reportsToPositionId:null })},'Top-level role added.'); if(ok) setNewRoot(''); }
-  function printChart(){ window.print(); }
-  function fitToScreen(){
-    const vp=viewportRef.current, ch=chartRef.current;
-    if(!vp||!ch) return;
-    const w=ch.scrollWidth/(zoom||1); const avail=vp.clientWidth-24;
-    setZoom(w>0 ? Math.max(0.4, Math.min(1, avail/w)) : 1);
-  }
 
-  const printedAt = new Date().toLocaleString();
+  // A selected role becomes an editor in place of its card; everything else
+  // draws as the shared read-only card.
+  const renderCard = (node: OrgTreeNode) => {
+    const flat = nodes.find(n => n.id === node.positionId);
+    if (selectedId === node.positionId && flat) return <OrgNodeEditor node={flat} ctx={ctx} />;
+    return <OrgCard node={node} onClick={() => node.positionId && setSelectedId(node.positionId)} />;
+  };
 
   return <div className="card organogram-card">
-    <div className="panel-head no-print">
+    <div className="panel-head">
       <h3>Laboratory Organogram &amp; Deputisation</h3>
       <div className="org-toolbar">
-        <div className="org-zoom">
-          <button type="button" title="Zoom out" onClick={()=>setZoom(z=>Math.max(0.4, Math.round((z-0.1)*10)/10))}>−</button>
-          <span className="org-zoom-val">{Math.round(zoom*100)}%</span>
-          <button type="button" title="Zoom in" onClick={()=>setZoom(z=>Math.min(1.6, Math.round((z+0.1)*10)/10))}>+</button>
-          <button type="button" title="Fit to screen" onClick={fitToScreen}>Fit</button>
-          <button type="button" title="Reset" onClick={()=>setZoom(1)}>100%</button>
-        </div>
         <button type="button" onClick={applyStandard}>Apply standard structure</button>
-        <button type="button" onClick={printChart}>Print</button>
       </div>
     </div>
-    <p className="hint no-print">The appointed roles below the Laboratory Manager are set by hand. Under each <strong>Unit Supervisor</strong>, the unit’s technical staff are arranged automatically by cadre (Scientist → Technician → Assistant) then professional rank — the highest-ranked becomes the next-in-command, and succession flows downward. Click any appointed role to edit it; the automatic chain follows the staff register.</p>
-    <div className="org-legend no-print">
-      <span className="leg"><span className="org-swatch rt-management" />Management</span>
-      <span className="leg"><span className="org-swatch rt-quality" />Quality</span>
-      <span className="leg"><span className="org-swatch rt-technical" />Technical / unit</span>
-      <span className="leg"><span className="org-swatch rt-support" />Support / admin</span>
-      <span className="leg"><span className="org-swatch org-staff-swatch" />Auto staff (by cadre &amp; rank)</span>
-    </div>
-    <form className="org-add-root no-print" onSubmit={addRoot}>
+    <p className="hint">The appointed roles below the Laboratory Manager are set by hand. Under each <strong>Unit Supervisor</strong>, the unit’s technical staff are arranged automatically by cadre (Scientist → Technician → Assistant) then professional rank — the highest-ranked becomes the next-in-command, and succession flows downward. Click any appointed role to edit it.</p>
+    <form className="org-add-root" onSubmit={addRoot}>
       <TextField placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onValue={nextValue => setNewRoot(nextValue)} />
       <button type="submit">Add top role</button>
     </form>
-    {error && <Notice kind="error" className="no-print">{error}</Notice>}
-    {success && <Notice kind="success" className="no-print">{success}</Notice>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {success && <Notice kind="success">{success}</Notice>}
 
-    <div className="org-viewport" ref={viewportRef}>
-      <div className="org-print-area" ref={chartRef} style={{ zoom } as unknown as React.CSSProperties}>
-        <div className="org-print-head"><strong>SECH_LIMS — Laboratory Organisational Structure &amp; Deputisation</strong><span>Printed {printedAt}</span></div>
-        {tree.length===0
-          ? <p className="hint">No positions yet. Use “Add top role” or “Apply standard structure”.</p>
-          : <div className="org-chart"><ul className="org-tree">{tree.map(r => <OrgTreeBranch key={r.key} node={r} ctx={ctx} />)}</ul></div>}
-      </div>
-    </div>
+    <OrgChartBoard roots={tree} facility={facility} renderCard={renderCard} onPrintError={setError}
+      emptyText="No positions yet. Use “Add top role” or “Apply standard structure”." />
   </div>;
-}
-
-const avClass = (a?: string | null) => `av-${String(a || 'available').toLowerCase().replace(/[^a-z]+/g,'-')}`;
-
-function OrgTreeBranch({ node, ctx }: { node: OrgTreeNode; ctx: OrgCtx }) {
-  const kids = node.children;
-  if (node.kind === 'staff') {
-    const unavailable = node.availability && node.availability.toLowerCase() !== 'available';
-    return <li>
-      <div className={`org-node org-staff ${avClass(node.availability)}`} title={node.staffName}>
-        <span className="org-title">{node.title}</span>
-        <span className="org-holder">{node.staffName}</span>
-        <span className="org-meta">{node.cadre}{node.rank ? ` · ${node.rank}` : ''}</span>
-        <span className="org-deputy">
-          {unavailable ? <span className="av-flag">{node.availability}</span> : null}
-          {node.nextInCommand ? <span className="muted"> Next: {node.nextInCommand}</span> : null}
-        </span>
-      </div>
-      {kids.length>0 && <ul>{kids.map(k=><OrgTreeBranch key={k.key} node={k} ctx={ctx} />)}</ul>}
-    </li>;
-  }
-  // Position (appointed) node — editable in place.
-  const flat = ctx.nodes.find(n => n.id === node.positionId);
-  const selected = ctx.selectedId === node.positionId;
-  return <li>
-    {selected && flat
-      ? <OrgNodeEditor node={flat} ctx={ctx} />
-      : <button type="button" className={`org-node rt-${node.roleType} ${node.isActive ? '' : 'inactive'} ${node.unitHead ? 'is-head' : ''}`} onClick={()=>ctx.onSelect(node.positionId!)}>
-          <span className="org-title">{node.title}</span>
-          <span className={`org-holder ${node.vacant ? 'vacant' : ''}`}>{node.vacant ? 'Vacant — click to assign' : node.holderName}</span>
-          {node.unitHead
-            ? <span className="org-deputy">{node.deputyName ? <>Next-in-command: {node.deputyName}</> : <span className="muted">No deputy yet</span>}{node.actingName && node.actingName !== node.deputyName ? <span className="muted"> · Acting: {node.actingName}</span> : null}</span>
-            : <span className="org-deputy">{node.deputyName ? <>Deputy: {node.deputyName}</> : <span className="muted">Deputy: —</span>}</span>}
-        </button>}
-    {kids.length>0 && <ul>{kids.map(k=><OrgTreeBranch key={k.key} node={k} ctx={ctx} />)}</ul>}
-  </li>;
 }
 
 // In-place editor rendered as the node itself when selected.
@@ -2971,7 +2913,7 @@ export function MyLaboratory() {
 
     {tab === 'Mission & Vision' && <div className="card">
       <h3>Mission &amp; vision</h3>
-      <p>The laboratory's mission and vision statements. These appear on the Laboratory Profile in Documents &amp; Records.</p>
+      <p>The laboratory's mission and vision statements. These appear on the Laboratory Profile in Organisation &amp; Leadership.</p>
       {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
         <label>Mission<TextField as="textarea" rows={3} value={form.mission} onValue={nextValue => setForm({ ...form, mission: nextValue })} placeholder="Why the laboratory exists and who it serves." /></label>
         <label>Vision<TextField as="textarea" rows={3} value={form.vision} onValue={nextValue => setForm({ ...form, vision: nextValue })} placeholder="What the laboratory aspires to become." /></label>

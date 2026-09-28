@@ -138,8 +138,6 @@ export const FEATURES: FeatureDef[] = [
     desc: 'Archived records from every module.', tabs: ['Central Archive'] },
   { key: 'documents.masterlist', module: 'documents', label: 'Master list',
     desc: 'The controlled Document & Records Master List.', tabs: ['Master List'] },
-  { key: 'documents.profile', module: 'documents', label: 'Laboratory profile', sensitive: true,
-    desc: 'Laboratory identity, quality manual, policy and objectives.', tabs: ['Laboratory Profile'] },
 
   // ── Equipment ───────────────────────────────────────────────────────────
   { key: 'equipment.register', module: 'equipment', label: 'Asset register', sensitive: true,
@@ -222,9 +220,9 @@ export const FEATURES: FeatureDef[] = [
   { key: 'organisation.structure', module: 'organisation', label: 'Organogram & conduct',
     desc: 'The organisational structure, deputisation and the code of conduct.',
     tabs: ['Organogram & Deputisation', 'Code of Conduct'] },
-  { key: 'organisation.quality_config', module: 'organisation', label: 'Quality configuration', sensitive: true,
-    desc: 'Quality policy, objectives and configuration of the management system.',
-    tabs: ['Quality Configuration'] },
+  { key: 'organisation.quality_config', module: 'organisation', label: 'Laboratory profile', sensitive: true,
+    desc: 'Laboratory identity, mission and vision, quality policy, objectives, core documents and licences.',
+    tabs: ['Laboratory Profile'] },
   { key: 'organisation.budget', module: 'organisation', label: 'Budgetary projection', sensitive: true,
     desc: 'Budget projections and financial planning for the laboratory.',
     tabs: ['Budgetary Projection'] },

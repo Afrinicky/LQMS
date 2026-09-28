@@ -332,7 +332,7 @@ export function seedDefaults() {
           // Quality's own instruments: competence, impartiality, the manual.
           'personnel.training', 'personnel.orientation', 'personnel.authorizations',
           'personnel.declarations', 'personnel.reports', 'personnel.activities',
-          'documents.profile', 'organisation.structure',
+          'organisation.structure',
           'process_management.directory', 'process_management.intervals',
           'process_management.critical', 'process_management.amendments',
           'process_management.reviews', 'process_management.rejections',
@@ -371,7 +371,7 @@ export function seedDefaults() {
           'meetings', 'monthly_reports', 'iqc', 'eqa', 'verification_validation',
           'measurement_uncertainty', 'poct', 'blood_bank_handover',
           'documents.library', 'documents.authoring', 'documents.workflow',
-          'documents.records', 'documents.masterlist', 'documents.archive', 'documents.profile',
+          'documents.records', 'documents.masterlist', 'documents.archive',
           'organisation.structure', 'organisation.quality_config', 'organisation.budget',
           'organisation.records_review', 'organisation.licences',
           'customer_focus.feedback', 'customer_focus.surveys', 'customer_focus.communication',
