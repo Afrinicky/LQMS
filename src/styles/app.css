@@ -5165,7 +5165,7 @@ button.cell-mark:disabled { cursor: default; }
 .rs-defs li { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
 .rs-def-name { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; }
 .rs-def-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10.5px; color: var(--faint); margin-top: 3px; }
-.rs-def-method { margin: 5px 0 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.rs-def-method, .rs-def-why { margin: 5px 0 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
 
 /* -- modals --------------------------------------------------------------- */
 .ls-modal-back {

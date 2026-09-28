@@ -114,6 +114,11 @@ export default function TextField(props: Props | AreaProps) {
   const inputRest = rest as unknown as Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>;
   return (
     <input
+      // The browser's own list of things typed into other boxes has no place
+      // in a record: a sentence written on one screen was being offered, and
+      // accepted, as the answer on another. A box that wants the browser's
+      // help — the password boxes — says so itself, and that wins.
+      autoComplete="off"
       {...inputRest}
       {...shared}
       onKeyDown={e => {
