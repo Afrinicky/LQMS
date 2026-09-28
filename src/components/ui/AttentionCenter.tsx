@@ -17,21 +17,21 @@ import type { LiveAlert, LiveAlertsGrouped } from '../../../shared/types/api';
 // Everything is clickable and drills into the exact record it comes from.
 // ==========================================================================
 
-const TODAY = () => new Date().toISOString().slice(0, 10);
+export const TODAY = () => new Date().toISOString().slice(0, 10);
 
-type Bucket = 'crit' | 'overdue' | 'today' | 'info';
-const RAIL_CLASS: Record<Bucket, string> = { crit: 'crit', overdue: 'warn', today: 'ok', info: 'info' };
+export type Bucket = 'crit' | 'overdue' | 'today' | 'info';
+export const RAIL_CLASS: Record<Bucket, string> = { crit: 'crit', overdue: 'warn', today: 'ok', info: 'info' };
 
 // Classify one live alert into a single, mutually-exclusive priority bucket
 // so the ring segments always add up to the number of active alerts.
-function bucketOf(a: LiveAlert, today: string): Bucket {
+export function bucketOf(a: LiveAlert, today: string): Bucket {
   if (a.tone === 'crit') return 'crit';
   if (a.dueDate && a.dueDate < today) return 'overdue';
   if (a.dueDate === today) return 'today';
   return 'info';
 }
 
-function dueChip(a: LiveAlert, today: string): { text: string; tone: 'crit' | 'warn' | 'muted' } {
+export function dueChip(a: LiveAlert, today: string): { text: string; tone: 'crit' | 'warn' | 'muted' } {
   if (a.dueDate && a.dueDate < today) {
     const days = Math.max(1, Math.round((new Date(today).getTime() - new Date(a.dueDate).getTime()) / 86400000));
     return { text: `${days}d overdue`, tone: 'crit' };

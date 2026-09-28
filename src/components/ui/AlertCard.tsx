@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Clock, Bell, CheckCircle2, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Clock, Bell, CheckCircle2, ChevronRight, ArrowRight } from 'lucide-react';
+import { TODAY, RAIL_CLASS, bucketOf, dueChip, type Bucket } from './AttentionCenter';
 import { api } from '../../services/api';
 import type { LiveAlert, LiveAlertsGrouped } from '../../../shared/types/api';
 
@@ -50,15 +51,20 @@ export function AlertGrid({ alerts, onOpen, emptyText = 'No active alerts — al
   return <div className="alert-grid">{alerts.map(a => <AlertCard key={a.key} alert={a} onOpen={onOpen} />)}</div>;
 }
 
-// ModuleAlerts — drop-in strip for a module dashboard. Fetches this module's
-// live alerts and renders them as env-style cards. Renders nothing while empty
-// unless `showEmpty` is set, so it never adds clutter to a clean module.
-export function ModuleAlerts({ moduleKey, title = 'Alerts & attention', scope = 'all', limit, showEmpty = false, onOpen }: {
+// ModuleAlerts — compact triage panel for a module dashboard. It mirrors the
+// main dashboard: a severity summary and a short, ranked queue of what to do
+// next, never a wall of cards. Renders nothing while empty unless `showEmpty`
+// is set, so it never adds clutter to a clean module.
+export function ModuleAlerts({ moduleKey, title = 'Alerts & attention', scope = 'all', limit = 4, showEmpty = false, onOpen }: {
   moduleKey: string; title?: string; scope?: 'all' | 'mine'; limit?: number; showEmpty?: boolean; onOpen?: (a: LiveAlert) => void;
 }) {
+  const navigate = useNavigate();
+  const today = TODAY();
   const [alerts, setAlerts] = useState<LiveAlert[] | null>(null);
   const [denied, setDenied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [bucket, setBucket] = useState<Bucket | null>(null);
+
   useEffect(() => {
     let live = true;
     api<LiveAlert[]>(`/notifications/live-alerts?module=${encodeURIComponent(moduleKey)}${scope === 'mine' ? '&scope=mine' : ''}`)
@@ -71,29 +77,86 @@ export function ModuleAlerts({ moduleKey, title = 'Alerts & attention', scope = 
 
   if (alerts === null || denied) return null;
   if (alerts.length === 0 && !showEmpty) return null;
+  if (alerts.length === 0) {
+    return <div className="alert-empty"><CheckCircle2 size={18} /> <span>No active alerts — all clear.</span></div>;
+  }
 
-  const cap = limit && !expanded ? limit : alerts.length;
-  const shown = alerts.slice(0, cap);
-  const crit = alerts.filter(a => a.tone === 'crit').length;
-  const warn = alerts.filter(a => a.tone === 'warn').length;
+  const counts = { crit: 0, overdue: 0, today: 0, info: 0 } as Record<Bucket, number>;
+  for (const a of alerts) counts[bucketOf(a, today)]++;
+  const total = alerts.length;
+
+  const allFilters: { key: Bucket; label: string; value: number; chip: string }[] = [
+    { key: 'crit', label: 'critical', value: counts.crit, chip: 'crit' },
+    { key: 'overdue', label: 'overdue', value: counts.overdue, chip: 'warn' },
+    { key: 'today', label: 'due today', value: counts.today, chip: 'warn' },
+    { key: 'info', label: 'later', value: counts.info, chip: 'muted' },
+  ];
+  const filters = allFilters.filter(f => f.value > 0);
+
+  const queue = bucket ? alerts.filter(a => bucketOf(a, today) === bucket) : alerts;
+  const cap = expanded ? Math.min(queue.length, 12) : limit;
+  const shown = queue.slice(0, cap);
+
+  const open = (a: LiveAlert) => { if (onOpen) onOpen(a); else navigate(a.actionUrl); };
 
   return (
-    <section className="alert-section">
-      <div className="alert-section-head">
+    <div className="card ma-card">
+      <div className="ma-head">
         <h3>{title}</h3>
-        <div className="alert-section-counts">
-          {crit > 0 && <span className="alert-chip crit"><AlertTriangle size={12} />{crit} critical</span>}
-          {warn > 0 && <span className="alert-chip warn"><Clock size={12} />{warn} due</span>}
-          <span className="alert-chip muted">{alerts.length} total</span>
+        <div className="ma-chips">
+          {filters.map(f => (
+            <button
+              key={f.key}
+              type="button"
+              className={`alert-chip ${f.chip} ${bucket === f.key ? 'is-on' : ''}`}
+              onClick={() => setBucket(b => (b === f.key ? null : f.key))}
+              title={`Show only ${f.label} items`}
+            >
+              {f.value} {f.label}
+            </button>
+          ))}
+          <span className="alert-chip muted">{total} total</span>
         </div>
       </div>
-      <AlertGrid alerts={shown} onOpen={onOpen} />
-      {limit && alerts.length > limit && (
-        <button type="button" className="alert-more" onClick={() => setExpanded(e => !e)}>
-          {expanded ? 'Show fewer' : `Show all ${alerts.length}`} <ChevronRight size={13} />
-        </button>
+
+      <div className="ma-bar" title={`${counts.crit} critical · ${counts.overdue} overdue · ${counts.today} due today · ${counts.info} later`}>
+        {counts.crit > 0 && <span className="ma-seg crit" style={{ flex: counts.crit }} />}
+        {counts.overdue > 0 && <span className="ma-seg warn" style={{ flex: counts.overdue }} />}
+        {counts.today > 0 && <span className="ma-seg ok" style={{ flex: counts.today }} />}
+        {counts.info > 0 && <span className="ma-seg info" style={{ flex: counts.info }} />}
+      </div>
+
+      <ul className="pq-list ma-list">
+        {shown.map(a => {
+          const chip = dueChip(a, today);
+          return (
+            <li key={a.key} className="pq-item" onClick={() => open(a)} role="button" title={`Open: ${a.message || a.title}`}>
+              <span className={`pq-rail ${RAIL_CLASS[bucketOf(a, today)]}`} />
+              <div className="pq-main">
+                <div className="pq-title">{a.title}</div>
+                <div className="pq-meta">{[a.sectionName, a.detail].filter(Boolean).join(' · ') || a.moduleLabel}</div>
+              </div>
+              <span className={`pq-due ${chip.tone}`}>{chip.text}</span>
+              <ArrowRight size={15} className="pq-go" />
+            </li>
+          );
+        })}
+      </ul>
+
+      {queue.length > limit && (
+        <div className="ma-foot">
+          <button type="button" className="alert-more" onClick={() => setExpanded(e => !e)}>
+            {expanded ? 'Show fewer' : `${queue.length - limit} more`} <ChevronRight size={13} />
+          </button>
+          {bucket && <button type="button" className="alert-more" onClick={() => { setBucket(null); setExpanded(false); }}>Show all {total} <ChevronRight size={13} /></button>}
+        </div>
       )}
-    </section>
+      {!(queue.length > limit) && bucket && (
+        <div className="ma-foot">
+          <button type="button" className="alert-more" onClick={() => setBucket(null)}>Show all {total} <ChevronRight size={13} /></button>
+        </div>
+      )}
+    </div>
   );
 }
 
