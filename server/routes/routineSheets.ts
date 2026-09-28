@@ -40,7 +40,7 @@ import { recordSignature } from '../services/signatureService.js';
 import {
   openSheet, refreshSheetRows, sheetPayload, saveCells, submitSheet, reopenSheet,
   verifySheet, archiveSheet, raiseSheetNc, sheetsForSection, subjectsForSection,
-  deleteSheet, deleteRoutineSchedule,
+  deleteSheet, deleteRoutineSchedule, monthHasEnded, signedEarly,
 } from '../services/routineSheets.js';
 import { unitScopePayload, resolveUnitScope, isCrossUnitRole } from '../services/unitScope.js';
 import { sheetToHtml, sheetToWorkbook, sheetTemplateWorkbook, parseSheetWorkbook } from '../services/routineSheetRender.js';
@@ -290,7 +290,13 @@ export function routineSheetRoutes() {
       ...payload,
       permissions: {
         canRecord: mayRecord(req, sheet) && !payload.sheet.locked,
-        canVerify: mayVerify(req, sheet),
+        // Signing closes the month, so it is only offered once the month is
+        // over. Offering it sooner is what froze charts: the sheet locked and
+        // the days still to come could never be recorded.
+        canVerify: mayVerify(req, sheet) && monthHasEnded(sheet.month),
+        // A month signed before it ended can be put back into use by the same
+        // person who could sign it, which is how a frozen chart is recovered.
+        canReopen: mayVerify(req, sheet) && (sheet.status === 'submitted' || signedEarly(sheet)),
         canRaiseNc: resolvePermission(req.user!.id, 'nc_capa', 'create').allowed,
         tier: tierForSheet(db, sheet),
       },
@@ -400,7 +406,7 @@ export function routineSheetRoutes() {
     const db = getDb();
     const sheet = loadSheet(req, res);
     if (!sheet) return;
-    if (!mayVerify(req, sheet)) return res.status(403).json({ error: 'Only a supervisor can put a submitted sheet back into use.' });
+    if (!mayVerify(req, sheet)) return res.status(403).json({ error: 'Only a supervisor can put a sheet back into use.' });
     try {
       reopenSheet(db, sheet.id);
       audit(req, { action: 'edit', entity: 'routine_log_sheets', entityId: sheet.id, newValue: { status: 'open' } });
@@ -427,6 +433,14 @@ export function routineSheetRoutes() {
     }
     const payload = sheetPayload(db, sheet.id);
     if (payload.sheet.locked) return res.status(400).json({ error: 'This sheet has already been verified.' });
+    // Asked before the gaps are counted, because the answer is not "there are
+    // gaps" — it is that the month is still running and the days left in it
+    // would be shut out of their own chart.
+    if (!monthHasEnded(sheet.month)) {
+      return res.status(400).json({
+        error: `${payload.sheet.monthLabel} has not ended yet. Signing it now would close the chart for the days still to be recorded.`,
+      });
+    }
 
     const stats = payload.completeness;
     if (stats.missingCount > 0 && req.body?.acknowledgeGaps !== true) {

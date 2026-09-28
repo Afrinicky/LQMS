@@ -138,10 +138,33 @@ check('adding a note to a cell does not post the reading again',
    ======================================================================== */
 console.log('\n[2] The supervisor signs the month');
 
+// Signing closes a month for good, so it waits until the month is over. A
+// month still running would be shut against the days left in it, which is what
+// used to leave charts frozen — so the signing is done on a month that has
+// ended, and the month in progress is checked to be unsignable.
+const lastMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
+const stillRunning = await j(`/routine-sheets/${sheetId}/verify`, { token: A, method: 'POST', body: {
+  comments: 'Fine', acknowledgeGaps: true,
+} });
+check('a month that has not ended cannot be signed',
+  stillRunning.status === 400 && /has not ended yet/.test(String(stillRunning.json?.error ?? '')),
+  `${stillRunning.status} ${JSON.stringify(stillRunning.json)?.slice(0, 140)}`);
+
+const closed = await j('/routine-sheets/open', { token: A, method: 'POST', body: {
+  kind: 'environmental', subjectId: assetId, month: lastMonth, sectionId,
+} });
+check('last month\'s chart opens', closed.status === 200, JSON.stringify(closed.json)?.slice(0, 160));
+const signedSheetId = closed.json?.sheet?.id;
+const closedRow = closed.json?.rows?.find(r => r.row_key === 'temperature');
+await j(`/routine-sheets/${signedSheetId}/cells`, { token: A, method: 'POST', body: {
+  cells: [{ rowId: closedRow.id, day: 1, slot: 'am', value: 9.4 }, { rowId: closedRow.id, day: 1, slot: 'pm', value: 5.2 }],
+} });
+const closedState = (await j(`/routine-sheets/${signedSheetId}`, { token: A })).json;
+
 // Nothing may be signed by somebody with no signature on file. This is checked
 // FIRST because it has to hold before any of the rest matters: a verified month
 // carrying only a typed name is exactly what an assessor challenges.
-const unsigned = await j(`/routine-sheets/${sheetId}/verify`, { token: A, method: 'POST', body: {
+const unsigned = await j(`/routine-sheets/${signedSheetId}/verify`, { token: A, method: 'POST', body: {
   comments: 'Fine', acknowledgeGaps: true,
 } });
 check('a month cannot be signed by somebody with no signature on file',
@@ -172,13 +195,13 @@ const PNG = Buffer.from(
 check('the account now reports a signature on file',
   (await j('/signatures/me', { token: A })).json?.hasSignature === true);
 
-const refused = await j(`/routine-sheets/${sheetId}/verify`, { token: A, method: 'POST', body: { comments: 'Fine' } });
+const refused = await j(`/routine-sheets/${signedSheetId}/verify`, { token: A, method: 'POST', body: { comments: 'Fine' } });
 check('signing a month with gaps is refused until the gaps are acknowledged',
   refused.status === 409 && refused.json?.error === 'gaps', `${refused.status}`);
 check('and the refusal says exactly how many are missing',
-  String(refused.json?.message ?? '').includes(String(afterNote.completeness.missingCount)));
+  String(refused.json?.message ?? '').includes(String(closedState.completeness.missingCount)));
 
-const verified = await j(`/routine-sheets/${sheetId}/verify`, { token: A, method: 'POST', body: {
+const verified = await j(`/routine-sheets/${signedSheetId}/verify`, { token: A, method: 'POST', body: {
   comments: 'One excursion on the 1st, dealt with.', acknowledgeGaps: true, raiseNc: true,
 } });
 check('acknowledging them lets it be signed', verified.status === 200, JSON.stringify(verified.json)?.slice(0, 160));
@@ -189,26 +212,26 @@ check('an NC was raised against the month', Boolean(verified.json?.ncId));
 
 // The signature must reach the sheet as an image, not only as a name — on the
 // screen that shows it and on the sheet that is printed and filed.
-const signed = (await j(`/routine-sheets/${sheetId}`, { token: A })).json;
+const signed = (await j(`/routine-sheets/${signedSheetId}`, { token: A })).json;
 check('the verified sheet carries the signature image, not just the name',
   String(signed?.sheet?.signature?.image ?? '').startsWith('data:image/'),
   String(signed?.sheet?.signature?.image ?? '(none)').slice(0, 40));
 check('and still names the person who signed it', Boolean(signed?.sheet?.verifiedByName));
 {
-  const r = await fetch(`${BASE}/routine-sheets/${sheetId}/print?autoprint=0`, { headers: { Authorization: `Bearer ${A}` } });
+  const r = await fetch(`${BASE}/routine-sheets/${signedSheetId}/print?autoprint=0`, { headers: { Authorization: `Bearer ${A}` } });
   const html = await r.text();
   check('the printed sheet shows the signature itself', r.ok && html.includes('class="sigimg"'), `${r.status}`);
   check('and does not print "not on file" over a signed month', !html.includes('<span class="signone">'));
 }
 
-const locked = await j(`/routine-sheets/${sheetId}/cells`, { token: A, method: 'POST', body: {
-  cells: [{ rowId: tempRow.id, day: 2, slot: 'am', value: 5 }],
+const locked = await j(`/routine-sheets/${signedSheetId}/cells`, { token: A, method: 'POST', body: {
+  cells: [{ rowId: closedRow.id, day: 2, slot: 'am', value: 5 }],
 } });
 check('a signed month refuses further entries', locked.status === 400, `${locked.status}`);
 check('and says a nonconformity is how a signed record gets corrected',
   String(locked.json?.error ?? '').toLowerCase().includes('nonconformity'), locked.json?.error);
 
-const archived = await j(`/routine-sheets/${sheetId}/archive`, { token: A, method: 'POST', body: {} });
+const archived = await j(`/routine-sheets/${signedSheetId}/archive`, { token: A, method: 'POST', body: {} });
 check('a signed month can be archived', archived.status === 200 && Boolean(archived.json?.archiveId));
 
 /* ==========================================================================
@@ -488,7 +511,7 @@ for (const [kind, endpoint] of [
     `${index.status} · ${(index.json?.sheets ?? []).length} sheet(s)`);
 }
 
-const printed = await fetch(`${BASE}/routine-sheets/${sheetId}/print`, { headers: { Authorization: `Bearer ${A}` } });
+const printed = await fetch(`${BASE}/routine-sheets/${signedSheetId}/print`, { headers: { Authorization: `Bearer ${A}` } });
 const html = await printed.text();
 check('a sheet prints as the laboratory\'s own form', printed.ok && html.includes('<table'), `${printed.status}`);
 check('the printed sheet carries the signature block', html.includes('Reviewed and verified by'));
