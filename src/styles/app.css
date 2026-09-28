@@ -1145,6 +1145,23 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
 .alert-module-counts { display: flex; gap: 6px; flex-wrap: wrap; }
 .alert-module-detail { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 
+/* ---- Module alerts panel — compact triage strip for a module dashboard ---- */
+.ma-card { padding: 14px 16px; margin: 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.ma-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ma-head h3 { margin: 0; font-size: 14px; }
+.ma-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ma-chips button.alert-chip { cursor: pointer; box-shadow: none; }
+.ma-chips button.alert-chip:hover { border-color: var(--border-strong); }
+.ma-chips .alert-chip.is-on { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+.ma-bar { display: flex; gap: 2px; height: 5px; border-radius: 99px; overflow: hidden; background: var(--panel-2); }
+.ma-seg { display: block; border-radius: 99px; }
+.ma-seg.crit { background: var(--danger); } .ma-seg.warn { background: var(--warning); }
+.ma-seg.ok { background: var(--accent-bright); } .ma-seg.info { background: var(--faint); }
+.ma-list .pq-item { padding: 8px 6px; }
+.ma-list .pq-rail { min-height: 26px; }
+.ma-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ma-foot .alert-more { margin-top: 2px; }
+
 /* ============================================================================
    ATTENTION CENTER — unified triage surface that opens every dashboard.
    Severity ring + quality-health meter on the left, a short ranked priority
