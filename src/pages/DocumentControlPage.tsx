@@ -131,7 +131,7 @@ const emptyReviewForm = { reviewDate: '', reviewOutcome: 'no_change', reviewNote
 const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positionId: '', sectionId: '', departmentId: '', dueDate: '', notes: '' };
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
-const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
+const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List'] as const;
 /**
  * The document-control tabs, and the right each one actually needs.
  *
@@ -1094,114 +1094,6 @@ export function DocumentControlPage() {
     {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError}
       documents={documents} onPreview={d => setViewer({ docId: d.id, versionId: previewVersionId(d), workflowStatus: d.status })} />}
 
-    {section === 'Laboratory Profile' && <LaboratoryProfileView staff={staff} documents={documents} onOpenDoc={openDoc}
-      onPreview={d => setViewer({ docId: d.id, versionId: previewVersionId(d), workflowStatus: d.status })} onError={setError} />}
-  </div>;
-}
-
-// ============================================================================
-// Laboratory Profile — a designated place in Documents & Records for the
-// laboratory's identity, mission/vision, objectives, leadership, the three core
-// documents (auto-registered from Settings → My Laboratory) and registration
-// documents. Everything is read-only here; it is maintained in Settings.
-// ============================================================================
-function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError }: { staff: Staff[]; documents: DocumentRecord[]; onOpenDoc: (id: number) => void; onPreview: (d: DocumentRecord) => void; onError: (m: string) => void }) {
-  const [config, setConfig] = useState<import('../../shared/types/api').LaboratoryConfig | null>(null);
-  useEffect(() => { api<import('../../shared/types/api').LaboratoryConfig>('/laboratory-config').then(setConfig).catch(e => onError(errorText(e))); }, []);
-  if (!config) return <div className="card"><p>Loading laboratory profile…</p></div>;
-  const p = config.profile;
-  // Core documents are the controlled documents in the register (full metadata),
-  // matched by document type — registered from Settings → My Laboratory.
-  const CORE_TYPE: Record<string, string> = { quality_manual: 'Quality Manual', laboratory_handbook: 'Handbook', safety_manual: 'Safety Manual' };
-  const coreByType = (type: string) => documents.find(d => (d.document_type || '') === type && d.status !== 'obsolete');
-  const legal = config.documents.filter(d => d.category === 'legal_identity');
-  const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
-  const annual = config.objectives.filter(o => o.year != null);
-  const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a: number, b: number) => b - a);
-  const leaders = staff.filter(s => !!s.isActive && (s as any).primaryPosition);
-  const coreLabel: Record<string, string> = { quality_manual: 'Quality Manual', laboratory_handbook: 'Laboratory Handbook', safety_manual: 'Safety Manual' };
-
-  return <div className="lab-profile">
-    <div className="card">
-      <div className="lab-profile-head">
-        <div>
-          <h2 style={{ margin: 0 }}>{p?.facility_name || 'Laboratory not yet registered'}</h2>
-          {p?.motto && <p className="muted" style={{ margin: '2px 0 0' }}><em>{p.motto}</em></p>}
-        </div>
-        <Link className="hint" to="/settings/laboratory">Maintained in Settings → My Laboratory</Link>
-      </div>
-      {p && <div className="lab-facts">
-        <div><span className="hint">Legal status</span><div>{p.legal_status || '—'}</div></div>
-        <div><span className="hint">Registration no</span><div>{p.registration_number || '—'}</div></div>
-        <div><span className="hint">Accreditation</span><div>{p.accreditation_status || '—'}{p.accreditation_body ? ` · ${p.accreditation_body}` : ''}</div></div>
-        <div><span className="hint">Location</span><div>{[p.address, p.city, p.country].filter(Boolean).join(', ') || '—'}</div></div>
-        <div><span className="hint">Contact</span><div>{[p.phone, p.email].filter(Boolean).join(' · ') || '—'}</div></div>
-        <div><span className="hint">Website</span><div>{p.website || '—'}</div></div>
-      </div>}
-    </div>
-
-    {(p?.mission || p?.vision) && <div className="grid cols-2" style={{ marginTop: 16 }}>
-      <div className="card"><h3>Mission</h3><p style={{ whiteSpace: 'pre-wrap' }}>{p?.mission || '—'}</p></div>
-      <div className="card"><h3>Vision</h3><p style={{ whiteSpace: 'pre-wrap' }}>{p?.vision || '—'}</p></div>
-    </div>}
-
-    <div className="card" style={{ marginTop: 16 }}>
-      <h3>Core documents</h3>
-      <p className="muted" style={{ marginTop: 0 }}>The laboratory's foundational controlled documents, registered from Settings → My Laboratory.</p>
-      <div className="doc-cards">
-        {(['quality_manual', 'laboratory_handbook', 'safety_manual'] as const).map(cat => {
-          const d = coreByType(CORE_TYPE[cat]);
-          return <div key={cat} className={`doc-card${d ? '' : ' missing'}`}>
-            <div className="doc-card-ico"><FileText size={20} /></div>
-            <div className="doc-card-body">
-              <strong>{coreLabel[cat]}</strong>
-              {d ? <>
-                <span className="hint">{d.document_code || '—'} · {d.title}{d.current_version_number ? ` · v${d.current_version_number}` : ''}</span>
-                <div className="doc-card-actions">
-                  {(d.current_version_id || d.resolved_version_id) && <button type="button" onClick={() => onPreview(d)}>Preview</button>}
-                  <button type="button" className="secondary" onClick={() => onOpenDoc(d.id)}>Manage</button>
-                </div>
-              </> : <span className="hint">Not registered yet — add it in Settings → My Laboratory.</span>}
-            </div>
-          </div>;
-        })}
-      </div>
-    </div>
-
-    <div className="card" style={{ marginTop: 16 }}>
-      <h3>Quality policy &amp; objectives</h3>
-      {p?.quality_policy ? <p style={{ whiteSpace: 'pre-wrap' }}>{p.quality_policy}</p> : <p className="hint">No quality policy recorded yet.</p>}
-      {standing.length > 0 && <>
-        <h4>Standing objectives</h4>
-        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th></tr></thead><tbody>
-          {standing.map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td></tr>)}
-        </tbody></table>
-      </>}
-      {years.map(y => <div key={y} style={{ marginTop: 12 }}>
-        <h4>{y} objectives</h4>
-        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Status</th></tr></thead><tbody>
-          {annual.filter(o => o.year === y).map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{formatBadge(o.status)}</td></tr>)}
-        </tbody></table>
-      </div>)}
-      {standing.length === 0 && years.length === 0 && <p className="hint">No quality objectives recorded yet.</p>}
-    </div>
-
-    <div className="card" style={{ marginTop: 16 }}>
-      <h3>Leadership &amp; organization</h3>
-      {leaders.length === 0 ? <p className="hint">No positions assigned yet. Configure the organogram in Settings → People &amp; Access.</p> :
-        <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Unit / Section</th></tr></thead><tbody>
-          {leaders.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{(s as any).primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
-        </tbody></table>}
-    </div>
-
-    <div className="card" style={{ marginTop: 16 }}>
-      <h3>Registration &amp; legal documents</h3>
-      {p?.legal_identity_notes && <p>{p.legal_identity_notes}</p>}
-      {legal.length === 0 ? <p className="hint">No legal identity documents uploaded yet.</p> :
-        <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Reference</th><th>Issuer</th><th>Expiry</th><th>File</th></tr></thead><tbody>
-          {legal.map(d => <tr key={d.id}><td>{d.doc_type || '—'}</td><td>{d.title}</td><td>{d.reference_number || '—'}</td><td>{d.issuing_authority || '—'}</td><td>{d.expiry_date || '—'}</td><td>{d.file_id ? <button type="button" className="secondary" onClick={() => openStoredFile(d.file_id!, d.file_name, d.file_mime)}>Open</button> : '—'}</td></tr>)}
-        </tbody></table>}
-    </div>
   </div>;
 }
 

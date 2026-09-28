@@ -1,17 +1,19 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal, OrgChartBoard } from '../components/ui';
+import { FileText } from 'lucide-react';
+import { openStoredFile } from '../services/files';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken, errorText, apiRead, ApiError } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import PermissionTabs from '../components/PermissionTabs';
 import { usePermissions } from '../hooks/usePermissions';
 import type {
   Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig,
   EthicalDeclarationForm, EthicalDeclarationSignature, ContinuityPlan, QtReviewConfig, QtReview, Position, OrgTree,
-  DeclarationTemplate,
+  DeclarationTemplate, StaffProfile, DocumentRecord, Section,
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
@@ -73,48 +75,172 @@ function SignatureImage({ staffId, hasSignature, name }: { staffId: number; hasS
   return <span style={{ fontFamily: "'Segoe Script', 'Brush Script MT', cursive", fontSize: 15 }}>{name}</span>;
 }
 
-// Read-only display of the laboratory configuration owned by Settings → My
-// Laboratory. Shown here so the whole team can see the legal identity, quality
-// manual, quality policy and objectives; it can only be changed in Settings.
-export function QualityConfigurationView({ config }: { config: LaboratoryConfig | null }) {
-  if (!config) return <div className="card"><p>Loading laboratory configuration…</p></div>;
+// ============================================================================
+// Laboratory Profile — the laboratory's identity in one place: who it is, what
+// it commits to, the documents and licences that prove it, and the people who
+// run it. Everything on it opens: a document opens the document, a licence
+// opens its file, a member of staff opens their profile. It is maintained in
+// Settings → My Laboratory and read-only here.
+// ============================================================================
+const titleCase = (v?: string | null) => (v ? v.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '');
+
+const CORE_DOCS: Array<{ type: string; label: string }> = [
+  { type: 'Quality Manual', label: 'Quality Manual' },
+  { type: 'Handbook', label: 'Laboratory Handbook' },
+  { type: 'Safety Manual', label: 'Safety Manual' },
+];
+
+/** A stored file or controlled document, opened the way its own kind opens. */
+function DocLink({ label, sub, onOpen, missing }: { label: string; sub?: string; onOpen?: () => void; missing?: boolean }) {
+  if (missing || !onOpen) return <span className="lp-doc is-missing"><FileText size={14} /> <span>{label}<em>{sub || 'Not registered'}</em></span></span>;
+  return <button type="button" className="lp-doc" onClick={onOpen}>
+    <FileText size={14} /> <span>{label}{sub && <em>{sub}</em>}</span>
+  </button>;
+}
+
+function StaffProfileModal({ staffId, onClose }: { staffId: number; onClose: () => void }) {
+  const [profile, setProfile] = useState<StaffProfile | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<StaffProfile>(`/staff/${staffId}`).then(p => { if (live) setProfile(p); }).catch(e => { if (live) setFailed(errorText(e)); });
+    return () => { live = false; };
+  }, [staffId]);
+  const s = profile?.staff;
+  return <DetailModal open onClose={onClose} title={s?.full_name || 'Staff profile'} subtitle={s?.employee_no ? `Staff ID ${s.employee_no}` : undefined}>
+    {failed && <Notice kind="error">{failed}</Notice>}
+    {!profile && !failed && <p className="muted">Loading profile…</p>}
+    {profile && s && <div className="lp-staff">
+      <div className="lp-facts">
+        <div><span className="hint">Unit / Section</span><div>{s.section_name || '—'}</div></div>
+        <div><span className="hint">Email</span><div>{s.email || '—'}</div></div>
+        <div><span className="hint">Phone</span><div>{s.phone || '—'}</div></div>
+        <div><span className="hint">Status</span><div>{s.is_active ? 'Active' : 'Inactive'}</div></div>
+        <div><span className="hint">Login account</span><div>{profile.account ? `${profile.account.username} · ${profile.account.role_name}` : 'None'}</div></div>
+      </div>
+      <h4>Positions</h4>
+      {profile.positions.length === 0 ? <p className="hint">No position assigned.</p> :
+        <table className="data-table"><thead><tr><th>Position</th><th>Assignment</th><th>Reports to</th></tr></thead><tbody>
+          {profile.positions.map(p => <tr key={p.id}><td>{p.title}</td><td>{titleCase(p.assignment_type)}</td><td>{p.reports_to_title || '—'}</td></tr>)}
+        </tbody></table>}
+      <h4>Authorisations</h4>
+      {profile.authorizations.length === 0 ? <p className="hint">No technical authorisations recorded.</p> :
+        <table className="data-table"><thead><tr><th>Area</th><th>Unit</th><th>Level</th><th>Expires</th></tr></thead><tbody>
+          {profile.authorizations.map(a => <tr key={a.id}><td>{titleCase(a.module_key)}</td><td>{a.section_name || '—'}</td><td>{titleCase(a.level)}</td><td>{a.expires_at || '—'}</td></tr>)}
+        </tbody></table>}
+      <h4>Record activity</h4>
+      <div className="lp-facts">
+        <div><span className="hint">Documents</span><div>{profile.activity.documents}</div></div>
+        <div><span className="hint">Declarations</span><div>{profile.activity.declarations}</div></div>
+        <div><span className="hint">Competency</span><div>{profile.activity.competency}</div></div>
+        <div><span className="hint">Training</span><div>{profile.activity.training}</div></div>
+        <div><span className="hint">Open actions</span><div>{profile.activity.openActions}</div></div>
+      </div>
+    </div>}
+  </DetailModal>;
+}
+
+export function LaboratoryProfileView({ config, staff, registrations }: { config: LaboratoryConfig | null; staff: Staff[]; registrations: RegulatoryRegistration[] }) {
+  const navigate = useNavigate();
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [logo, setLogo] = useState<string | null>(null);
+  const [openStaffId, setOpenStaffId] = useState<number | null>(null);
+
+  useEffect(() => {
+    api<DocumentRecord[]>('/documents').then(setDocuments).catch(() => setDocuments([]));
+    api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
+    let revoke: string | null = null;
+    fetchBlobUrl('/laboratory-logo').then(u => { revoke = u; setLogo(u); }).catch(() => undefined);
+    return () => { if (revoke) URL.revokeObjectURL(revoke); };
+  }, []);
+
+  if (!config) return <div className="card"><p>Loading laboratory profile…</p></div>;
   const p = config.profile;
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+
+  const coreOf = (type: string) => documents.find(d => (d.document_type || '') === type && d.status !== 'obsolete');
+  const legal = config.documents.filter(d => d.category === 'legal_identity');
+  const manuals = config.documents.filter(d => d.category !== 'legal_identity');
   const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
   const annual = config.objectives.filter(o => o.year != null);
   const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a, b) => b - a);
-  const legalDocs = config.documents.filter(d => d.category === 'legal_identity');
-  const manualDocs = config.documents.filter(d => d.category === 'quality_manual');
-  return <div className="grid" style={{ gap: 16 }}>
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
-        <h3 style={{ margin: 0 }}>Laboratory identity</h3>
-        <Link className="hint" to="/settings/laboratory">Edit in Settings → My Laboratory</Link>
+  const activeStaff = staff.filter(s => !!s.isActive);
+  const leaders = activeStaff.filter(s => !!s.primaryPosition);
+  const expiring = registrations.filter(r => r.expiry_date && r.expiry_date >= today && r.expiry_date <= soon).length;
+  const expired = registrations.filter(r => r.expiry_date && r.expiry_date < today).length;
+  const staffBySection = (id: number) => activeStaff.filter(s => s.sectionId === id).length;
+
+  return <div className="lab-profile">
+    <div className="card lp-hero">
+      {logo && <img className="lp-logo" src={logo} alt="" />}
+      <div className="lp-hero-main">
+        <h2>{p?.facility_name || 'Laboratory not yet registered'}{p?.short_name ? <span className="lp-short">{p.short_name}</span> : null}</h2>
+        {p?.motto && <p className="lp-motto">{p.motto}</p>}
+        <div className="lp-tags">
+          {p?.legal_status && <span className="badge">{titleCase(p.legal_status)}</span>}
+          {p?.accreditation_status && <span className="badge">{titleCase(p.accreditation_status)}{p.accreditation_body ? ` · ${p.accreditation_body}` : ''}</span>}
+          {p?.registration_number && <span className="badge">Reg. {p.registration_number}</span>}
+        </div>
       </div>
-      {p ? <div className="form-grid" style={{ marginTop: 10 }}>
-        <div><span className="hint">Facility</span><div><strong>{p.facility_name}</strong>{p.short_name ? ` (${p.short_name})` : ''}</div></div>
-        <div><span className="hint">Legal status</span><div>{p.legal_status || '—'}</div></div>
-        <div><span className="hint">Registration no</span><div>{p.registration_number || '—'}</div></div>
-        <div><span className="hint">Accreditation</span><div>{p.accreditation_status || '—'}{p.accreditation_body ? ` · ${p.accreditation_body}` : ''}</div></div>
-        <div><span className="hint">Location</span><div>{[p.city, p.country].filter(Boolean).join(', ') || '—'}</div></div>
-        <div><span className="hint">Contact</span><div>{p.phone || p.email || '—'}</div></div>
-      </div> : <p>Not yet registered.</p>}
-      {p?.legal_identity_notes && <p style={{ marginTop: 10 }}>{p.legal_identity_notes}</p>}
-      {legalDocs.length > 0 && <p className="hint" style={{ marginTop: 8 }}>Legal documents on file: {legalDocs.map(d => d.title).join(', ')}.</p>}
+      <Link className="hint lp-edit" to="/settings/laboratory">Maintained in Settings → My Laboratory</Link>
+    </div>
+
+    <KpiStrip items={[
+      { label: 'Active staff', value: activeStaff.length },
+      { label: 'Units', value: sections.length },
+      { label: 'Registrations', value: registrations.length },
+      { label: 'Expiring soon', value: expiring, tone: expiring ? 'warning' : undefined },
+      { label: 'Expired', value: expired, tone: expired ? 'danger' : undefined },
+      { label: 'Quality objectives', value: config.objectives.length },
+    ]} />
+
+    <div className="lp-grid">
+      <div className="card">
+        <h3>Identity &amp; contact</h3>
+        <div className="lp-facts">
+          <div><span className="hint">Legal status</span><div>{titleCase(p?.legal_status) || '—'}</div></div>
+          <div><span className="hint">Registration no</span><div>{p?.registration_number || '—'}</div></div>
+          <div><span className="hint">Accreditation</span><div>{titleCase(p?.accreditation_status) || '—'}{p?.accreditation_number ? ` · ${p.accreditation_number}` : ''}</div></div>
+          <div><span className="hint">Accreditation body</span><div>{p?.accreditation_body || '—'}</div></div>
+          <div><span className="hint">Address</span><div>{[p?.address, p?.city, p?.country].filter(Boolean).join(', ') || '—'}</div></div>
+          <div><span className="hint">Telephone</span><div>{p?.phone || '—'}</div></div>
+          <div><span className="hint">Email</span><div>{p?.email || '—'}</div></div>
+          <div><span className="hint">Website</span><div>{p?.website || '—'}</div></div>
+        </div>
+        {p?.legal_identity_notes && <p className="lp-note">{p.legal_identity_notes}</p>}
+      </div>
+
+      <div className="card">
+        <h3>Mission</h3>
+        <p className="lp-statement">{p?.mission || <span className="hint">No mission statement recorded yet.</span>}</p>
+        <h3 style={{ marginTop: 14 }}>Vision</h3>
+        <p className="lp-statement">{p?.vision || <span className="hint">No vision statement recorded yet.</span>}</p>
+      </div>
     </div>
 
     <div className="card">
       <h3>Quality policy</h3>
-      {p?.quality_policy ? <p style={{ whiteSpace: 'pre-wrap' }}>{p.quality_policy}</p> : <p className="hint">No quality policy recorded yet.</p>}
-      {config.policies.length > 0 && <>
-        <h4>Supporting policies</h4>
-        <ul className="link-list">{config.policies.map(pol => <li key={pol.id}><strong>{pol.title}:</strong> {pol.policy_statement}{pol.reference_note ? <> <span className="hint">({pol.reference_note})</span></> : ''}</li>)}</ul>
-      </>}
+      <p className="lp-statement">{p?.quality_policy || <span className="hint">No quality policy recorded yet.</span>}</p>
+      {config.policies.length > 0 && <div className="lp-policies">
+        {config.policies.map(pol => <div key={pol.id} className="lp-policy"><strong>{pol.title}</strong><span>{pol.policy_statement}</span></div>)}
+      </div>}
     </div>
 
     <div className="card">
-      <h3>Quality manual</h3>
-      {p?.quality_manual_summary ? <p style={{ whiteSpace: 'pre-wrap' }}>{p.quality_manual_summary}</p> : <p className="hint">No quality manual summary recorded yet.</p>}
-      {manualDocs.length > 0 && <p className="hint">Manual documents on file: {manualDocs.map(d => `${d.title}${d.version ? ` ${d.version}` : ''}`).join(', ')}.</p>}
+      <h3>Core documents</h3>
+      <div className="lp-docs">
+        {CORE_DOCS.map(c => {
+          const d = coreOf(c.type);
+          return <DocLink key={c.type} label={c.label} missing={!d}
+            sub={d ? [d.document_code, d.current_version_number ? `v${d.current_version_number}` : null].filter(Boolean).join(' · ') : undefined}
+            onOpen={d ? () => navigate(`/documents?open=${d.id}`) : undefined} />;
+        })}
+        {manuals.map(d => <DocLink key={`lab-${d.id}`} label={d.title} sub={[titleCase(d.doc_type), d.version].filter(Boolean).join(' · ')}
+          missing={!d.file_id} onOpen={d.file_id ? () => void openStoredFile(d.file_id!, d.file_name, d.file_mime) : undefined} />)}
+      </div>
+      {p?.quality_manual_summary && <p className="lp-note">{p.quality_manual_summary}</p>}
     </div>
 
     <div className="card">
@@ -133,6 +259,66 @@ export function QualityConfigurationView({ config }: { config: LaboratoryConfig 
         </tbody></table>
       </div>)}
     </div>
+
+    <div className="card">
+      <h3>Leadership &amp; key positions</h3>
+      {leaders.length === 0 ? <p className="hint">No positions assigned yet.</p> :
+        <div className="lp-people">
+          {leaders.map(s => <button key={s.id} type="button" className="lp-person" onClick={() => setOpenStaffId(s.id)} title="Open staff profile">
+            <span className="lp-person-avatar">{(s.initials || s.fullName.split(' ').map(x => x[0]).join('')).slice(0, 2).toUpperCase()}</span>
+            <span className="lp-person-main">
+              <strong>{s.fullName}</strong>
+              <em>{s.primaryPosition}</em>
+              <span className="hint">{s.sectionName || s.unit || '—'}</span>
+            </span>
+          </button>)}
+        </div>}
+    </div>
+
+    <div className="card">
+      <h3>Units &amp; sections</h3>
+      {sections.length === 0 ? <p className="hint">No units configured yet.</p> :
+        <table className="data-table"><thead><tr><th>Unit</th><th>Staff</th><th>Supervisor</th></tr></thead><tbody>
+          {sections.map(sec => {
+            const head = activeStaff.find(s => s.sectionId === sec.id && /supervisor|head/i.test(s.primaryPosition || s.jobTitle || ''));
+            return <tr key={sec.id}>
+              <td>{sec.name}</td>
+              <td>{staffBySection(sec.id)}</td>
+              <td>{head ? <button type="button" className="link-btn" onClick={() => setOpenStaffId(head.id)}>{head.fullName}</button> : '—'}</td>
+            </tr>;
+          })}
+        </tbody></table>}
+    </div>
+
+    <div className="card">
+      <h3>Registration &amp; legal documents</h3>
+      {legal.length === 0 ? <p className="hint">No legal identity documents uploaded yet.</p> :
+        <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Reference</th><th>Issuer</th><th>Expiry</th></tr></thead><tbody>
+          {legal.map(d => {
+            const clickable = !!d.file_id;
+            return <tr key={d.id} className={clickable ? 'clickable-row' : ''} title={clickable ? 'Open document' : undefined}
+              onClick={clickable ? () => void openStoredFile(d.file_id!, d.file_name, d.file_mime) : undefined}>
+              <td>{titleCase(d.doc_type) || '—'}</td><td>{d.title}</td><td>{d.reference_number || '—'}</td>
+              <td>{d.issuing_authority || '—'}</td><td>{d.expiry_date || '—'}</td>
+            </tr>;
+          })}
+        </tbody></table>}
+    </div>
+
+    <div className="card">
+      <h3>Registrations &amp; licences</h3>
+      {registrations.length === 0 ? <p className="hint">No registrations recorded.</p> :
+        <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Issuing body</th><th>Reference</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
+          {registrations.map(r => <tr key={r.id}>
+            <td>{titleCase(r.credential_type) || '—'}</td><td>{r.title}</td><td>{r.issuing_body || '—'}</td>
+            <td>{r.reference || '—'}</td>
+            <td className="lp-expiry">{r.expiry_date || '—'}{r.expiry_date && r.expiry_date < today ? <span className="badge danger">Expired</span> : r.expiry_date && r.expiry_date <= soon ? <span className="badge warning">Expiring</span> : null}</td>
+            <td>{formatBadge(r.status)}</td>
+          </tr>)}
+        </tbody></table>}
+    </div>
+
+    {openStaffId !== null && <StaffProfileModal staffId={openStaffId} onClose={() => setOpenStaffId(null)} />}
   </div>;
 }
 
@@ -162,7 +348,7 @@ const BUDGET_SCOPES: Array<{ key: string; label: string }> = [
   { key: 'other', label: 'Other' },
 ];
 
-const TABS = ['Dashboard', 'Quality Configuration', 'Code of Conduct', 'Organogram & Deputisation', 'Budgetary Projection', 'Quality & Technical Records Review', 'Registrations & Licences', 'Meetings', 'Management Review'];
+const TABS = ['Dashboard', 'Laboratory Profile', 'Organogram & Deputisation', 'Code of Conduct', 'Budgetary Projection', 'Quality & Technical Records Review', 'Registrations & Licences', 'Meetings', 'Management Review'];
 
 export function OrganisationPage() {
   const { can } = usePermissions();
@@ -224,7 +410,7 @@ export function OrganisationPage() {
     {error && <Notice kind="error">{error}</Notice>}
     {notice && <Notice kind="success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
 
-    {tab === 'Quality Configuration' && <QualityConfigurationView config={config} />}
+    {tab === 'Laboratory Profile' && <LaboratoryProfileView config={config} staff={staff} registrations={registrations} />}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="organisation" /><KpiStrip items={[
       { label: 'Code-of-conduct records', value: summary?.codeOfConductRecords ?? conduct.length, onClick: () => setTab('Code of Conduct') },
@@ -733,6 +919,8 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
   const [positions, setPositions] = useState<Position[]>([]);
   const [plans, setPlans] = useState<ContinuityPlan[]>([]);
   const [editingId, setEditingId] = useState<number | 'new' | null>(null);
+  const [sub, setSub] = useState<'Organogram' | 'Deputisation'>('Organogram');
+  const [facility, setFacility] = useState('');
   const emptyPlan = { positionId: '', keyRole: '', deputyPositionId: '', deputyStaffId: '', actingArrangement: '', authorityScope: '', handoverProcedure: '', activationTrigger: '', trainingStatus: 'in_progress', lastTestedDate: '', nextReviewDate: '', status: 'active', notes: '' };
   const [form, setForm] = useState(emptyPlan);
 
@@ -747,6 +935,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
     } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, []);
+  useEffect(() => { api<LaboratoryConfig>('/laboratory-config').then(c => setFacility(c.profile?.facility_name || '')).catch(() => undefined); }, []);
 
   function startNew() { setForm(emptyPlan); setEditingId('new'); }
   function startEdit(plan: ContinuityPlan) {
@@ -791,16 +980,27 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
   const positionsList = tree ? flatten(tree.roots) : [];
 
   return <div>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      <div>
-        <h3 style={{ margin: 0 }}>Organogram &amp; Deputisation</h3>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Reads live from Settings → People &amp; Access. Any organogram or deputy change made there appears here (and vice versa). Continuity plans below cover the absence of key personnel so the management system keeps running.</p>
-      </div>
-      <Link to="/settings/people" className="secondary" style={{ padding: '6px 10px', borderRadius: 6, background: '#f1f5f9', color: '#334155', textDecoration: 'none' }}>Edit organogram in Settings →</Link>
+    <div className="org-subtabs">
+      {(['Organogram', 'Deputisation'] as const).map(t => (
+        <button key={t} type="button" className={sub === t ? 'active' : ''} onClick={() => setSub(t)}>{t}</button>
+      ))}
     </div>
 
-    <div className="card" style={{ marginTop: 12 }}>
-      <h4 style={{ marginTop: 0 }}>Current organogram &amp; deputies</h4>
+    {sub === 'Organogram' && <div className="card">
+      <div className="panel-head">
+        <h3 style={{ margin: 0 }}>Laboratory organogram</h3>
+        {can('organisation.structure', 'edit') && <Link to="/settings/people" className="hint">Edit in Settings → People &amp; Access</Link>}
+      </div>
+      <OrgChartBoard roots={tree?.roots || []} facility={facility} onPrintError={onError}
+        emptyText="No positions on the organogram yet. Add positions in Settings → People & Access." />
+    </div>}
+
+    {sub === 'Deputisation' && <>
+    <div className="card">
+      <div className="panel-head">
+        <h3 style={{ margin: 0 }}>Current organogram &amp; deputies</h3>
+        {can('organisation.structure', 'edit') && <Link to="/settings/people" className="hint">Edit in Settings → People &amp; Access</Link>}
+      </div>
       {positionsList.length === 0 ? <p className="muted">No positions on the organogram yet. Add positions in Settings → People &amp; Access.</p> :
         <table className="data-table">
           <thead><tr><th>Position</th><th>Holder</th><th>Deputy</th><th>Acting (next in command)</th><th>Continuity plan</th></tr></thead>
@@ -812,7 +1012,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
                 <td>{p.holderName || <span className="muted">Vacant</span>}</td>
                 <td>{p.deputyName || <span className="muted">—</span>}</td>
                 <td>{p.actingName || p.deputyName || <span className="muted">—</span>}</td>
-                <td>{plan ? <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>Documented</span> : <button className="secondary" onClick={() => { setForm({ ...emptyPlan, positionId: String(p.id), keyRole: p.title }); setEditingId('new'); }}>Document</button>}</td>
+                <td>{plan ? <span className="badge success">Documented</span> : <button className="secondary" onClick={() => { setForm({ ...emptyPlan, positionId: String(p.id), keyRole: p.title }); setEditingId('new'); }}>Document</button>}</td>
               </tr>;
             })}
           </tbody>
@@ -846,6 +1046,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
           </tbody>
         </table>}
     </div>
+    </>}
 
     {editingId !== null && <div className="doc-drawer-overlay" onClick={() => setEditingId(null)}>
       <div className="doc-drawer" onClick={e => e.stopPropagation()}>
