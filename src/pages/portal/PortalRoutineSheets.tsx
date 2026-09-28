@@ -495,8 +495,14 @@ export function PortalDeconProgramme({ sectionId }: { sectionId?: number | null 
             <span className="rs-def-meta">
               <span className="badge">{String(row.effective_frequency ?? row.frequency).replace(/_/g, ' ')}</span>
               {row.effective_decontaminant && <span>{row.effective_decontaminant}</span>}
-              {row.is_excluded ? <span className="badge warning">not carried here — {row.exclusion_reason}</span> : null}
+              {row.is_excluded ? <span className="badge warning">not carried here</span> : null}
             </span>
+            {/* The reason is free text a supervisor wrote. It belongs on a line
+                of its own, where it wraps and reads as it was typed; inside a
+                badge it was title-cased and ran off the side of the page. */}
+            {row.is_excluded && row.exclusion_reason && (
+              <p className="rs-def-why"><strong>Why this unit does not carry it:</strong> {row.exclusion_reason}</p>
+            )}
             {row.method && <p className="rs-def-method">{row.method}</p>}
           </li>
         ))}
