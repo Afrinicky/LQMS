@@ -294,6 +294,9 @@ export function routineSheetRoutes() {
         // over. Offering it sooner is what froze charts: the sheet locked and
         // the days still to come could never be recorded.
         canVerify: mayVerify(req, sheet) && monthHasEnded(sheet.month),
+        // Putting a settled entry right is a separate right from signing the
+        // month off, and is not held back until the month has ended.
+        canAmend: mayVerify(req, sheet),
         // A month signed before it ended can be put back into use by the same
         // person who could sign it, which is how a frozen chart is recovered.
         canReopen: mayVerify(req, sheet) && (sheet.status === 'submitted' || signedEarly(sheet)),

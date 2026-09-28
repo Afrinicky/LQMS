@@ -105,6 +105,10 @@ check('and says why', /has not ended yet/.test(early.json?.error ?? ''), JSON.st
 check('the sheet is still open', (await j(`/routine-sheets/${sheetId}`, { token: A })).json?.sheet?.status === 'open');
 check('and the screen is not offered the signature either',
   (await j(`/routine-sheets/${sheetId}`, { token: A })).json?.permissions?.canVerify === false);
+// Holding the signature back until the month ends must not hold back the
+// correction of an entry already settled, which is a different right.
+check('but putting a settled entry right is still offered',
+  (await j(`/routine-sheets/${sheetId}`, { token: A })).json?.permissions?.canAmend === true);
 
 console.log('\n[2] So the chart keeps accepting readings all month');
 const charted = await j(`/routine-sheets/${sheetId}/cells`, { token: A, method: 'POST',
