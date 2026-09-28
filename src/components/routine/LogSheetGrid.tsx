@@ -151,7 +151,7 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
   const { sheet, rows, completeness, permissions } = data;
   const editable = Boolean(permissions?.canRecord) && !sheet.locked;
-  const mayAmend = Boolean(permissions?.canVerify);
+  const mayAmend = Boolean(permissions?.canAmend ?? permissions?.canVerify);
   const days = Array.from({ length: sheet.days }, (_, i) => i + 1);
   const daily = rows.filter(r => r.cadence !== 'weekly');
   const weekly = rows.filter(r => r.cadence === 'weekly');
@@ -168,58 +168,16 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
     : currentMonth ? today.getDate() : 0;
   const pmOpen = nowMinutes() >= (sheet.pmOpensAt ?? 15 * 60);
 
-  const body = (
-    <div className={`ls-wrap${compact && !expanded ? ' is-compact' : ''}`}>
-      <header className="ls-head">
-        <div>
-          <h4>{sheet.title}</h4>
-          <p className="ls-sub">
-            {sheet.sectionName ? `${sheet.sectionName} · ` : ''}{monthLabel(sheet.month)}
-            {sheet.subtitle ? ` · ${sheet.subtitle}` : ''}
-          </p>
-        </div>
-        <div className="ls-head-right">
-          <span className={`ls-status s-${sheet.status}`} title={SHEET_STATUS_HINTS[sheet.status]}>
-            {sheet.locked && <Lock size={11} />} {SHEET_STATUS_LABELS[sheet.status]}
-          </span>
-          <SheetActions sheet={sheet} editable={editable} onReload={load} onProblem={setProblem}
-            expanded={expanded} onToggleExpand={() => setExpanded(v => !v)} />
-        </div>
-      </header>
-
-      {sheet.locked && (
-        <div className="ls-locked">
-          <Lock size={12} />
-          <div className="ls-locked-text">
-            Signed {String(sheet.verified_at ?? '').slice(0, 10)}
-            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}.{' '}
-            {/* A month signed before it ended has days left to record, and the
-                sheet would otherwise sit frozen at whatever it said that day. */}
-            {permissions?.canReopen
-              ? `${monthLabel(sheet.month)} has not ended — put it back into use to record the rest of it.`
-              : 'Corrections require a nonconformity.'}
-            {sheet.verification_comments && <span className="ls-locked-note">{sheet.verification_comments}</span>}
-          </div>
-          {/* The signature itself, not just who typed their name. A verified
-              month is expected to carry it, on screen as on the paper form. */}
-          {sheet.signature?.image && (
-            <figure className="ls-sig">
-              <img src={sheet.signature.image} alt={`Signature of ${sheet.verifiedByName ?? sheet.signature.signer_name ?? 'the reviewer'}`} />
-              <figcaption>E-SIG-{sheet.signature.id}</figcaption>
-            </figure>
-          )}
-        </div>
-      )}
+  // The chart itself. Held apart from the rest of the sheet so the expanded
+  // window can show it on its own.
+  const chart = (
+    <>
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       {notice && (
         <p className="ls-breach-note">
           <AlertTriangle size={13} /> {notice}
           <button type="button" className="pq-link" onClick={() => setNotice(null)}>Dismiss</button>
         </p>
-      )}
-
-      {completeness.needsReview > 0 && (
-        <ExtractionReview sheetId={sheetId} count={completeness.needsReview} note={sheet.extraction_note} onDone={load} />
       )}
 
       <div className="ls-scroll" style={{ ['--ls-day' as string]: `${DAY_WIDTH}px` }}>
@@ -289,6 +247,56 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
       </div>
 
       <Legend />
+    </>
+  );
+
+  const body = (
+    <div className={`ls-wrap${compact && !expanded ? ' is-compact' : ''}`}>
+      <header className="ls-head">
+        <div>
+          <h4>{sheet.title}</h4>
+          <p className="ls-sub">
+            {sheet.sectionName ? `${sheet.sectionName} · ` : ''}{monthLabel(sheet.month)}
+            {sheet.subtitle ? ` · ${sheet.subtitle}` : ''}
+          </p>
+        </div>
+        <div className="ls-head-right">
+          <span className={`ls-status s-${sheet.status}`} title={SHEET_STATUS_HINTS[sheet.status]}>
+            {sheet.locked && <Lock size={11} />} {SHEET_STATUS_LABELS[sheet.status]}
+          </span>
+          <SheetActions sheet={sheet} editable={editable} onReload={load} onProblem={setProblem}
+            expanded={expanded} onToggleExpand={() => setExpanded(v => !v)} />
+        </div>
+      </header>
+
+      {sheet.locked && (
+        <div className="ls-locked">
+          <Lock size={12} />
+          <div className="ls-locked-text">
+            Signed {String(sheet.verified_at ?? '').slice(0, 10)}
+            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}.{' '}
+            {/* A month signed before it ended has days left to record, and the
+                sheet would otherwise sit frozen at whatever it said that day. */}
+            {permissions?.canReopen
+              ? `${monthLabel(sheet.month)} has not ended — put it back into use to record the rest of it.`
+              : 'Corrections require a nonconformity.'}
+            {sheet.verification_comments && <span className="ls-locked-note">{sheet.verification_comments}</span>}
+          </div>
+          {/* The signature itself, not just who typed their name. A verified
+              month is expected to carry it, on screen as on the paper form. */}
+          {sheet.signature?.image && (
+            <figure className="ls-sig">
+              <img src={sheet.signature.image} alt={`Signature of ${sheet.verifiedByName ?? sheet.signature.signer_name ?? 'the reviewer'}`} />
+              <figcaption>E-SIG-{sheet.signature.id}</figcaption>
+            </figure>
+          )}
+        </div>
+      )}
+      {completeness.needsReview > 0 && (
+        <ExtractionReview sheetId={sheetId} count={completeness.needsReview} note={sheet.extraction_note} onDone={load} />
+      )}
+
+      {chart}
 
       <TrendPanel trends={data.trends ?? []} />
 
@@ -351,13 +359,13 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
       </p>
       <div className="ls-expand" role="dialog" aria-modal="true" aria-label={sheet.title}
         onMouseDown={e => { if (e.target === e.currentTarget) setExpanded(false); }}>
-        {/* Resizable by its bottom-right corner, and it opens large enough that
-            a month of columns fits without scrolling on most screens. */}
+        {/* The chart and nothing else, filling the screen and resizable by its
+            bottom-right corner. */}
         <div className="ls-expand-panel">
           <button type="button" className="ls-expand-close" onClick={() => setExpanded(false)} aria-label="Close the window">
             <X size={15} />
           </button>
-          <div className="ls-expand-body">{body}</div>
+          <div className="ls-expand-body">{chart}</div>
         </div>
       </div>
     </>

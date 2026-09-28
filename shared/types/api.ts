@@ -764,7 +764,7 @@ export type LogSheetPayload = {
   sheet:LogSheet; rows:LogSheetRow[]; cells:LogSheetCell[];
   completeness:LogSheetCompleteness;
   trends?:SheetTrend[];
-  permissions?:{ canRecord:boolean; canVerify:boolean; canReopen?:boolean; canRaiseNc:boolean; tier:string };
+  permissions?:{ canRecord:boolean; canVerify:boolean; canAmend?:boolean; canReopen?:boolean; canRaiseNc:boolean; tier:string };
 };
 
 /** What came back from writing cells, including what was refused and why. */
