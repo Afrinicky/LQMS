@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, CheckCircle2, ClipboardList, Download, FileSpreadsheet,
-  FileWarning, History, Loader2, Lock, Paperclip, Printer, RefreshCw, ScanLine,
-  Signature, TrendingDown, TrendingUp, Trash2, Upload, X,
+  FileWarning, History, Loader2, Lock, Maximize2, Minimize2, Paperclip, Printer,
+  RefreshCw, ScanLine, Signature, TrendingDown, TrendingUp, Trash2, Upload, X,
 } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -87,6 +87,9 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
   const [busy, setBusy] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [showVerify, setShowVerify] = useState(false);
+  // The grid in a window of its own. Thirty-one day columns on a laptop leaves
+  // a strip a few cells wide; the same sheet, unchanged, gets the screen.
+  const [expanded, setExpanded] = useState(false);
   const { hasSignature } = useSignatureOnFile();
 
   const load = useCallback(async () => {
@@ -96,6 +99,20 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
   }, [sheetId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Escape closes the window, unless it is closing a cell that is being typed
+  // into — the same key cancels an edit, and the edit is the nearer thing.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      setExpanded(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [expanded]);
 
   const cellIndex = useMemo(() => {
     const map = new Map<string, LogSheetCell>();
@@ -151,8 +168,8 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
     : currentMonth ? today.getDate() : 0;
   const pmOpen = nowMinutes() >= (sheet.pmOpensAt ?? 15 * 60);
 
-  return (
-    <div className={`ls-wrap${compact ? ' is-compact' : ''}`}>
+  const body = (
+    <div className={`ls-wrap${compact && !expanded ? ' is-compact' : ''}`}>
       <header className="ls-head">
         <div>
           <h4>{sheet.title}</h4>
@@ -165,7 +182,8 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
           <span className={`ls-status s-${sheet.status}`} title={SHEET_STATUS_HINTS[sheet.status]}>
             {sheet.locked && <Lock size={11} />} {SHEET_STATUS_LABELS[sheet.status]}
           </span>
-          <SheetActions sheet={sheet} editable={editable} onReload={load} onProblem={setProblem} />
+          <SheetActions sheet={sheet} editable={editable} onReload={load} onProblem={setProblem}
+            expanded={expanded} onToggleExpand={() => setExpanded(v => !v)} />
         </div>
       </header>
 
@@ -174,7 +192,12 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
           <Lock size={12} />
           <div className="ls-locked-text">
             Signed {String(sheet.verified_at ?? '').slice(0, 10)}
-            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Corrections require a nonconformity.
+            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}.{' '}
+            {/* A month signed before it ended has days left to record, and the
+                sheet would otherwise sit frozen at whatever it said that day. */}
+            {permissions?.canReopen
+              ? `${monthLabel(sheet.month)} has not ended — put it back into use to record the rest of it.`
+              : 'Corrections require a nonconformity.'}
             {sheet.verification_comments && <span className="ls-locked-note">{sheet.verification_comments}</span>}
           </div>
           {/* The signature itself, not just who typed their name. A verified
@@ -271,21 +294,26 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
       <MonthSummary data={data} />
 
-      {!hideVerification && permissions?.canVerify && !sheet.locked && (
+      {!hideVerification && (permissions?.canVerify || permissions?.canReopen) && (
         <div className="ls-verify-bar">
-          {/* Said before the form is filled in rather than after it is submitted:
-              the server refuses to sign for anybody with no signature on file. */}
-          <button type="button" className="ls-primary" disabled={hasSignature === false}
-            title={hasSignature === false ? NO_SIGNATURE_HINT : undefined}
-            onClick={() => setShowVerify(true)}>
-            <Signature size={14} /> Review and sign off {monthLabel(sheet.month)}
-          </button>
-          {hasSignature === false && <span className="ls-nosig">{NO_SIGNATURE_HINT}</span>}
-          {sheet.status === 'submitted' && (
+          {/* Signing is only offered once the month is over. Offered sooner, it
+              locked the sheet against the days still to come. */}
+          {permissions?.canVerify && !sheet.locked && <>
+            {/* Said before the form is filled in rather than after it is
+                submitted: the server refuses to sign for anybody with no
+                signature on file. */}
+            <button type="button" className="ls-primary" disabled={hasSignature === false}
+              title={hasSignature === false ? NO_SIGNATURE_HINT : undefined}
+              onClick={() => setShowVerify(true)}>
+              <Signature size={14} /> Review and sign off {monthLabel(sheet.month)}
+            </button>
+            {hasSignature === false && <span className="ls-nosig">{NO_SIGNATURE_HINT}</span>}
+          </>}
+          {permissions?.canReopen && (
             <button type="button" className="pq-link" disabled={busy === 'reopen'}
               onClick={async () => {
                 setBusy('reopen');
-                try { setData(await api(`/routine-sheets/${sheetId}/reopen`, { method: 'POST' })); }
+                try { setData(await api(`/routine-sheets/${sheetId}/reopen`, { method: 'POST' })); onChanged?.(); }
                 catch (e) { setProblem(errorText(e)); } finally { setBusy(null); }
               }}>Put it back into use</button>
           )}
@@ -310,6 +338,29 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
           onDone={next => { setData(next); setShowVerify(false); onChanged?.(); }} />
       )}
     </div>
+  );
+
+  // Rendered in one place or the other, never both: the sheet keeps its state
+  // either way, so expanding it costs nothing and loses nothing.
+  if (!expanded) return body;
+  return (
+    <>
+      <p className="ls-expanded-note">
+        <Maximize2 size={13} /> Open in a larger window.
+        <button type="button" className="pq-link" onClick={() => setExpanded(false)}>Bring it back</button>
+      </p>
+      <div className="ls-expand" role="dialog" aria-modal="true" aria-label={sheet.title}
+        onMouseDown={e => { if (e.target === e.currentTarget) setExpanded(false); }}>
+        {/* Resizable by its bottom-right corner, and it opens large enough that
+            a month of columns fits without scrolling on most screens. */}
+        <div className="ls-expand-panel">
+          <button type="button" className="ls-expand-close" onClick={() => setExpanded(false)} aria-label="Close the window">
+            <X size={15} />
+          </button>
+          <div className="ls-expand-body">{body}</div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -778,9 +829,10 @@ function TrendPanel({ trends }: { trends: SheetTrend[] }) {
 /* ----------------------------------------------------------------------------
    Paper in, paper out
    ------------------------------------------------------------------------- */
-function SheetActions({ sheet, editable, onReload, onProblem }: {
+function SheetActions({ sheet, editable, onReload, onProblem, expanded, onToggleExpand }: {
   sheet: LogSheetPayload['sheet']; editable: boolean;
   onReload: () => void; onProblem: (message: string) => void;
+  expanded?: boolean; onToggleExpand?: () => void;
 }) {
   const { can } = usePermissions();
   // Taking a whole month out to Excel, or loading one back in, is not the same
@@ -829,6 +881,12 @@ function SheetActions({ sheet, editable, onReload, onProblem }: {
 
   return (
     <div className="ls-actions">
+      {onToggleExpand && (
+        <button type="button" className="pq-link" onClick={onToggleExpand}
+          title={expanded ? 'Back to the page' : 'Open the sheet in a larger window'}>
+          {expanded ? <><Minimize2 size={12} /> Close</> : <><Maximize2 size={12} /> Expand</>}
+        </button>
+      )}
       <button type="button" className="pq-link" onClick={() => openAuthed(`/routine-sheets/${sheet.id}/print`)}
         title="The sheet as the laboratory knows it, ready to print or save as PDF">
         {busy?.endsWith('/print') ? <Loader2 size={12} className="pd-spin" /> : <Printer size={12} />} Print

@@ -40,6 +40,7 @@
     "check:bin-card": "node scripts/bin-card-check.mjs",
     "check:units": "node scripts/unit-and-placement-check.mjs",
     "check:monitoring": "node scripts/monitoring-check.mjs",
+    "check:chart-freeze": "node scripts/chart-freeze-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

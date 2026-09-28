@@ -1134,6 +1134,29 @@ function defaultSlotTime(db: DB, slot: string | undefined): string {
    Closing the month
    ========================================================================= */
 
+/** Has the month this sheet covers finished? */
+export function monthHasEnded(month: string): boolean {
+  return String(month) < new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * A signature applied before the month it covers had ended.
+ *
+ * This is the state that froze charts. Verifying locks the sheet, and nothing
+ * unlocks it — so a supervisor who signed on the 22nd left the remaining days
+ * of the month unrecordable for good, and the bench watched a chart that had
+ * simply stopped accepting readings. The signature was for days that had not
+ * happened yet, which is the part that makes it undoable: withdrawing it and
+ * putting the month back into use is a correction, not a re-opening of a
+ * finished record.
+ *
+ * A month that has genuinely ended stays final when it is signed, which is the
+ * whole point of signing it.
+ */
+export function signedEarly(sheet: any): boolean {
+  return sheet?.status === 'verified' && !monthHasEnded(sheet.month);
+}
+
 export function submitSheet(db: DB, sheetId: number, staffId: number | null): void {
   const sheet = db.prepare('SELECT * FROM routine_log_sheets WHERE id = ?').get(sheetId) as any;
   if (!sheet) throw new Error('Log sheet not found');
@@ -1145,9 +1168,16 @@ export function submitSheet(db: DB, sheetId: number, staffId: number | null): vo
 export function reopenSheet(db: DB, sheetId: number): void {
   const sheet = db.prepare('SELECT * FROM routine_log_sheets WHERE id = ?').get(sheetId) as any;
   if (!sheet) throw new Error('Log sheet not found');
-  if (sheetIsLocked(sheet.status)) throw new Error('A verified sheet cannot be reopened. Raise a nonconformity against the month instead.');
+  if (sheetIsLocked(sheet.status) && !signedEarly(sheet)) {
+    throw new Error('A verified sheet cannot be reopened. Raise a nonconformity against the month instead.');
+  }
+  // A signature that covered days which had not happened is withdrawn with the
+  // reopening. The signature record itself is kept — it was made, and the
+  // audit trail says by whom and when it was taken back.
   db.prepare(`UPDATE routine_log_sheets SET status = 'open', submitted_by_staff_id = NULL,
-      submitted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(sheetId);
+      submitted_at = NULL, verified_by_staff_id = NULL, verified_at = NULL,
+      verification_signature_id = NULL, verification_comments = NULL,
+      updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(sheetId);
 }
 
 /**
@@ -1198,6 +1228,12 @@ export function verifySheet(db: DB, sheetId: number, options: { staffId: number 
   const sheet = db.prepare('SELECT * FROM routine_log_sheets WHERE id = ?').get(sheetId) as any;
   if (!sheet) throw new Error('Log sheet not found');
   if (sheetIsLocked(sheet.status)) throw new Error('This sheet has already been verified.');
+  // Signing closes the month for good, so it cannot happen while the month is
+  // still running: the days left in it would be unrecordable, and the chart
+  // would sit frozen at whatever it said on the day it was signed.
+  if (!monthHasEnded(sheet.month)) {
+    throw new Error(`${monthLabel(sheet.month)} has not ended yet. Signing it now would close the chart for the days still to be recorded.`);
+  }
   db.prepare(`UPDATE routine_log_sheets SET status = 'verified', verified_by_staff_id = ?, verified_at = CURRENT_TIMESTAMP,
       verification_signature_id = ?, verification_comments = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .run(options.staffId, options.signatureId, options.comments ?? null, sheetId);
