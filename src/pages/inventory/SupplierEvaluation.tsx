@@ -79,7 +79,6 @@ function EvaluationList({ suppliers }: { suppliers: Supplier[] }) {
     <div className="workspace-head">
       <div>
         <h3>Supplier evaluations</h3>
-        <p className="muted">Each evaluation is scored against a framework of questions, concluded with a rating, and printable. Raising one is a manager action.</p>
       </div>
       {mayEvaluate && <div className="workspace-actions">
         <button type="button" onClick={() => setCreating(v => !v)}><Plus size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />New evaluation</button>
@@ -317,7 +316,6 @@ function Conclusion({ record, summary, mayEvaluate, onError, onNotice, onChanged
 
     {closed && mayEvaluate && !record.reviewed_at && <section className="signoff-card">
       <h4>Review</h4>
-      <p className="muted">A second pair of eyes, recorded as you. The reviewer cannot be the evaluator.</p>
       <div className="form-grid">
         <label className="wide">Reviewer's comments<TextField as="textarea" rows={2} value={review.reviewerComments} onValue={nextValue => setReview({ reviewerComments: nextValue })} /></label>
         <button type="button" onClick={() => void act('/review', review, 'Review recorded.')}>Countersign as reviewer</button>
@@ -357,7 +355,7 @@ function FrameworkList() {
 
   return <>
     <div className="workspace-head">
-      <div><h3>Evaluation frameworks</h3><p className="muted">What a supplier is judged against — a set of questions grouped by theme, each with the standard for an acceptable answer.</p></div>
+      <div><h3>Evaluation frameworks</h3></div>
       {mayCreate && <div className="workspace-actions"><button type="button" onClick={() => setCreating(v => !v)}><Plus size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />New framework</button></div>}
     </div>
     {error && <Notice kind="error">{error}</Notice>}

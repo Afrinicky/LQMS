@@ -95,11 +95,6 @@ export default function EquipmentAnalyserTab({ equipment }: { equipment: Equipme
         <div className="pp-head">
           <div>
             <h3><Cable size={16} /> Analyser transmission</h3>
-            <p>
-              Which of these instruments send their results straight into SECHLIMS, and what has arrived. Control
-              runs go to the IQC board for the bench to accept; patient results can be carried on to LHIMS for the
-              analysers its own middleware never covered.
-            </p>
           </div>
           {canConfigure && (
             <Link className="pq-link" to="/settings/analysers"><Settings2 size={13} /> Set up links</Link>
@@ -110,12 +105,6 @@ export default function EquipmentAnalyserTab({ equipment }: { equipment: Equipme
           <ShieldCheck size={15} />
           <div>
             <strong>A transmission that already works is never touched.</strong>
-            <p>
-              An analyser whose link belongs to the LHIMS middleware is recorded here so the system knows to stay
-              away from it — SECHLIMS will not bind its port or dial it, and says so rather than trying. That
-              analyser still reaches SECHLIMS, by reading the middleware&rsquo;s own log file, which cannot affect
-              the connection either way.
-            </p>
           </div>
         </div>
 
@@ -198,10 +187,6 @@ export default function EquipmentAnalyserTab({ equipment }: { equipment: Equipme
       {unlinked.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <h4>Instruments with no link</h4>
-          <p className="muted">
-            Results from these are entered by hand. An analyser that speaks TCP/IP and transmits nowhere today is
-            the safe one to connect next — nothing existing is affected by taking it.
-          </p>
           <ul className="il-unlinked">
             {unlinked.map(item => (
               <li key={item.id}>

@@ -118,7 +118,6 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
     <div className="workspace-head">
       <div>
         <h3>Appraisal cycles</h3>
-        <p className="muted">One period, one template, one closing date. Opening a cycle raises an appraisal for everybody in scope, so nobody is missed and the register shows who is outstanding.</p>
       </div>
       {mayCreate && <div className="workspace-actions">
         <button type="button" onClick={() => setCreatingCycle(v => !v)}>
@@ -182,7 +181,6 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
     <div className="workspace-head" style={{ marginTop: 26 }}>
       <div>
         <h3>Appraisal templates</h3>
-        <p className="muted">What everybody in a job is asked about, and how much each answer counts towards the overall figure.</p>
       </div>
       {mayCreate && <div className="workspace-actions">
         <button type="button" onClick={() => setCreatingTemplate(v => !v)}>

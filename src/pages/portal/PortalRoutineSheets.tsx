@@ -393,10 +393,6 @@ function NewEnvironmentalLog({ month, onClose, onCreated }: {
         <strong>Register something new to chart</strong>
         <button type="button" className="pq-link" onClick={onClose}>Cancel</button>
       </div>
-      <p className="muted">
-        It becomes your unit&rsquo;s to read, and this month&rsquo;s chart opens as soon as it is saved.
-        A reading outside the range you set here raises an excursion the moment it is entered.
-      </p>
 
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
 
@@ -480,10 +476,6 @@ export function PortalDeconProgramme({ sectionId }: { sectionId?: number | null 
       <div className="pp-head">
         <div>
           <h3><ClipboardList size={16} /> What your unit decontaminates</h3>
-          <p>
-            The laboratory-wide programme every unit carries, plus anything your unit added.
-            A padlock means the frequency was set for the whole laboratory and your unit supervisor adjusts it, not you.
-          </p>
         </div>
       </div>
       <ul className="rs-defs">

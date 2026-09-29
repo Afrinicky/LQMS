@@ -125,7 +125,6 @@ export function Home() {
           <section className="register-prompt card" role="alert">
             <div>
               <h2>Register your laboratory</h2>
-              <p>Welcome! Before you begin, register your laboratory — its legal identity and documents, quality manual, and the quality policy and objectives for ISO 15189:2022. This is a one-time step you can revisit any time.</p>
             </div>
             <button type="button" onClick={() => navigate('/settings/laboratory')}>Register laboratory <ArrowRight size={16} /></button>
           </section>
@@ -154,7 +153,6 @@ export function Home() {
             <div className="empty-state">
               <span className="es-ico"><PackageSearch size={26} /></span>
               <h3>No workspaces assigned yet</h3>
-              <p>Your account has not been given access to any module. Ask a System Administrator to assign your role and permissions under Settings → People &amp; Access.</p>
             </div>
           </div>
         )}
@@ -287,7 +285,6 @@ export function Dashboard() {
       <PageHeader
         eyebrow="Laboratory overview"
         title={firstName ? `Good day, ${firstName}` : 'Main Dashboard'}
-        subtitle="The laboratory's quality picture — every figure opens the record behind it. Your own tasks, inbox and record are in My Portal."
         actions={<button className="secondary" type="button" onClick={() => navigate('/my-portal')}><IdCard size={16} /> My Portal</button>}
       />
 
@@ -322,9 +319,7 @@ export function ModulePage({ moduleKey, title, eyebrow = 'Module', placeholder =
   if (!isEnabled(moduleKey)) return <DisabledModule />;
   return (
     <div className="module-page">
-      <PageHeader title={title} eyebrow={eyebrow} subtitle={placeholder
-        ? 'This workspace is part of the SECH_LIMS foundation and will gain full workflows in a later phase.'
-        : 'Connected to the host API and the audit-ready data model.'} />
+      <PageHeader title={title} eyebrow={eyebrow} />
       <div className="card">
         <div className="empty-state">
           <span className="es-ico"><PackageSearch size={26} /></span>

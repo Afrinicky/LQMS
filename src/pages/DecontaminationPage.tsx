@@ -43,8 +43,7 @@ export default function DecontaminationPage({ embedded }: { embedded?: boolean }
   return (
     <div>
       {!embedded && (
-        <PageHeader eyebrow="Facilities and Safety" title="Decontamination"
-          subtitle="The bench and environment decontamination programme, and the monthly logs it produces." />
+        <PageHeader eyebrow="Facilities and Safety" title="Decontamination" />
       )}
       {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
 
@@ -105,11 +104,6 @@ function DeconLogs({ onError }: { onError: (m: string | null) => void }) {
       <div className="pp-head">
         <div>
           <h3><Droplets size={16} /> Decontamination logs</h3>
-          <p>
-            One log per decontamination, per month. Anyone in the unit records on it; at the end of the month
-            the unit supervisor reads it, signs it and it is filed. A day left blank stays blank — that is
-            what the log is for.
-          </p>
         </div>
         <div className="rs-month">
           <button type="button" className="pq-link" onClick={() => shiftMonth(-1)}><ChevronLeft size={14} /></button>
@@ -125,11 +119,7 @@ function DeconLogs({ onError }: { onError: (m: string | null) => void }) {
 
       {loading ? <p className="muted">Loading…</p>
         : !index?.sheets.length ? (
-          <p className="muted">
-            Nothing is set up for this unit yet. Open &ldquo;Add from the standard set&rdquo; and adopt the
-            laboratory-wide programme — benches, floors, sinks, fans, cobwebs — then adjust it to how this
-            laboratory actually works.
-          </p>
+          <p className="muted">Nothing is set up for this unit yet.</p>
         ) : (
           <div className="rs-split">
             <div className="rs-list"><SheetPicker sheets={index.sheets} activeId={activeId} onPick={setActiveId} /></div>
@@ -203,10 +193,6 @@ function DeconProgramme({ onError, canEdit }: { onError: (m: string | null) => v
       <div className="pp-head">
         <div>
           <h3>The decontamination programme</h3>
-          <p>
-            Laboratory-wide decontaminations are carried by every unit; a unit supervisor sets their own frequency for
-            their room and adds whatever else it needs. Changing a laboratory-wide one changes it everywhere.
-          </p>
         </div>
         <div className="pp-head-actions">
           <label className="inline">
@@ -445,11 +431,6 @@ function DeconFrameworks({ onError, canAdopt }: { onError: (m: string | null) =>
       <div className="pp-head">
         <div>
           <h3><Sparkles size={16} /> The standard set</h3>
-          <p>
-            The decontaminations most laboratories run, with sensible frequencies and the method written out.
-            Tick what applies here and adopt them; every one can be edited afterwards, and a unit can run any of
-            them at its own frequency. Nothing here overrides your own SOP — it is a starting point, not a rule.
-          </p>
         </div>
         {canAdopt && chosen.size > 0 && (
           <button type="button" disabled={busy} onClick={() => void adopt()}>

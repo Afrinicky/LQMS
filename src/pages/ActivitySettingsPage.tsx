@@ -185,7 +185,6 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
         <div className="di-head">
           <div>
             <h3><ClipboardList size={16} /> Unit activities</h3>
-            <p>The recurring work each unit does. Each one lands on whoever the duty roster places in that unit — never on a fixed name unless you say so.</p>
           </div>
           <div className="head-actions">
             {mayCreate && <button type="button" className="secondary" onClick={() => void loadProposals()} disabled={busy}>
@@ -206,7 +205,6 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
             {proposals.length === 0
               ? <p className="muted">Nothing new to suggest — every registered asset, instrument schedule and monitoring parameter already has an activity.</p>
               : <>
-                <p className="muted">Your environmental assets, equipment maintenance programmes and monitoring parameters each imply an activity. Accept them and the bench sees them today.</p>
                 <ul className="proposal-list">
                   {proposals.map(p => (
                     <li key={p.sourceKey}>
@@ -435,11 +433,6 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
     <>
       <div className="card">
         <h3><Lightbulb size={16} /> Make it easy and it gets done</h3>
-        <p>
-          Staff comply with what is simple. An activity that keeps being missed is usually awkward to perform or awkward to record,
-          so it is treated here as a design problem to fix rather than a discipline problem to chase. Flag anything that needs
-          redesigning; the flag travels with the activity so everybody working on it can see it is being simplified.
-        </p>
         {error && <Notice kind="error">{error}</Notice>}
         {notice && <Notice kind="success">{notice}</Notice>}
       </div>
@@ -447,7 +440,7 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
       <div className="card">
         <h3>Flagged for redesign</h3>
         {flagged.length === 0
-          ? <p className="muted">Nothing is flagged. Anything below can be flagged in one click.</p>
+          ? <p className="muted">Nothing is flagged.</p>
           : <table className="data-table">
             <thead><tr><th>Activity</th><th>Status</th><th>Why</th><th>Ease</th><th /></tr></thead>
             <tbody>
@@ -588,11 +581,6 @@ function SchedulingPolicyTab() {
   return (
     <div className="card">
       <h3>Scheduling policy</h3>
-      <p>
-        When each schedule must exist, and what the system does when it does not. The duty roster and unit reassignment belong to the
-        laboratory manager and quality manager; the bench schedules belong to the unit supervisors and are due later, because they follow
-        the unit assignments rather than preceding them.
-      </p>
       {error && <Notice kind="error">{error}</Notice>}
       {notice && <Notice kind="success">{notice}</Notice>}
 
@@ -619,10 +607,6 @@ function SchedulingPolicyTab() {
 
         <fieldset className="policy-section">
           <legend>Unit rotation</legend>
-          <p className="muted">
-            How this laboratory staffs its units. Some keep people in one unit permanently; others rotate them, and may or may not move
-            the unit supervisors on the same cadence. This sets the model — the reassignment schedule and acting-supervisor tools follow it.
-          </p>
           <label className="inline"><input type="checkbox" checked={policy.rotation_enabled === 1} onChange={flag('rotation_enabled')} disabled={!mayEdit} />
             <span>This laboratory rotates staff between units (leave off to keep staff in one unit permanently)</span></label>
           {policy.rotation_enabled === 1 && <>
@@ -728,7 +712,6 @@ function ReminderSounds() {
       <div className="di-head">
         <div>
           <h3><Volume2 size={16} /> Reminder sounds</h3>
-          <p>What the desktop app and the phone play when work lands on your list. Sounds are generated on the device, so they work offline and sound the same everywhere.</p>
         </div>
         {mayEditLaboratory && (
           <div className="head-actions">
@@ -740,7 +723,6 @@ function ReminderSounds() {
 
       {error && <Notice kind="error">{error}</Notice>}
       {notice && <Notice kind="success">{notice}</Notice>}
-      {scope === 'user' && !data.user && <p className="muted">You are currently following the laboratory default. Changing anything here creates your own settings.</p>}
 
       <div className="form-grid">
         <label className="inline"><input type="checkbox" checked={draft.enabled !== 0} onChange={e => setDraft({ ...draft, enabled: e.target.checked ? 1 : 0 })} />
@@ -763,7 +745,6 @@ function ReminderSounds() {
         <label>Quiet until
           <input type="time" value={String(draft.quiet_hours_end ?? '')} onChange={e => setDraft({ ...draft, quiet_hours_end: e.target.value })} /></label>
       </div>
-      <p className="muted">Quiet hours silence everything except a critical alert — a failing freezer still makes a noise at three in the morning.</p>
 
       <table className="data-table">
         <thead><tr><th>When</th><th>Sound</th><th /></tr></thead>
@@ -812,11 +793,6 @@ export function ActivitySettingsPage() {
     <div>
       <div className="card">
         <h3>Unit Activities &amp; Reminders</h3>
-        <p>
-          Everything a unit is supposed to do on a repeating basis — environmental charting, equipment checks, controls, reagent changes,
-          cleaning — defined once here and then placed, every day, on whoever the duty roster puts in that unit. Leadership sees the same
-          list as oversight; the to-do itself stays with the people on duty.
-        </p>
       </div>
 
       <div className="tabs">

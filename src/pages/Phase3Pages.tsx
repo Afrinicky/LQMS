@@ -370,7 +370,7 @@ export function EquipmentPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
+    <PageHeader eyebrow="Equipment Management" title="Equipment Management" />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Analyser Sync', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
@@ -517,7 +517,7 @@ export function EquipmentPage() {
 
     {tab === 'Equipment Files' && <EquipmentFilesTab equipment={equipment} sections={sections} departments={departments} setError={setError} onChanged={() => { void reloadSelected(); }} />}
 
-    {tab === 'Reports placeholder' && <div className="card"><p>Reporting and exports for equipment will be added in a later phase.</p></div>}
+    {tab === 'Reports placeholder' && <div className="card"></div>}
   </div>;
 }
 
@@ -658,7 +658,6 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
 
     {showDecommission && !item.decommissioned && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }}>
       <h4 style={{ marginTop: 0 }}>Decommission &amp; safe disposal</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Confirms decontamination and captures the disposal method. On save the item is retired and the record appears at the top of the profile.</p>
       <div className="form-grid">
         <label>Date decommissioned<input type="date" value={decomForm.decommissionedAt} onChange={e => setDecomForm({ ...decomForm, decommissionedAt: e.target.value })} required /></label>
         <label>Decommissioned by<select value={decomForm.decommissionedByStaffId} onChange={e => setDecomForm({ ...decomForm, decommissionedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -863,7 +862,6 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
 
     {showConfig && <div className="card" style={{ background: 'var(--surface-2)' }}>
       <h4 style={{ marginTop: 0 }}>Checklist questions</h4>
-      <p className="muted" style={{ marginTop: 0 }}>These questions are yours to edit — change the wording, add your own, or retire ones you don't use. They are starter content only.</p>
       <table className="data-table"><thead><tr><th>#</th><th>Question</th><th></th></tr></thead><tbody>
         {items.map((it, i) => <tr key={it.id}>
           <td>{i + 1}</td>
@@ -964,7 +962,6 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
   const today = new Date().toISOString().slice(0, 10);
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Reference standards &amp; certified reference materials</h3>
-    <p className="muted" style={{ marginTop: 0 }}>The reference materials and instruments (certified thermometer, tachometer, CRMs) that underpin in-house calibration and metrological traceability.</p>
     {/* POST /equipment/reference-standards — the maintenance and calibration
         right, which is what the server asks for. */}
     {can('equipment.maintenance', 'create') && <form className="form" onSubmit={submit}>
@@ -1049,12 +1046,10 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0 }}>Maintenance records — Excel</h3>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Export all logged maintenance to Excel, or bulk-import maintenance records from a spreadsheet (rows are matched to equipment by their identifier). Download the template for the exact columns.</p>
       <XlsxToolbar module="equipment.maintenance" exportPath="/equipment/maintenance/export" templatePath="/equipment/maintenance/template" importPath="/equipment/maintenance/import" exportName="Equipment_Maintenance_Records.xlsx" onImported={() => { loadDue(); if (equipId) loadForEquip(equipId); onChanged(); }} />
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Due &amp; overdue</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Every routine maintenance and servicing schedule that is due within 30 days or overdue. Log it done in one click.</p>
       {due.length === 0 ? <p className="muted">Nothing due.</p> : <table className="table"><thead><tr><th>Equipment</th><th>Type</th><th>Frequency</th><th>Due</th><th></th></tr></thead><tbody>
         {due.map(s => {
   const { can } = usePermissions(); const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id}>
@@ -1176,7 +1171,6 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
   return <div>
     <div className="card">
       <h3>Report an equipment adverse event</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Reportable incidents are nonconformities: a linked NC is raised automatically. Investigation, corrective action, follow-up, retrospective impact and external reporting are captured on the record.</p>
       {/* An equipment adverse event has its own right. Close enough to a
           safety incident to explain the copy-paste, and not the same thing. */}
       {can('equipment.adverse', 'create') && <form className="form" onSubmit={submit}>
@@ -1312,12 +1306,6 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
   return <div>
     <div className="card">
       <h3>Record training &amp; competence on equipment</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        The trainer can be one of our own staff or somebody from outside — the engineer who installed it, the
-        supplier&apos;s application specialist. Whatever is recorded here lands on the person&apos;s own training file
-        as well, so it does not have to be entered twice. When they are competent and authorised, the competency
-        assessment and technical authorisation are created in Personnel Management at the same time.
-      </p>
       {notice && <Notice kind="success">{notice}</Notice>}
       {can('equipment.training', 'create') && <form className="form" onSubmit={submit}>
         <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
@@ -1434,7 +1422,6 @@ function EquipmentFilesTab({ equipment, sections, departments, setError, onChang
     <div className="section-head"><h3 style={{ margin: 0 }}>Equipment files</h3>
       <select value={equipId} onChange={e => setEquipId(e.target.value)} style={{ maxWidth: 320 }}><option value="">Select equipment…</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select>
     </div>
-    <p className="muted" style={{ marginTop: 0 }}>Documents added here are created as controlled documents in <strong>Documents &amp; Records</strong> and linked to the equipment, so an update in either module is reflected in both.</p>
     {!equipId ? <p className="muted">Select an equipment item to view and add its files.</p> : <>
       {/* Two rights, because this form does two things: it authors a
           controlled document (POST /documents) and attaches it to the
@@ -1799,7 +1786,7 @@ export function InventoryPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, stock items, receiving, issuing, stock counts and expiry control." />
+    <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {notice && <Notice kind="success" className="card" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ flex: 1 }}>{notice}</span>
@@ -1851,7 +1838,6 @@ export function InventoryPage() {
           {can('supplier_inventory', 'print') && <button type="button" className="secondary" title="Print Code 128 labels — each item's own barcode, whether the product's or one SECH_LIMS generated" onClick={() => printLabelSheet(itemRows.map(it => ({ barcodeValue: effectiveBarcode(it), title: it.name, lines: [effectiveBarcode(it), it.storage_path || it.category || ''].filter(Boolean) })), { widthMm: 50, heightMm: 25, title: 'Stock barcode labels' })}>🏷️ Print barcode labels</button>}
         </div>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Rows are matched on item code — a code the register already holds is updated, a blank one is created. Export first, edit that file, import it back.</p>
       {regResult && <Notice kind="success">
         Import complete — <strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated, <strong>{regResult.skipped}</strong> skipped
         {regResult.errors.length > 0 && <ul className="link-list">{regResult.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}
@@ -1996,10 +1982,6 @@ export function InventoryPage() {
     {tab === 'Receiving' && recvTab === 'Goods receipt' && <div>
       <div className="card">
         <h3>Book in a delivery</h3>
-        <p className="muted" style={{ marginTop: 0 }}>
-          A delivery is booked in against its lot and expiry — the level traceability runs at. Scanning the box
-          fills in the product, the lot and the expiry.
-        </p>
         <div style={{ margin: '0 0 12px' }}>
           <BarcodeScanner placeholder="Scan the box to fill this form…" autoFocus={false} onScan={scanForReceipt} />
           {receiptNote && <Notice kind="success" style={{ marginTop: 8 }}>{receiptNote}</Notice>}
@@ -2063,7 +2045,6 @@ export function InventoryPage() {
               lines: [b.batch_number ? `Batch ${b.batch_number}` : '', b.expiry_date ? `Exp ${String(b.expiry_date).slice(0, 10)}` : ''].filter(Boolean),
             })), { widthMm: 50, heightMm: 25, title: 'Batch labels' })}>🏷️ Print batch labels</button>}
         </div>
-        <p className="muted" style={{ marginTop: 0 }}>A delivery is quarantined until it has been inspected and accepted. Until then it cannot be issued — only discarded or returned. Stock is issued earliest-expiry-first.</p>
         {batches.length === 0 ? <p className="muted">Nothing has been received yet.</p> : <>
           <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
             <th>Item</th><th>Batch / lot</th><th>Received from</th><th>Available</th><th>Received</th><th>Expires</th><th>Acceptance</th><th className="reg-actions-col"></th>
@@ -2246,7 +2227,6 @@ export function InventoryPage() {
             </>}
           </div>
         </div>
-        <p className="muted" style={{ marginTop: 0 }}>Rows are matched on supplier code — a code the register already holds is updated, a blank one is created.</p>
         {suppliers.length === 0 ? <p className="muted">No suppliers registered yet.</p> : supplierRows.length === 0 ? <p className="muted">Nothing matches “{supplierQuery}”.</p> :
           <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
             <th>Supplier</th><th>Contact</th><th>Supplies</th><th>Items</th><th>Evaluation</th><th>Status</th><th className="reg-actions-col"></th>
@@ -2273,7 +2253,6 @@ export function InventoryPage() {
 
       {supplierTab === 'New registration' && <div className="card">
         <h3>Register a supplier</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Whoever supplies reagents, consumables or a service that affects a result belongs on this register, with the evaluation the laboratory's procedure requires.</p>
         {can('supplier_inventory.suppliers', 'create') && <form className="form" onSubmit={submitSupplier}>
           <label>Name<TextField value={supplierForm.name} onValue={nextValue => setSupplierForm({ ...supplierForm, name: nextValue })} required /></label>
           <label>Contact person<TextField value={supplierForm.contactPerson} onValue={nextValue => setSupplierForm({ ...supplierForm, contactPerson: nextValue })} /></label>
@@ -2325,7 +2304,6 @@ export function InventoryPage() {
 
       {supplierTab === 'Management' && <div className="card">
         <h3>Who is due, and who is not being watched</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Monitoring is the part that slips. This is the same register, sorted by what needs doing.</p>
         {suppliers.length === 0 ? <p className="muted">No suppliers registered yet.</p> : <>
           <KpiStrip items={[
             { label: 'Suppliers', value: suppliers.length },
@@ -2912,7 +2890,6 @@ function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
       {can('supplier_inventory.stock', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('withdraw')}>
         {working === 'withdraw' ? 'Withdrawing…' : 'Withdraw from the register'}
       </button>}
-      <p className="muted">It leaves the working register. Every batch and movement stays on the record.</p>
       {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" className="danger" disabled={!!working || reason.trim().length < 8}
         onClick={() => void run('delete', confirming)}>
         {working === 'delete' ? 'Erasing…' : confirming ? `Yes — erase it and its ${history} record${history === 1 ? '' : 's'}` : 'Erase permanently'}
@@ -3044,7 +3021,6 @@ function SupplierRemovalModal({ impact, onClose, onDone, setError }: {
       {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('suspend')}>
         {working === 'suspend' ? 'Suspending…' : 'Suspend them'}
       </button>}
-      <p className="muted">They stop being offered for new orders. Everything they supplied keeps their name.</p>
       {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" className="danger" disabled={!!working || reason.trim().length < 8} onClick={() => void run('delete', confirming)}>
         {working === 'delete' ? 'Erasing…' : confirming ? 'Yes — erase them' : 'Erase permanently'}
       </button>}
@@ -3126,7 +3102,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
   }
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />}
+    {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" />}
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBarFor('monitoring')(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'].filter(t => !embedded || t !== 'Dashboard'), setTab)}
 
@@ -3210,7 +3186,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
         </tbody></table>}
     </div>}
 
-    {tab === 'Monthly Charts placeholder' && <div className="card"><p>Monthly trend charts will be added in a later phase.</p></div>}
+    {tab === 'Monthly Charts placeholder' && <div className="card"></div>}
   </div>;
 }
 
@@ -3338,7 +3314,7 @@ export function SafetyPage() {
   const openIncidents = summary?.openIncidents ?? incidents.filter(i => i.status !== 'closed').length;
 
   return <div>
-    <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, equipment, inspections, waste, chemicals and occupational health." />
+    <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBarFor('facilities_safety')(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', 'Environmental Monitoring', 'Decontamination'], setTab)}
 

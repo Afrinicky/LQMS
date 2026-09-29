@@ -206,7 +206,7 @@ export function EvidencePanel({ basePath, attachments, canEdit, onChanged, itemC
 
   return <div className="evidence-panel">
     {attachments.length === 0
-      ? <p className="muted">Nothing attached yet. Add a scanned worksheet, a photograph, a certificate or a report to evidence what was assessed.</p>
+      ? <p className="muted">Nothing attached yet.</p>
       : <table className="data-table">
         <thead><tr><th>Title</th><th>File</th><th>Description</th><th>Attached</th>{canEdit && <th />}</tr></thead>
         <tbody>

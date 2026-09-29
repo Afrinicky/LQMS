@@ -327,7 +327,7 @@ export function AssessmentsPage() {
     ...(isEnabled('quality_indicators') && canView('quality_indicators') ? [{ key: 'Quality Indicator Monitoring', active: tab === 'Quality Indicator Monitoring', go: () => setTab('Quality Indicator Monitoring') }] : []),
   ];
   return <div className="module-page">
-    <PageHeader eyebrow="Assessments" title="Assessments" subtitle="Internal audits, risk management, and quality indicator monitoring." />
+    <PageHeader eyebrow="Assessments" title="Assessments" />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
     {inInternalAudit && tabBarFor('assessments')(tab, INTERNAL_AUDIT_TABS, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
@@ -380,7 +380,6 @@ export function AssessmentsPage() {
     </form>}
 
     {tab === 'Checklist Library' && <>
-      <p><small>Edit, replace, or archive default checklists. Marking is optional per checklist. Internal marks are not accreditation or external compliance scores.</small></p>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th><th>Default</th><th>Marking</th><th></th></tr></thead><tbody>
         {checklists.map(c => <tr key={c.id}>
           <td>{c.checklist_code || '—'}</td><td>{c.checklist_name}</td><td>{c.checklist_type.replace(/_/g, ' ')}</td>
@@ -399,7 +398,6 @@ export function AssessmentsPage() {
           the everyday right to add a question. */}
       {can('assessments', 'import') && <>
       <h3>Import checklist from CSV / XLSX</h3>
-      <p><small>Expected columns: SectionTitle, QuestionText (required), and optionally SectionCode, SectionPossibleMarks, SectionWeight, QuestionCode, ResponseType, MaxMarks, Weight, Guidance, ExpectedEvidence, ScoringGuidance, IsRequired. Rows are grouped into sections by SectionTitle.</small></p>
       <form className="form-grid" onSubmit={submitFileImport}>
         <label>Checklist name<TextField value={importMeta.checklistName} onValue={nextValue => setImportMeta({ ...importMeta, checklistName: nextValue })} required /></label>
         <label>Checklist type<select value={importMeta.checklistType} onChange={e => setImportMeta({ ...importMeta, checklistType: e.target.value })}>{CHECKLIST_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
@@ -466,7 +464,6 @@ export function AssessmentsPage() {
     </>}
 
     {tab === 'Plan Assessment' && <>
-      <p><small>Select a checklist, then pick whole/sections/individual questions. Selected questions are copied into the assessment so it stays stable if the source checklist later changes.</small></p>
       <div className="form-grid">
         <label>Assessment<select value={planAssessmentId} onChange={e => setPlanAssessmentId(e.target.value)}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
         <label>Checklist<select value={planChecklistId} onChange={e => { setPlanChecklistId(e.target.value); void loadPlanChecklist(e.target.value); setPlanSelectedSections([]); setPlanSelectedQuestions([]); }}><option value="">—</option>{checklists.filter(c => c.status !== 'archived').map(c => <option key={c.id} value={c.id}>{c.checklist_name} ({c.status})</option>)}</select></label>
@@ -572,7 +569,6 @@ export function AssessmentsPage() {
       {findings.map(f => <tr key={f.id}><td>{f.finding_number}</td><td>{f.program_number || f.assessment_program_id}</td><td>{f.finding_date}</td><td>{f.finding_type.replace(/_/g, ' ')}</td><td>{f.title}</td><td>{formatBadge(f.status)}</td><td>{!f.nc_id && can('nc_capa', 'create') && <button onClick={() => createNc(f.id)}>NC</button>}{!f.capa_id && <button onClick={() => createCapa(f.id)}>CAPA</button>}</td></tr>)}
     </tbody></table>}
 
-    {tab === 'Reports' && <p>Assessment outcome reports and trend dashboards will be added in a later phase.</p>}
   </div>;
 }
 
@@ -606,7 +602,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
-    {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />}
+    {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" />}
     {tabBarFor('meetings')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -661,9 +657,6 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
       <button type="submit">Create meeting</button>
     </form>}
 
-    {tab === 'Attendance' && <p>Open a meeting to record attendance and add action items.</p>}
-    {tab === 'Action Items' && <p>Action items raised in meetings appear inside the meeting detail panel and in the shared Action Tracker.</p>}
-    {tab === 'Reports' && <p>Meeting cadence reports will be added in a later phase.</p>}
   </div>;
 }
 
@@ -695,7 +688,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
-    {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />}
+    {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Management Review" />}
     {tabBarFor('management_review')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -747,9 +740,6 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
       <button type="submit">Create review</button>
     </form>}
 
-    {tab === 'Inputs' && <p>Open a review from the register to add inputs or use "Generate inputs from modules" to pull QMS summaries.</p>}
-    {tab === 'Actions' && <p>Actions raised from a review appear inside the review's detail panel and in the shared Action Tracker.</p>}
-    {tab === 'Reports' && <p>Management review reports will be added in a later phase.</p>}
   </div>;
 }
 
@@ -780,7 +770,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
 
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
-    {!embedded && <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />}
+    {!embedded && <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" />}
     {tabBarFor('quality_indicators')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -874,7 +864,6 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
         </>;
       })()}
     </>}
-    {tab === 'Reports' && <p>Indicator reports will be added in a later phase.</p>}
   </div>;
 }
 
@@ -904,7 +893,7 @@ export function ContinualImprovementPage() {
 
   const tabs = ['Dashboard', 'Improvement Projects', 'New Project', 'Updates', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Continual Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
+    <PageHeader eyebrow="Continual Improvement" title="Continual Improvement" />
     {tabBarFor('continual_improvement')(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -959,7 +948,5 @@ export function ContinualImprovementPage() {
       <button type="submit">Create improvement project</button>
     </form>}
 
-    {tab === 'Updates' && <p>Open a project from the register to add updates.</p>}
-    {tab === 'Reports' && <p>Improvement portfolio reports will be added in a later phase.</p>}
   </div>;
 }

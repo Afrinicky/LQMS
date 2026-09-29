@@ -205,7 +205,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
   const tabs = ['Dashboard', 'Raw Archive', 'New Import', 'Import Batches', 'Mapping Rules', 'Exceptions', 'Generate Report', 'Monthly Reports', 'TAT Summary', 'Reports/Exports'];
 
   return <div className={embedded ? '' : 'module-page'}>
-    {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Monthly Reports &amp; Archives" subtitle="Monthly report imports, archives, and exception handling." />}
+    {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Monthly Reports &amp; Archives" />}
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -259,7 +259,6 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       <label>Source file<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
       <label>Notes<TextField as="textarea" value={importForm.notes} onValue={nextValue => setImportForm({ ...importForm, notes: nextValue })} /></label>
       <button type="submit">Upload import batch</button>
-      <p><em>CSV (.csv) and Excel (.xlsx, .xls) imports are parsed. The uploaded file is retained as raw archive evidence and included in backups.</em></p>
     </form>}
 
     {tab === 'Import Batches' && <>

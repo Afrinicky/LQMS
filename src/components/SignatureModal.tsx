@@ -52,9 +52,6 @@ export function SignatureModal({ onClose }: { onClose: () => void }) {
           <button className="drawer-close" type="button" aria-label="Close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="pw-body">
-          <p className="muted" style={{ margin: '0 0 12px', fontSize: 13 }}>
-            Upload your signature once. It is applied automatically to every electronic signing across SECH_LIMS — approvals, acknowledgements and forms.
-          </p>
           {!staffLinked && <p className="pw-error">Your login isn’t linked to a staff record, so it can’t hold a signature. Ask an administrator to link it.</p>}
           {staffLinked && hasSignature && imgUrl && (
             <div className="sig-preview"><img src={imgUrl} alt="Your signature" /></div>

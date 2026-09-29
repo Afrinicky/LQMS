@@ -62,7 +62,7 @@ export default function PortalDeclarations() {
       <div class="meta">${esc(d.form_number || '')}</div>
       <h1>${esc(d.title)}</h1>
       <div class="meta">Version ${esc(d.version || '—')} · effective ${esc(d.effective_date || '—')}${d.issued_by ? ` · issued by ${esc(d.issued_by)}` : ''}</div>
-      ${d.body_content ? `<div class="body">${esc(d.body_content)}</div>` : '<p class="muted">The declaration text was supplied as an attached file.</p>'}
+      ${d.body_content ? `<div class="body">${esc(d.body_content)}</div>` : ''}
       ${d.acknowledgement_statement ? `<div class="ack">${esc(d.acknowledgement_statement)}</div>` : ''}
       <div class="signblock">
         ${sigBlock}
@@ -82,7 +82,6 @@ export default function PortalDeclarations() {
         <div className="pp-head">
           <div>
             <h3><FileSignature size={16} /> Awaiting your signature</h3>
-            <p>A declaration is not in force until you have read and signed it. Open one and sign it here.</p>
           </div>
           {declarations.pending.length > 0 && <span className="pp-count crit">{declarations.pending.length}</span>}
         </div>
@@ -118,7 +117,6 @@ export default function PortalDeclarations() {
         <div className="pp-head">
           <div>
             <h3>Signed by me</h3>
-            <p>Your signed declarations, reopenable and printable — this is what an assessor asks to see.</p>
           </div>
           {declarations.signed.length > 0 && <span className="pp-count">{declarations.signed.length}</span>}
         </div>

@@ -467,10 +467,6 @@ function EventFormBody({ form, setForm, staff, sections, equipment, busy, editin
           somebody remembering to create it. */}
       <section>
         <h4><Repeat size={14} /> Does it come round again?</h4>
-        <p className="muted section-note">
-          A recurring session raises its next occurrence automatically when this one is closed, with the same people
-          invited — and each occurrence is reviewed for effect in its own right. A one-off is reviewed once.
-        </p>
         <div className="field-grid">
           <label>How often
             <select value={form.frequency} onChange={e => set('frequency', e.target.value)}>
@@ -516,10 +512,6 @@ function EventFormBody({ form, setForm, staff, sections, equipment, busy, editin
 
       <section>
         <h4><Target size={14} /> How its effect will be judged</h4>
-        <p className="muted section-note">
-          A session is not finished when it has been held. Choosing how it will be checked, and by when, is what
-          turns a list of sessions into evidence that the work changed.
-        </p>
         <div className="field-grid">
           <label>Method
             <select value={form.effectivenessMethod} onChange={e => set('effectivenessMethod', e.target.value)}>
@@ -884,7 +876,6 @@ function EventDetail({ event, staff, canEdit, canCreate, canClose, onChanged, on
       {ask === 'postpone' && (
         <form className="training-ask" onSubmit={e => { e.preventDefault(); void act('/postpone', { trainingDate: askDate, reason: askReason }, 'Postponed. Everybody expected at it has been told the new date.'); }}>
           <h5><CalendarClock size={13} /> Postpone this session</h5>
-          <p className="muted">Everybody on the list is told that it has moved, and told the new date.</p>
           <label>New date<input type="date" value={askDate} onChange={e => setAskDate(e.target.value)} required /></label>
           <label className="wide">Why<TextField value={askReason} onValue={setAskReason} required
             placeholder="e.g. The analyser engineer's visit was moved" /></label>
@@ -898,10 +889,6 @@ function EventDetail({ event, staff, canEdit, canCreate, canClose, onChanged, on
       {ask === 'cancel' && (
         <form className="training-ask" onSubmit={e => { e.preventDefault(); void act('/cancel', { reason: askReason }, 'Called off. Everybody expected at it has been told.'); }}>
           <h5><XCircle size={13} /> Call this session off</h5>
-          <p className="muted">
-            The session is kept on the register as one that was planned and did not happen, so the programme can
-            account for it. Everybody on the list is told.
-          </p>
           <label className="wide">Why<TextField value={askReason} onValue={setAskReason} required
             placeholder="e.g. The provider withdrew the course" /></label>
           <div className="form-actions">
@@ -1043,12 +1030,7 @@ function EventDetail({ event, staff, canEdit, canCreate, canClose, onChanged, on
                 </button>
               </div>
             </form>
-          ) : (
-            <p className="muted">
-              This session is held but not yet closed. Closing it is done by the administrator, the laboratory manager
-              or the quality manager, who signs for the record. Until then it is not on anybody&apos;s file.
-            </p>
-          )}
+          ) : null}
         </>
       )}
 
@@ -1076,10 +1058,6 @@ function EventDetail({ event, staff, canEdit, canCreate, canClose, onChanged, on
               <label className="wide">What was found
                 <TextField as="textarea" value={review.notes} onValue={v => setReview({ ...review, notes: v })}
                   placeholder="What changed in the work — or what did not, and what is being done about it." /></label>
-              <p className="muted wide">
-                Recording the review signs it with your signature on file. A finding of &ldquo;not effective&rdquo; against
-                somebody schedules individual retraining for them.
-              </p>
               <button type="submit" className="primary" disabled={busy}>
                 <CheckCircle2 size={13} /> {busy ? 'Saving…' : 'Record and sign the review'}
               </button>
@@ -1106,10 +1084,6 @@ function EventDetail({ event, staff, canEdit, canCreate, canClose, onChanged, on
       {canClose && (locked || canEdit) && !ownedElsewhere && (
         <details className="senior-actions">
           <summary><Settings2 size={13} /> Senior actions</summary>
-          <p className="muted">
-            Reserved to the administrator, the laboratory manager and the quality manager. Everything here is recorded
-            against your name in the audit trail.
-          </p>
           <div className="training-actions">
             {locked && event.status === 'closed' && (
               <button type="button" onClick={() => setAsk('reopen')}>Reopen this closed record</button>
@@ -1135,11 +1109,6 @@ function EventDetail({ event, staff, canEdit, canCreate, canClose, onChanged, on
 
           {ask === 'delete' && (
             <div className="training-ask">
-              <p>
-                <strong>Deleting is almost always the wrong thing.</strong> A session that is not going ahead should be
-                called off, so the programme can still account for it. Delete only a record created in error. A session
-                anybody has signed for cannot be deleted at all.
-              </p>
               <div className="form-actions">
                 <button type="button" className="danger" disabled={busy}
                   onClick={async () => {

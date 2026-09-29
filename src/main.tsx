@@ -2,10 +2,14 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { applyTheme, storedTheme } from './hooks/useTheme';
 
 declare global {
   interface Window { __SECH_LIMS_RENDERER_STARTED__?: boolean }
 }
+
+// The reader's theme is on the document before React paints.
+applyTheme(storedTheme());
 
 console.log('[renderer] main.tsx loaded');
 window.__SECH_LIMS_RENDERER_STARTED__ = true;

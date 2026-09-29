@@ -41,7 +41,6 @@ export default function PortalSchedule() {
         <div className="pp-head">
           <div>
             <h3><CalendarClock size={16} /> Where I am today</h3>
-            <p>Your shift and bench as the published roster has it.</p>
           </div>
         </div>
         {duty?.onDuty ? (
@@ -69,7 +68,6 @@ export default function PortalSchedule() {
           <div className="pp-head">
             <div>
               <h3><CalendarRange size={16} /> Rosters and schedules you owe</h3>
-              <p>Your colleagues cannot see next month until you publish it.</p>
             </div>
             <span className="pp-count crit">{owedSchedules.length}</span>
           </div>
@@ -99,7 +97,6 @@ export default function PortalSchedule() {
         <div className="pp-head">
           <div>
             <h3>My upcoming duties</h3>
-            <p>Every shift assigned to you on a published or approved roster.</p>
           </div>
           {duties.length > 0 && <span className="pp-count">{duties.length}</span>}
         </div>
@@ -133,7 +130,6 @@ export default function PortalSchedule() {
         <div className="pp-head">
           <div>
             <h3>Reviews due from me</h3>
-            <p>Items on the laboratory&rsquo;s review calendar that name you as responsible.</p>
           </div>
           {mineOnCalendar.length > 0 && <span className="pp-count">{mineOnCalendar.length}</span>}
         </div>

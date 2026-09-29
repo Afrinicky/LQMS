@@ -135,7 +135,7 @@ function Gate({ children }: { children: React.ReactNode }) {
     return <StartupShell
       variant="error"
       heading="Local service is not responding"
-      message="The host service did not respond in time. You can retry the connection, or restart the application for a clean start."
+      message="The host service did not respond in time."
       detail={`API base URL: ${API_BASE}\n${errorDetail}`}
     >
       <button onClick={retry}>Retry connection</button>
@@ -175,7 +175,7 @@ function Gate({ children }: { children: React.ReactNode }) {
   return <StartupShell
     variant="error"
     heading="Startup error"
-    message="Something went wrong while the application was starting up. Retry, or restart the application."
+    message="Something went wrong while the application was starting up."
     detail={errorDetail || 'No further details available.'}
   >
     <button onClick={retry}>Retry</button>

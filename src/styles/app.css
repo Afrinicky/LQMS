@@ -168,8 +168,8 @@
   --on-accent: #FFFFFF;
 
   /* ---- Borders ---- */
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border: var(--wash-080);
+  --border-strong: var(--wash-140);
 
   /* ---- Neutral overlays ---- */
   --overlay-1: rgba(255, 255, 255, 0.03);
@@ -816,7 +816,8 @@ li.chart-click, ul.chart-meter li.chart-click { padding: 4px 6px; margin: -4px -
 .dash-charts .chart-legend { gap: 6px; min-width: 110px; }
 .dash-charts .donut-center strong { font-size: 24px; }
 
-/* Give chart cards a thin coloured top accent so they feel part of the system */
+/* A thin accent along the top of a chart card. On white it is one colour:
+   a six-colour ribbon reads as decoration rather than as part of the figure. */
 .chart-card { background-clip: padding-box; }
 .chart-card::before {
   content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
@@ -1148,6 +1149,7 @@ button.step-toggle:hover { background: var(--overlay-2); box-shadow: none; trans
    ========================================================================= */
 .home-shell {
   position: relative;
+  background: var(--home-bg);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -1448,6 +1450,12 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
 /* The alert's own sentence — not a label, so it keeps its own capitalisation. */
 .pq-msg { margin-top: 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Dennis's SOP tools, inside the document viewer */
+.sop-tools { margin-top: 12px; padding: 12px; background: var(--dv-panel); border: 1px solid var(--dv-border); border-radius: 8px; color: var(--dv-text); }
+.sop-confirm { margin-top: 8px; padding: 10px; background: var(--warning-bg); border: 1px solid var(--warning); border-radius: 6px; color: var(--warning); font-size: 12.5px; }
+.sop-output { white-space: pre-wrap; background: var(--dv-panel-2); border: 1px solid var(--dv-border); border-radius: 6px; padding: 12px; color: var(--dv-text); font-size: 12.5px; max-height: 38vh; overflow: auto; }
+.dv-ghost.on { background: var(--dv-on); border-color: var(--accent); }
 
 /* Focus flash — highlights the exact record a dashboard alert points to */
 .focus-flash { animation: focus-flash 2.6s ease-out; }
@@ -1913,7 +1921,7 @@ li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shad
   transition: all 0.12s ease;
 }
 .chip-select .pick input { width: auto; margin: 0; }
-.chip-select .pick.on { background: var(--accent-soft); color: var(--text); border-color: var(--accent); }
+.chip-select .pick.on { background: var(--accent-soft); color: var(--on-soft); border-color: var(--accent); }
 .primary-pick { display: block; margin-top: 12px; max-width: 360px; }
 .auth-row { align-items: end; }
 .auth-row button { height: 40px; }
@@ -5036,7 +5044,7 @@ button.cell-mark:disabled { cursor: default; }
 .ls-cell:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
 .ls-cell.is-blank {
   background: repeating-linear-gradient(45deg,
-    transparent, transparent 3px, rgba(255,255,255,0.045) 3px, rgba(255,255,255,0.045) 6px);
+    transparent, transparent 3px, var(--wash-045) 3px, var(--wash-045) 6px);
 }
 .ls-cell.is-breach { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
 .ls-cell.is-warn { background: var(--warning-bg); color: var(--warning); }

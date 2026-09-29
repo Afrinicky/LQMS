@@ -58,7 +58,6 @@ const TABS = PORTAL_FACES;
 type Tile = {
   tab: PortalTab;
   title: string;
-  blurb: string;
   icon: React.ReactNode;
   /** null when the tile has nothing worth counting (preferences, say). */
   count: number | null;
@@ -247,53 +246,44 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
   const tiles: Tile[] = [
     {
       tab: 'My Tasks', title: 'My tasks & duties', icon: <ClipboardList size={20} />,
-      blurb: 'Everything with your name on it — today’s unit activities, actions, attestations and assigned tasks.',
       count: activitiesDue + assigned.length + queue.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length,
       countLabel: 'open', tone: activitiesDue + assigned.length > 0 ? 'warn' : undefined,
     },
     {
       tab: 'Routine Work', title: 'Routine work', icon: <Repeat size={20} />,
-      blurb: 'The recurring work of your bench — charting, decontamination, equipment care and controls — and who performs each one.',
       count: activitiesDue, countLabel: 'due now', tone: activitiesDue > 0 ? 'warn' : undefined,
     },
     {
       tab: 'My Inbox', title: 'My inbox', icon: <Inbox size={20} />,
-      blurb: 'Every alert the laboratory routed to you. Opening one opens the work behind it, here.',
       count: openAlerts.length, countLabel: unread ? `${unread} unread` : 'open',
       tone: urgentAlerts > 0 ? 'crit' : undefined,
     },
     {
       tab: 'My Schedule', title: 'My schedule', icon: <CalendarClock size={20} />,
-      blurb: 'The shifts you are on, the bench you are on today, and the rosters you owe your unit.',
       count: (tasks?.upcomingDuties?.length ?? 0) + owedSchedules, countLabel: 'upcoming',
       tone: owedSchedules > 0 ? 'warn' : undefined,
     },
     {
       tab: 'My Record', title: 'My record', icon: <UserRound size={20} />,
-      blurb: 'Your personnel record as the laboratory holds it: post, contact, positions and technical authorisations.',
       count: profile?.authorizations?.length ?? 0, countLabel: 'authorisations',
     },
     {
       tab: 'My Documents', title: 'My documents', icon: <FileBadge size={20} />,
-      blurb: 'Certificates, licences and records on your staff file, with what has lapsed called out.',
       count: documents.length, countLabel: expiredDocs ? `${expiredDocs} expired` : 'on file',
       tone: expiredDocs > 0 ? 'crit' : undefined,
     },
     {
       tab: 'My Training', title: 'My training & competency', icon: <GraduationCap size={20} />,
-      blurb: 'Training you are down to attend and the competency assessments planned for you.',
       count: coming.length, countLabel: 'scheduled',
     },
     {
       tab: 'My Declarations', title: 'My declarations', icon: <FileSignature size={20} />,
-      blurb: 'Confidentiality, impartiality and conflict of interest — what you must sign, and what you have signed.',
       count: declarations.pending.length || declarations.signed.length,
       countLabel: declarations.pending.length ? 'to sign' : 'signed',
       tone: declarations.pending.length ? 'warn' : undefined,
     },
     {
       tab: 'Preferences', title: 'My preferences', icon: <Sliders size={20} />,
-      blurb: 'Which areas may alert you, and what this device does when one arrives.',
       count: null, countLabel: 'Alerts and sounds',
     },
   ];
@@ -313,7 +303,6 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
 
       <div className="portal-section-title">
         <h3>Everything that is mine</h3>
-        <p>Each panel opens in place — you never leave your portal to reach it.</p>
       </div>
 
       <div className="portal-tiles">
@@ -322,7 +311,6 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
             <span className="pt-ico">{t.icon}</span>
             <span className="pt-body">
               <span className="pt-title">{t.title}</span>
-              <span className="pt-blurb">{t.blurb}</span>
             </span>
             <span className="pt-foot">
               {t.count !== null && <span className="pt-count">{t.count}</span>}
@@ -341,7 +329,6 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
             <div className="pp-head">
               <div>
                 <h3><ClipboardList size={16} /> Waiting on me</h3>
-                <p>Declarations, attestations, actions and tasks assigned to you by name.</p>
               </div>
               <button type="button" className="pq-link" onClick={() => onOpen('My Tasks')}>
                 Open my tasks <ArrowRight size={13} />
@@ -398,7 +385,6 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
             <div className="pp-head">
               <div>
                 <h3><BellRing size={16} /> Coming up</h3>
-                <p>Training and competency already booked for you.</p>
               </div>
             </div>
             {coming.length === 0 ? (
@@ -453,7 +439,6 @@ function RaiseSomething() {
       <div className="pp-head">
         <div>
           <h3><Plus size={16} /> Raise something</h3>
-          <p>Report it from here — you do not need to go looking for the register.</p>
         </div>
       </div>
       <div className="portal-raise">

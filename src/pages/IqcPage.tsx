@@ -155,7 +155,6 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         <PageHeader
           eyebrow="Process Management"
           title="Internal Quality Control"
-          subtitle="Define a control once, run it the same way every time, and let the rules for its type decide the outcome."
         />
       )}
       <PermissionTabs moduleKey="iqc" tabs={tabs} active={tab} onChange={setTab} />
@@ -297,7 +296,6 @@ function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, ownUni
       <div className="empty-state">
         <span className="es-ico"><Beaker size={26} /></span>
         <h3>No controls defined yet</h3>
-        <p>Define a control material — commercial or in-house — and say what it measures. Once defined it can be run.</p>
       </div>
     </div>;
   }
@@ -392,7 +390,7 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
       )}
 
       {material.control_type === 'culture_sensitivity' && material.cs_scope === 'identification'
-        ? <p className="hint">Identification-only control — passes when the reference strain is identified as <strong>{material.expected_organism || 'the expected organism'}</strong>. No antimicrobial panel.</p>
+        ? <p className="hint">Identification only — expected: <strong>{material.expected_organism || '—'}</strong></p>
         : <table className="data-table compact">
         <thead><tr>
           <th>{material.control_type === 'culture_sensitivity' ? 'Antimicrobial agent' : 'Analyte'}</th>
@@ -515,8 +513,6 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
           )}
           <button type="button" className="secondary" disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
         </div>
-        {isAdmin && reason.trim().length < 10 && <p className="hint">Erasing needs a reason of at least a sentence.</p>}
-        {!isAdmin && <p className="hint">Only an administrator can erase a control outright.</p>}
       </div>
     );
   }
@@ -734,12 +730,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
       <button type="button" className="secondary tiny" onClick={() => setRows(rs => [...rs, { analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '' }])}>
         <Plus size={12} /> {isCs ? 'Add an agent' : 'Add an analyte'}
       </button>
-      <p className="hint">
-        An analyte removed here stops being measured. If it already has readings it is retired rather than deleted, so its
-        chart and history survive.
-      </p>
       </>}
-      {isCs && !wantsPanel && <p className="hint">Identification-only — no antimicrobial panel. This control passes when the reference strain is identified as the expected organism.</p>}
 
       {needsReason && (
         <div className="iqc-note warn">
@@ -774,11 +765,6 @@ function ImportControls({ onImported }: { onImported: (created: number) => void 
       <div className="section-head">
         <h3>Already have your controls in a spreadsheet?</h3>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Download the template, fill in one row per analyte (repeat the control's own columns down its
-        rows), and import it. A single control or a whole register works the same way. Anything that
-        cannot be accepted is reported by row number, and nothing in that row is written.
-      </p>
       <XlsxToolbar
         module="iqc" importOnly exportName="IQC_Controls.xlsx"
         templatePath="/iqc/controls/template" importPath="/iqc/controls/import"
@@ -915,9 +901,6 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
               placeholder={material.expected_organism ? `Expected: ${material.expected_organism}` : 'Organism the strain identified as'} />
           </label>
         </div>
-      )}
-      {material && material.control_type === 'culture_sensitivity' && material.cs_scope === 'identification' && (
-        <p className="hint" style={{ marginTop: 6 }}>Identification-only control — record the organism above; there is no susceptibility panel.</p>
       )}
 
       {material && analytes.length > 0 && (
@@ -1201,10 +1184,6 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
           Later runs on this lot were judged with it in their history, so their charts will read without it.
           The audit trail keeps what was removed.
         </p>
-        <p className="hint">
-          This is for a run that should never have been recorded — a duplicate, a test entry, a run logged against the
-          wrong control. A failure is not removed; it is investigated and signed off.
-        </p>
         <label className="stack">Reason
           <TextField as="textarea" rows={2} value={reason} onValue={nextValue => setReason(nextValue)}
             placeholder="e.g. Duplicate entry — the same run was recorded twice on 2026-07-14." />
@@ -1384,7 +1363,6 @@ function ChartTab({ materials, onError, onNotice, canEdit }: {
         />
       )}
 
-      {!materialId && <p className="muted">Choose a quantitative control to chart. Qualitative controls have no numeric series — review them under Review instead.</p>}
       {data && (
         <LeveyJenningsChart
           data={data}
@@ -1414,7 +1392,6 @@ function LotChanges({ materials, onError, canCreate }: { materials: Material[]; 
   return (
     <div className="card">
       <div className="section-head"><h3>Lot changes</h3></div>
-      <p className="muted">A new lot has its own target values, so the two are bridged by running them in parallel. Recording it here marks the change on every chart.</p>
       {canCreate && (
         <form className="form-grid" onSubmit={submit} style={{ marginBottom: 16 }}>
           <label>Old lot<select value={form.oldIqcMaterialId} onChange={e => setForm(f => ({ ...f, oldIqcMaterialId: e.target.value }))} required><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} · {m.lot_number}</option>)}</select></label>

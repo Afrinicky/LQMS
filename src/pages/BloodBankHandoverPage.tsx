@@ -248,7 +248,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
   const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 
   return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />}
+    {!embedded && <PageHeader eyebrow="Process Management" title="Blood Bank Quality &amp; Inventory Handover" />}
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -513,7 +513,6 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <table className="data-table"><thead><tr><th>Group</th><th>Component</th><th>Transfused</th></tr></thead><tbody>
           {monthlySummary.transfusions.map((t, i) => <tr key={i}><td>{t.blood_group || '—'}</td><td>{(t.component_type || '—').replace(/_/g, ' ')}</td><td>{t.transfused || 0}</td></tr>)}
         </tbody></table>
-        <p><em>CSV export above includes the same counts plus per-donor-type and per-component-type rows.</em></p>
       </>}
       {!monthlySummary && <p>Select a month and click load.</p>}
     </>}

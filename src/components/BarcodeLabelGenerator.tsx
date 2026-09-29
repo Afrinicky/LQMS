@@ -18,7 +18,6 @@ export default function BarcodeLabelGenerator() {
 
   return <div className="card">
     <h3>Barcode label generator</h3>
-    <p className="muted" style={{ marginTop: 0 }}>Type or paste one value per line — each becomes a Code 128 barcode sticker. Use for logistics, storage bins/shelves, file boxes, or anything that needs a scannable label. The same barcodes are read by any USB or camera scanner.</p>
     <div className="form-grid">
       <label>Optional label title<TextField value={title} onValue={nextValue => setTitle(nextValue)} placeholder="e.g. Reagent store" /></label>
       <label>Label size<select value={size} onChange={e => setSize(e.target.value)}>{LABEL_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select></label>

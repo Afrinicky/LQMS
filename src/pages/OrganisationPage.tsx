@@ -538,7 +538,7 @@ export function OrganisationPage() {
   const enabledTabs = TABS.filter(t => (t === 'Meetings' ? isEnabled('meetings') : t === 'Management Review' ? isEnabled('management_review') : true));
 
   return <div className="module-page">
-    <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, ethical declarations, organogram, budgetary projections and routine record reviews." />
+    <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" />
     {tabBar(tab, enabledTabs, t => { setTab(t); setSearchParams(prev => { prev.set('tab', t); return prev; }); })}
     {error && <Notice kind="error">{error}</Notice>}
     {notice && <Notice kind="success" style={{ background: 'var(--success-bg)', border: '1px solid var(--success-line)', color: 'var(--success)', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
@@ -576,7 +576,6 @@ export function OrganisationPage() {
     {tab === 'Registrations & Licences' && <>
       <div className="card">
         <h3>Add registration / licence</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Facility licences, accreditation, practice registrations and permits. Enter the issuing body for your jurisdiction.</p>
         {can('organisation.licences', 'create') && <form className="form-grid" onSubmit={submitReg}>
           <label>Type<select value={regForm.credentialType} onChange={e => setRegForm({ ...regForm, credentialType: e.target.value })}><option value="">—</option>{['facility_licence', 'accreditation', 'practice_registration', 'permit', 'certification', 'other'].map(c => <option key={c} value={c}>{pretty(c)}</option>)}</select></label>
           <label>Title<TextField value={regForm.title} onValue={nextValue => setRegForm({ ...regForm, title: nextValue })} required /></label>
@@ -853,7 +852,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
       <h1>${esc(selected.title)}</h1>
       <div class="meta">Version ${esc(selected.version || '—')} · effective ${esc(selected.effective_date || '—')}${selected.uploaded_by_name ? ` · issued by ${esc(selected.uploaded_by_name)}` : ''}</div>
       ${selected.description ? `<p>${esc(selected.description)}</p>` : ''}
-      ${selected.body_content ? `<div class="body">${esc(selected.body_content)}</div>` : '<p class="empty">The declaration text was supplied as an attached file.</p>'}
+      ${selected.body_content ? `<div class="body">${esc(selected.body_content)}</div>` : ''}
       ${selected.acknowledgement_statement ? `<div class="ack">${esc(selected.acknowledgement_statement)}</div>` : ''}
       <h2>Acknowledgement of signatories (${signatures.length})</h2>
       ${signatures.length ? `<table><thead><tr><th>#</th><th>Name</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th><th>Signature</th></tr></thead><tbody>${rows}</tbody></table>`
@@ -881,14 +880,13 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <div>
         <h3 style={{ margin: 0 }}>Code of Conduct &amp; Ethical Declarations</h3>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Set up each declaration once from a pre-populated template; every member of staff opens it, reads it, and signs their own acknowledgement. Signatures are personal, appended to the form, and can be printed.</p>
       </div>
       {canManage && <button onClick={() => { if (showSetup) { resetSetup(); setShowSetup(false); } else { resetSetup(); setShowSetup(true); } }}>{showSetup ? 'Cancel' : '＋ Set up declaration'}</button>}
     </div>
 
     {showSetup && <div className="card" style={{ marginTop: 10 }}>
       <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit declaration' : 'Set up declaration'}</h4>
-      <p className="muted" style={{ marginTop: 0 }}>{editingId ? 'Amend this declaration. Changes apply to the form staff open and sign; existing signatures are kept.' : 'Start from a pre-populated declaration and edit it to suit the laboratory, or write your own. All active staff will be notified in their inbox to open, read, and sign it.'}</p>
+      
       {!editingId && <label style={{ display: 'block', marginBottom: 10 }}>Start from a template
         <select value={setupForm.templateKey} onChange={e => applyTemplate(e.target.value)} style={{ display: 'block', marginTop: 4 }}>
           <option value="">Blank / custom declaration</option>
@@ -954,7 +952,6 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
 
       <div>
         {!selected ? <div className="card" style={{ padding: 20 }}>
-          <p className="muted">Select a declaration on the left to open, read and sign it.</p>
         </div> : <>
           <div className="card">
             <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -969,12 +966,6 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                   )}
                 </h3>
                 <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · issued by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
-                {selected.status === 'obsolete' && (
-                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
-                    Withdrawn. Nobody is asked to sign it and it cannot be signed; the signatures already on it are kept
-                    as the record of what was agreed while it was in force.
-                  </p>
-                )}
               </div>
               <button type="button" className="badge" onClick={() => void printDeclaration()} style={{ cursor: 'pointer' }}>🖨 Print</button>
               {selected.file_id && <a className="badge" onClick={() => void downloadFileById(selected.file_id!, selected.file_name || 'declaration')} style={{ cursor: 'pointer' }}>⬇ Download form</a>}
@@ -1153,8 +1144,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
         <h3 style={{ margin: 0 }}>Deputisation of core posts</h3>
         {can('organisation.structure', 'edit') && <Link to="/settings/people" className="hint">Assign deputies in Settings → People &amp; Access</Link>}
       </div>
-      <p className="muted" style={{ marginTop: 0, fontSize: 12.5 }}>Every appointed post has a named deputy and a documented arrangement for covering it. Bench grades are covered by their unit and are not listed here.</p>
-      {corePosts.length === 0 ? <p className="muted">No core positions yet. Mark a position as a core post in Settings → People &amp; Access.</p> :
+      {corePosts.length === 0 ? <p className="muted">No core positions yet.</p> :
         <table className="data-table">
           <thead><tr><th>Post</th><th>Holder</th><th>Deputy</th><th>Continuity plan</th><th>Training</th><th>Last tested</th><th>Next review</th><th></th></tr></thead>
           <tbody>
@@ -1186,7 +1176,6 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
         <h3 style={{ margin: 0 }}>Continuity plans</h3>
         {can('organisation.structure', 'create') && <button onClick={() => { setForm(emptyPlan); setEditingId('new'); }}>＋ Add continuity plan</button>}
       </div>
-      <p className="muted" style={{ marginTop: 0, fontSize: 12.5 }}>Each plan names the deputy, what triggers the cover, the authority the deputy carries, and how the handover is done.</p>
       {plans.length === 0 ? <p className="muted">No continuity plans documented yet.</p> :
         <table className="data-table">
           <thead><tr><th>Plan #</th><th>Post</th><th>Deputy post</th><th>Deputy</th><th>Training</th><th>Last tested</th><th>Next review</th><th>Status</th><th></th></tr></thead>
@@ -1314,7 +1303,6 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <div>
         <h3 style={{ margin: 0 }}>Budgetary Projection</h3>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Plan across personnel needs, scope of tests, infrastructure, equipment, service &amp; maintenance, quality assurance (IQC / EQA) and materials.</p>
       </div>
       <label>Fiscal year&nbsp;<input type="number" value={year} onChange={e => setYear(e.target.value)} style={{ width: 100 }} />&nbsp;
         {years.length > 0 && <select value={year} onChange={e => setYear(e.target.value)}><option value={currentYear}>{currentYear}</option>{years.map(y => <option key={y} value={y}>{y}</option>)}</select>}
@@ -1469,7 +1457,6 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       <div>
         <h3 style={{ margin: 0 }}>Quality &amp; Technical Records Review</h3>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Routine documented review of every quality &amp; technical record — pulls live data from all modules, records findings, and raises follow-up actions.</p>
       </div>
     </div>
 
@@ -1477,7 +1464,6 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
 
     {sub === 'Configuration' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Review frequencies</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Configure how often each area is reviewed. The schedule drives the &ldquo;Next review&rdquo; column and the review calendar.</p>
       <table className="data-table">
         <thead><tr><th>Area</th><th>Frequency</th><th>Responsible</th><th>Last review</th><th>Next review</th><th>Active</th></tr></thead>
         <tbody>

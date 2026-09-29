@@ -353,7 +353,7 @@ export function TreatmentStage({ rows, criteria, staff, onChanged, onOpen }: Sta
       <div style={{ marginTop: 18, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         {outstanding > 0
           ? <p className="muted" style={{ marginTop: 0 }}>{outstanding} control measure(s) still outstanding. Mark each one implemented to move this risk on.</p>
-          : <p className="muted" style={{ marginTop: 0 }}>All control measures are implemented. The risk can now be re-scored.</p>}
+          : <p className="muted" style={{ marginTop: 0 }}>All control measures are implemented.</p>}
         <button disabled={busy || !criteria.canAssess || controls.length === 0 || outstanding > 0} onClick={complete}>
           {busy ? 'Saving…' : 'Controls implemented — assess residual risk'}
         </button>

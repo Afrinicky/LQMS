@@ -114,10 +114,6 @@ export default function UserAccountActions({ user, onChanged }: {
       <div className="uaa-row">
         <div className="uaa-what">
           <strong><KeyRound size={14} /> Password</strong>
-          <p>
-            Hand over a temporary password — the account must choose its own the next time it signs in.
-            If they have simply forgotten it, they can ask from the sign-in screen and you approve.
-          </p>
         </div>
         <div className="uaa-do">
           <TextField type="text" value={tempPassword} onValue={nextValue => setTempPassword(nextValue)}
@@ -169,9 +165,6 @@ export default function UserAccountActions({ user, onChanged }: {
         <div className="uaa-what">
           <strong><Trash2 size={14} /> Erase permanently</strong>
           {!impact && <p className="muted">Checking what this account has touched…</p>}
-          {impact && impact.canDelete && (
-            <p>This account has never been used for anything, so it can be removed entirely. This cannot be undone.</p>
-          )}
           {impact && !impact.canDelete && impact.blockers.length === 0 && (
             <p>
               <ShieldAlert size={13} /> This account is attached to{' '}
@@ -200,11 +193,6 @@ export default function UserAccountActions({ user, onChanged }: {
             </button>
           ) : impact?.canForceDelete && forcing ? (
             <div className="uaa-force">
-              <p>
-                The account is removed and every record that pointed at it lets go. The audit trail is kept
-                intact — its entries stay exactly as they are, and this erasure records whose account they
-                belonged to. This cannot be undone.
-              </p>
               <TextField value={forceReason} onValue={nextValue => setForceReason(nextValue)}
                 placeholder="Why is this account being erased?" />
               <div className="uaa-force-acts">

@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical, KeyRound, PenLine } from 'lucide-react';
+import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical, KeyRound, PenLine, Sun, Moon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../hooks/useTheme';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { canEnterSettings } from '../constants/settingsAccess';
@@ -28,6 +29,7 @@ function initials(name?: string) {
 
 export default function AppLayout() {
   const { user, logout, refreshUser } = useAuth();
+  const { theme, toggle: toggleTheme } = useTheme();
   const { modules, isEnabled } = useModules();
   const { can, canView } = usePermissions();
   const navigate = useNavigate();

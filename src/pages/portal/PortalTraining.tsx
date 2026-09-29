@@ -167,10 +167,6 @@ export default function PortalTraining() {
         <div className="pp-head">
           <div>
             <h3><BookOpenCheck size={16} /> Training I have done</h3>
-            <p>
-              Courses, conferences and qualifications you completed outside the laboratory's own
-              training register. Attach the certificate and Personnel Management will verify it.
-            </p>
           </div>
           <div className="pp-head-actions">
             {cpd.length > 0 && <span className="pp-count">{cpd.length}{totalHours > 0 ? ` · ${totalHours}h` : ''}</span>}
@@ -227,7 +223,7 @@ export default function PortalTraining() {
         )}
 
         {cpd.length === 0 ? (
-          <p className="muted">Nothing recorded yet. Anything you have done that the laboratory did not run belongs here.</p>
+          <p className="muted">Nothing recorded yet.</p>
         ) : (
           <table className="data-table">
             <thead><tr><th>When</th><th>Training</th><th>Kind</th><th>Hours</th><th>Status</th><th /></tr></thead>
@@ -275,7 +271,6 @@ export default function PortalTraining() {
         <div className="pp-head">
           <div>
             <h3><Target size={16} /> My competency assessments</h3>
-            <p>Assessments planned or under way for you, and who is assessing. Only your assessor can record the outcome.</p>
           </div>
           {competency.length > 0 && <span className="pp-count">{competency.length}</span>}
         </div>
@@ -381,10 +376,6 @@ function MyTrainingSessions({ data, onChanged, setError, setNotice }: {
             <div>
               <h3><PenLine size={16} /> {toSign.length === 1 ? 'A training attendance sheet needs your signature'
                 : `${toSign.length} training attendance sheets need your signature`}</h3>
-              <p>
-                You were marked present at these sessions. Signing attests that you attended — the same signature you
-                use everywhere else in the system, taken from your own record.
-              </p>
             </div>
           </div>
           {!data.hasSignatureOnFile && (
@@ -420,10 +411,6 @@ function MyTrainingSessions({ data, onChanged, setError, setNotice }: {
         <div className="pp-head">
           <div>
             <h3><GraduationCap size={16} /> Training coming up for me</h3>
-            <p>
-              Sessions the laboratory has scheduled you for. You are sent a notice when one is booked and again the day
-              before. Whoever runs the session marks who attended; you sign the sheet yourself.
-            </p>
           </div>
           {upcoming.length > 0 && <span className="pp-count">{upcoming.length}</span>}
         </div>
@@ -482,10 +469,6 @@ function MyTrainingSessions({ data, onChanged, setError, setNotice }: {
         <div className="pp-head">
           <div>
             <h3><CheckCircle2 size={16} /> Training I have attended</h3>
-            <p>
-              Sessions that have been held. Once a senior role has reviewed and closed one it is part of your
-              permanent record, and you can print its report — the session and the signed attendance sheet together.
-            </p>
           </div>
           {done.length > 0 && <span className="pp-count">{done.length}</span>}
         </div>

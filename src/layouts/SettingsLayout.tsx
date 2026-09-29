@@ -27,13 +27,7 @@ export default function SettingsLayout() {
 
   return (
     <div className="module-page">
-      <PageHeader
-        eyebrow="Configuration"
-        title="Settings"
-        subtitle={isAdministrator
-          ? 'Lab identity, access control, roles and positions, module toggles, backups, and LAN/device preparation.'
-          : 'The configuration tools assigned to your role.'}
-      />
+      <PageHeader eyebrow="Configuration" title="Settings" />
       <div className="settings-layout">
         <nav className="settings-nav">
           {visible.map(({ to, label }) => {

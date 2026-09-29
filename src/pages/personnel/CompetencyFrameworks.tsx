@@ -102,7 +102,6 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
     <div className="workspace-head">
       <div>
         <h3>Competency frameworks</h3>
-        <p className="muted">What each job is assessed against. An assessment takes a copy of the framework as it stands when the assessment is raised, so revising one here never rewrites a record already on file.</p>
       </div>
       <div className="workspace-actions">
         <label className="inline-filter">Status
@@ -162,7 +161,7 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
     </form>}
 
     {loading ? <p className="muted">Loading…</p> : frameworks.length === 0
-      ? <EmptyState title="No frameworks yet" message="A framework lists what a job is assessed against. Create one, add the elements of the job, then activate it." />
+      ? <EmptyState title="No frameworks yet" message="A framework lists what a job is assessed against." />
       : <table className="data-table">
         <thead><tr><th>Code</th><th>Framework</th><th>Applies to</th><th>Unit</th><th>Elements</th><th>Pass mark</th><th>Interval</th><th>Status</th><th /></tr></thead>
         <tbody>
@@ -546,7 +545,6 @@ function ImportElements({ targetId, onError, onClose, onChanged }: {
     <div className="import-head">
       <div>
         <h4>Clone questions from another framework</h4>
-        <p className="muted">Pick a framework, then take the whole thing, whole groups, or single elements. A group merges into one of the same name if this framework already has it.</p>
       </div>
       <button type="button" className="link-button" onClick={onClose} aria-label="Close import">Close</button>
     </div>

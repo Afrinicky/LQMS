@@ -345,7 +345,7 @@ function NotDone() {
       {rows.length === 0
         ? <div className="di-clear"><CheckCircle2 size={18} /><span>Every scheduled activity in this window was recorded as done.</span></div>
         : <>
-          <p className="muted">{rows.length} scheduled activit{rows.length === 1 ? 'y was' : 'ies were'} never recorded as done. Repeat offenders are listed first — an activity missed again and again is usually one that is hard to do.</p>
+          <p className="muted">{rows.length} scheduled activit{rows.length === 1 ? 'y' : 'ies'} never recorded as done.</p>
           {byActivity.map(group => (
             <section key={group.id} className="notdone-group">
               <header>
@@ -415,11 +415,6 @@ function Schedules() {
     <>
       <div className="card">
         <h3><CalendarClock size={15} /> Preparation status</h3>
-        <p className="muted">
-          The duty roster and unit reassignment are the laboratory manager&rsquo;s and quality manager&rsquo;s, due before the month turns.
-          The bench schedules are the unit supervisors&rsquo;, and follow the unit assignments. A month that starts without one runs on the previous
-          month&rsquo;s, automatically — which is safe, but it is recorded here so nobody mistakes it for a schedule somebody prepared.
-        </p>
         <table>
           <thead><tr><th>Schedule</th><th>Month</th><th>Unit</th><th>Due by</th><th>Status</th><th>Owed by</th><th /></tr></thead>
           <tbody>
@@ -441,7 +436,7 @@ function Schedules() {
       <div className="card">
         <h3><ShieldAlert size={15} /> Carried forward automatically</h3>
         {data.carryForwards.length === 0
-          ? <p className="muted">Nothing has had to be carried forward. Every month was prepared in time.</p>
+          ? <p className="muted">Nothing has had to be carried forward.</p>
           : <table>
             <thead><tr><th>Schedule</th><th>Month</th><th>Unit</th><th>Why</th><th>When</th></tr></thead>
             <tbody>
@@ -667,7 +662,6 @@ export function SystemAuditPage() {
       <PageHeader
         eyebrow="System Audit"
         title="Audit of the whole system, in real time"
-        subtitle="Everything that happened, everything that was supposed to happen and did not, and every place the data disagrees with itself. Every row opens the record behind it."
         actions={<button type="button" className="secondary" onClick={runScan} disabled={scanning}>
           {scanning ? <><RefreshCw size={15} className="spin" /> Scanning…</> : <><ScanSearch size={15} /> Run a scan</>}
         </button>}

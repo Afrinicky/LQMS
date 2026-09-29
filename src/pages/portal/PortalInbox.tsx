@@ -156,7 +156,6 @@ export default function PortalInbox({ onOpenFace }: { onOpenFace?: (face: Portal
       <div className="pp-head">
         <div>
           <h3><Inbox size={16} /> My inbox</h3>
-          <p>Every alert routed to you. Opening one marks it read and opens the work itself, right here.</p>
         </div>
         <TextField className="pp-search" value={search} onValue={nextValue => setSearch(nextValue)}
           placeholder="Search your alerts…" aria-label="Search your alerts" />

@@ -683,7 +683,7 @@ export function DocumentControlPage() {
   </tr>;
 
   return <div className="module-page">
-    <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
+    <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" />
     {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
     {section === 'Documents' && docTabs.length > 0 && <div className="tabs dm-doc-tabs">
       {docTabs.map(name => {
@@ -960,14 +960,12 @@ export function DocumentControlPage() {
             <option value="">— choose the position —</option>
             {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
           </select>
-          <span className="hint">Once issued, everybody holding this post sees it on their own portal and on their personnel record.</span>
         </label>
         <label>…or one named member of staff
           <select value={docForm.appliesToStaffId} onChange={e => setDocForm({ ...docForm, appliesToStaffId: e.target.value, appliesToPositionId: e.target.value ? '' : docForm.appliesToPositionId })}>
             <option value="">— none —</option>
             {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
           </select>
-          <span className="hint">For a personalised description. A description issued to one person overrides the one for their post.</span>
         </label>
       </>}
       <label>Review frequency (months)<input type="number" min={1} value={docForm.reviewFrequencyMonths} onChange={e => setDocForm({ ...docForm, reviewFrequencyMonths: e.target.value })} /></label>
@@ -992,7 +990,6 @@ export function DocumentControlPage() {
 
     {section === 'Documents' && tab === 'Bulk Import' && <div className="card">
       <h3 style={{ marginTop: 0 }}>Bulk import documents</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Import many SOPs, policies, forms or registers at once. Each file becomes a controlled document (Draft) and its full content is read for in-app viewing. Document numbers are taken from the file name when present (e.g. <em>“SECHPO026 Document Control Procedure”</em> → <strong>SECHPO026</strong>), otherwise auto-numbered from the prefix.</p>
       {can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitBulk}>
         <label>Document type<select value={bulkForm.documentType} onChange={e => setBulkForm({ ...bulkForm, documentType: e.target.value })}>{DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Numbering<select value={bulkForm.codeMode} onChange={e => setBulkForm({ ...bulkForm, codeMode: e.target.value })}>
@@ -1015,14 +1012,12 @@ export function DocumentControlPage() {
     </div>}
 
     {section === 'Documents' && tab === 'Review Queue' && <>
-      <p className="muted">Documents submitted for review. An authorised reviewer (technical staff / Quality Manager) opens each, reads it, and records a review — which advances it to <em>Reviewed</em> for approval.</p>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>
         {reviewQueue.map(queueRow)}{reviewQueue.length === 0 && <tr><td colSpan={6} className="muted">Nothing awaiting review.</td></tr>}
       </tbody></table>
     </>}
 
     {section === 'Documents' && tab === 'Approval Queue' && <>
-      <p className="muted">Documents that have been reviewed and are awaiting approval by the Laboratory Manager (or authorised approver). Approving issues the document as the current controlled version and distributes it to all staff for attestation.</p>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reviewed by</th><th>Status</th><th></th></tr></thead><tbody>
         {approvalQueue.map(d => <tr key={d.id}>
           <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
@@ -1044,7 +1039,6 @@ export function DocumentControlPage() {
     {section === 'Documents' && tab === 'Attestations' && <AttestationsTabView pending={pendingAttestations} staff={staff} documents={documents} onSignAttestation={signAttestation} onOpenDoc={(docId, versionId, attId) => setViewer({ docId, versionId: versionId || 0, attestationId: attId, workflowStatus: undefined })} onError={setError} />}
 
     {section === 'Documents' && tab === 'My Inbox' && <>
-      <p className="muted">Controlled documents distributed to you. Open each to read it, then attest. Your attestation is recorded against the document and appears on its printed attestation list.</p>
       <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Attestation status</th><th>Due</th><th>Signed</th><th>Actions</th></tr></thead><tbody>
         {inbox.map(e => <tr key={e.id}>
           <td>{e.document_code || '—'} — {e.title}</td>
@@ -1063,7 +1057,6 @@ export function DocumentControlPage() {
 
     {section === 'Documents' && tab === 'Obsolete Register' && <>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-        <p className="muted" style={{ margin: 0 }}>Documents withdrawn from circulation. Obsolete masters are retained in the archive until their destruction date, clearly separated from current documents.</p>
         <span style={{ flex: 1 }} />
         {mayExport && <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/obsolete-register/export', 'Obsolete_Document_Register.xlsx')}>{exportBusy === '/documents/obsolete-register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
       </div>
@@ -1116,7 +1109,6 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
       sub === 'Document Register' ? 'Document_Register.xlsx' : sub === 'Records Register' ? 'Records_Register.xlsx' : 'Obsolete_Document_Register.xlsx'],
   ];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>The controlled Document &amp; Records Master List: the single authoritative index of all controlled documents, controlled records and obsolete documents. The Excel export reproduces this list as a three-register workbook.</p>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
       {tabBar(sub, subs, setSub)}
       <span style={{ flex: 1 }} />
@@ -1931,7 +1923,6 @@ function DocumentDetailPanel(props: any) {
       <span className="dm-avatar">{initialsOf(ownerName === '—' ? null : ownerName)}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600 }}>{ownerName === '—' ? 'No owner assigned' : ownerName}</div>
-        <span className="hint">Document owner / author — responsible for keeping this document current.</span>
       </div>
       {canGovern
         ? <button className="secondary" onClick={onTransferOwner}>Change owner…</button>
@@ -2035,7 +2026,6 @@ function DocumentDetailPanel(props: any) {
     {isAdmin && <details className="doc-danger-zone dm-danger-details">
       <summary>Administrator tools</summary>
       <h4 style={{ marginTop: 10 }}>Delete document</h4>
-      <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Permanently removes this document, all versions, attestations, distribution, print logs and files. This cannot be undone — to retire while keeping history, mark it obsolete instead.</p>
       <button className="danger" onClick={onDelete}>Delete document permanently</button>
     </details>}
     </div>
@@ -2113,7 +2103,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
 
   const subs = ['Records Register', 'Retention Schedule', 'Review Log', 'Destruction Log', 'Backup & Archive'];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>Control of records — identification, collection, indexing, access, storage, review, retention and safe disposal of quality and technical records. Records may be uploaded (scanned or electronic files), generated inside the system, or indexed here when kept physically.</p>
     {tabBar(sub, subs, setSub)}
 
     {sub === 'Records Register' && <>
@@ -2142,7 +2131,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         Search to narrow it down, or export the register for the whole list.
       </p>}
       <h4>Register a controlled record</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Records completed on paper are indexed here; electronic records can be uploaded and stored in the register; records generated inside the system are linked to their source module.</p>
       {can('documents.records', 'create') && <form className="form-grid" onSubmit={submitRecord}>
         <label>Record type / title<TextField value={regForm.title} onValue={nextValue => setRegForm({ ...regForm, title: nextValue })} required /></label>
         <label>Category<select value={regForm.recordCategory} onChange={e => setRegForm({ ...regForm, recordCategory: e.target.value })}>{RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
@@ -2166,7 +2154,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Retention Schedule' && <>
-      <p className="muted">Retention schedule — how long each record type is kept and on what medium, aligned with national and legal requirements. Seeded with the laboratory's standard retention periods.</p>
       <table className="data-table"><thead><tr><th>S/N</th><th>Record type</th><th>Retention period</th><th>Storage medium</th><th>Responsible</th><th>Extended</th></tr></thead><tbody>
         {schedule.map(s => <tr key={s.id}><td>{s.sn ?? '—'}</td><td>{s.record_type}</td><td>{s.retention_period}</td><td>{s.storage_medium || '—'}</td><td>{s.responsible_role || '—'}</td><td>{s.extended_retention ? 'Yes' : '—'}</td></tr>)}
       </tbody></table>
@@ -2182,7 +2169,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Review Log' && <>
-      <p className="muted">Quality &amp; technical records review log — routine documented review of records, with findings and follow-up actions.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Category</th><th>Section</th><th>Findings</th><th>NC</th><th>Action</th><th>Follow-up</th><th>Reviewer</th></tr></thead><tbody>
         {reviewLog.map(r => <tr key={r.id}><td>{r.review_number || '—'}</td><td>{r.review_date}</td><td>{r.record_category}</td><td>{r.section_name || '—'}</td><td>{r.findings || '—'}</td><td>{r.nonconformities_identified || '—'}</td><td>{r.action_required ? 'Yes' : '—'}</td><td>{formatBadge(r.follow_up_status)}</td><td>{r.reviewer_name || '—'}</td></tr>)}
         {reviewLog.length === 0 && <tr><td colSpan={9} className="muted">No reviews logged.</td></tr>}
@@ -2204,7 +2190,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Destruction Log' && <>
-      <p className="muted">Destruction log — authorised, witnessed disposal of records and documents after their retention period, with confidentiality safeguarded.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Type</th><th>Description</th><th>Date destroyed</th><th>Method</th><th>Authorised by</th><th>Witness</th></tr></thead><tbody>
         {destruction.map(d => <tr key={d.id}><td>{d.destruction_number || '—'}</td><td>{d.item_type}</td><td>{d.description}</td><td>{d.date_destroyed}</td><td>{(d.method || '—').replace(/_/g, ' ')}</td><td>{d.authorized_by_name || '—'}</td><td>{d.witness_name || '—'}</td></tr>)}
         {destruction.length === 0 && <tr><td colSpan={7} className="muted">No destructions recorded.</td></tr>}
@@ -2226,7 +2211,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Backup & Archive' && <>
-      <p className="muted">Backup &amp; archive log — electronic record backups, off-site copies, and periodic restoration testing.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Scope</th><th>Location</th><th>Off-site</th><th>Integrity</th><th>Restore test</th></tr></thead><tbody>
         {backups.map(b => <tr key={b.id}><td>{b.backup_number || '—'}</td><td>{b.backup_date}</td><td>{b.backup_type || '—'}</td><td>{b.scope || '—'}</td><td>{b.storage_location || '—'}</td><td>{b.offsite ? 'Yes' : '—'}</td><td>{b.integrity_verified ? 'Verified' : '—'}</td><td>{b.restore_test_status ? formatBadge(b.restore_test_status) : '—'}</td></tr>)}
         {backups.length === 0 && <tr><td colSpan={8} className="muted">No backups logged.</td></tr>}
@@ -2313,9 +2297,6 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
   const selectedDoc = docList.find(d => d.id === selectedDocId);
 
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>
-      Search for a controlled document to see the full attestation list. Every staff member signs their own attestation; no-one can sign for another. Use <strong>Print list</strong> for a hard-copy audit-ready record.
-    </p>
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: 16, alignItems: 'start' }}>
       <div className="card" style={{ padding: 12 }}>
         <h4 style={{ margin: '0 0 8px' }}>1 · Choose a document</h4>
@@ -2376,7 +2357,6 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
           </div>
         </div> : <div className="card" style={{ padding: 20 }}>
           <h4 style={{ margin: '0 0 8px' }}>2 · Attestation list</h4>
-          <p className="muted" style={{ margin: 0 }}>Select a document on the left to see everyone who has attested to it.</p>
         </div>}
 
         {pending.length > 0 && !selectedDocId && <div className="card" style={{ padding: 14, marginTop: 12 }}>
@@ -2523,9 +2503,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
   const subs = ['Register', 'Upload / Add', 'Periodic Patient Results', 'Automation Schedules'];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>
-      A single, ISO-aligned register of every archive created anywhere in the system: documents, records, equipment history, monthly reports, patient results and system backups. New archives created in any module land here automatically, and can also be uploaded manually.
-    </p>
 
     {summary && <KpiStrip items={[
       { label: 'Total archives', value: summary.totalArchives },
@@ -2604,7 +2581,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
     {sub === 'Upload / Add' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Upload an archived document / record</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Register an archive here for records held physically or already prepared as a file. Every archive becomes searchable from this tab and is linked back to its source module.</p>
       {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitUpload}>
         <label>Title<TextField value={uploadForm.title} onValue={nextValue => setUploadForm({ ...uploadForm, title: nextValue })} required /></label>
         <label>Archive type<select value={uploadForm.archiveType} onChange={e => setUploadForm({ ...uploadForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
@@ -2626,7 +2602,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
     {sub === 'Periodic Patient Results' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Archive patient results for a period (Excel / CSV)</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Generates an Excel or CSV file of every processed patient result within the chosen period and registers it as an archive. Requires LHIMS data for the period to be imported.</p>
       {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitPatientArchive}>
         <label>Title (optional)<TextField value={patientForm.title} onValue={nextValue => setPatientForm({ ...patientForm, title: nextValue })} placeholder="e.g. Patient Results — Q3 2026" /></label>
         <label>Period start<input type="date" value={patientForm.periodStart} onChange={e => setPatientForm({ ...patientForm, periodStart: e.target.value })} required /></label>
@@ -2644,7 +2619,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
     {sub === 'Automation Schedules' && <>
       <div className="card">
         <h4 style={{ marginTop: 0 }}>Configure a periodic archive schedule</h4>
-        <p className="muted" style={{ marginTop: 0 }}>Define when an archive should be generated (e.g. weekly / monthly patient results). The schedule is stored and displayed on the dashboard; an operator triggers each archive from the &ldquo;Periodic Patient Results&rdquo; tab or an automated job.</p>
         {can('documents.archive', 'edit') && <form className="form-grid" onSubmit={submitSchedule}>
           <label>Key<TextField value={scheduleForm.scheduleKey} onValue={nextValue => setScheduleForm({ ...scheduleForm, scheduleKey: nextValue })} placeholder="e.g. patient_results" required /></label>
           <label>Title<TextField value={scheduleForm.title} onValue={nextValue => setScheduleForm({ ...scheduleForm, title: nextValue })} required /></label>

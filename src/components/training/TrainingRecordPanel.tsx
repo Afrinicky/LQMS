@@ -78,10 +78,6 @@ export default function TrainingRecordPanel({ staffId, title = 'Training file', 
     <div className={`card training-file${compact ? ' compact' : ''}`}>
       <div className="training-file-head">
         <h3><GraduationCap size={16} /> {title}</h3>
-        <p className="muted">
-          Everything recorded anywhere in the system, in one place — sessions the laboratory ran, training given on
-          an instrument, courses declared on the portal, and the assessments that show any of it worked.
-        </p>
       </div>
 
       {entries.length === 0 ? (

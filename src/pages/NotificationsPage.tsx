@@ -120,7 +120,6 @@ export function NotificationsPage() {
     <PageHeader
       eyebrow="Notifications &amp; Reports"
       title="Notifications &amp; Reports"
-      subtitle="The machinery behind the laboratory's alerts — what is due, what raises a reminder, and the reports built from it. Your own inbox and tasks are in My Portal."
       actions={<button className="secondary" type="button" onClick={() => navigate('/my-portal?tab=My%20Inbox')}><IdCard size={16} /> My inbox</button>}
     />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
@@ -169,8 +168,6 @@ export function NotificationsPage() {
     </>}
 
     {tab === 'Generate Alerts' && <>
-      <p>Run the routed alert scan now. This walks every module for due, overdue, expiring, excursion, pending-review and pending-approval items, then routes a notification to each responsible person, section head/staff, and the relevant managers — deduplicated against existing open notifications.</p>
-      <p className="muted">This scan also runs automatically in the background every 15 minutes and opportunistically as the dashboards are used, so alerts appear without anyone pressing this button. Each person reads what it routed to them in My Portal.</p>
       <button type="button" onClick={generateAlerts}>Run routed scan now</button>
       {generateResult && <p style={{ marginTop: 12 }}>Scanned {generateResult.candidates} condition(s) · routed {generateResult.created ?? 0} new notification(s) to {generateResult.recipients ?? 0} recipient slot(s) · skipped {generateResult.skipped} existing.</p>}
     </>}

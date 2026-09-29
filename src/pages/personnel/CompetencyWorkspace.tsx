@@ -134,7 +134,6 @@ export default function CompetencyWorkspace({ staff, sections, departments, posi
       <div className="workspace-head">
         <div>
           <h3>Assessment register</h3>
-          <p className="muted">Every competency assessment raised, with the score it produced and when the person falls due again.</p>
         </div>
         <div className="workspace-actions">
           {mayPrint && <PrintButton path="/personnel/competency-matrix/print" label="Print coverage matrix" />}
@@ -543,7 +542,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
     return <>
       <EmptyState
         title="No elements on this assessment"
-        message="This assessment was raised without a framework. Add the elements you are assessing, then score them."
+        message="This assessment was raised without a framework."
       />
       {scorable && <ExtraElementForm extra={extra} setExtra={setExtra} onAdd={addElement} onCancel={() => setAdding(false)} alwaysOpen />}
     </>;
@@ -694,10 +693,6 @@ function SampleChecks({ record, scorable, override, onError, onChanged }: {
   }
 
   return <div className="sample-checks">
-    <p className="muted">
-      Performance against material where the answer is already known — a proficiency-testing sample, a split, a blind sample, or one the laboratory has examined before.
-      This is the part of a competency assessment that does not depend on anybody's opinion.
-    </p>
 
     {checks.length === 0
       ? <EmptyState title="No sample performance recorded" message="Add a proficiency, split, blind or previously examined sample and the result the person obtained." />
@@ -894,7 +889,6 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
 
     {open && mayEdit && <section className="signoff-card">
       <h4>Submit for technical review</h4>
-      <p className="muted">Hands the scored assessment to a second, technically competent person before the outcome is recorded.</p>
       <div className="form-grid">
         <label>Technical reviewer
           <select value={review.reviewerStaffId} onChange={e => setReview({ ...review, reviewerStaffId: e.target.value })}>
@@ -947,7 +941,6 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
             You carried out this assessment, so you cannot also countersign it. The technical review has to be recorded by another approver, signed in as themselves.
           </Notice>
         : <>
-          <p className="muted">A second pair of eyes on the assessment and its evidence. It is recorded as you, the signed-in reviewer — it cannot be signed on someone else's behalf.</p>
           <div className="form-grid">
             <label className="wide">Reviewer's comments<TextField as="textarea" rows={2} value={review.reviewerComments} onValue={nextValue => setReview({ ...review, reviewerComments: nextValue })} /></label>
             <button type="button" onClick={() => void onAct('/review', { reviewerComments: review.reviewerComments }, 'Technical review recorded.')}>Countersign as technical reviewer</button>
@@ -963,7 +956,6 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
 
     {record.status === 'completed' && isSubject && <section className="signoff-card">
       <h4>Your acknowledgement</h4>
-      <p className="muted">Signing records that the assessment was discussed with you. It does not signify agreement — put anything you disagree with in the box.</p>
       <div className="form-grid">
         <label className="wide">Your comments<TextField as="textarea" rows={3} value={ack.staffComments} onValue={nextValue => setAck({ staffComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/acknowledge', ack, 'Acknowledgement recorded.')}>Acknowledge this assessment</button>
@@ -982,7 +974,6 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
 
     {closed && record.outcome !== 'not_yet_competent' && mayApprove && <section className="signoff-card">
       <h4>Grant a technical authorisation</h4>
-      <p className="muted">What this assessment entitles the person to do. The authorisation expires with the re-assessment date unless you set another.</p>
       <div className="form-grid">
         <label>Area of work<TextField value={auth.moduleKey} onValue={nextValue => setAuth({ ...auth, moduleKey: nextValue })} placeholder="e.g. iqc, monitoring, poct" required /></label>
         <label>Level

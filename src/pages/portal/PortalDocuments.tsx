@@ -99,10 +99,6 @@ export default function PortalDocuments() {
         <div className="pp-head">
           <div>
             <h3><FileBadge size={16} /> My documents</h3>
-            <p>
-              Everything on your staff file. Add your own certificates and licences here — Personnel
-              Management verifies them, and a verified document is then theirs to change, not yours.
-            </p>
           </div>
           <div className="pp-head-actions">
             {documents.length > 0 && <span className={`pp-count${expired ? ' crit' : ''}`}>{documents.length}</span>}
@@ -156,7 +152,7 @@ export default function PortalDocuments() {
         )}
 
         {documents.length === 0 ? (
-          <p className="muted">No documents are on your file yet. Add your qualifications, licence and certificates above.</p>
+          <p className="muted">No documents are on your file yet.</p>
         ) : (
           <table className="data-table">
             <thead><tr><th>Type</th><th>Title</th><th>Issued</th><th>Expires</th><th>Status</th><th /></tr></thead>

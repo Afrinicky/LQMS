@@ -163,8 +163,7 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
   }));
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Assessments" title="Risk Management"
-      subtitle="Identify, analyse, evaluate, treat, accept and review risk across the laboratory — one connected workflow." />}
+    {!embedded && <PageHeader eyebrow="Assessments" title="Risk Management" />}
 
     <div className="tabs">{permitted.map(name => {
       const n = (counts as Record<string, number>)[name];

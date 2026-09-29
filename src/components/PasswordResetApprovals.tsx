@@ -81,7 +81,7 @@ export default function PasswordResetApprovals({ compact = false }: { compact?: 
       {notice && <Notice kind="success">{notice}</Notice>}
 
       {pending.length === 0 ? (
-        <p className="muted" style={{ margin: 0 }}>Nothing waiting. Requests raised from the sign-in screen appear here.</p>
+        <p className="muted" style={{ margin: 0 }}>Nothing waiting.</p>
       ) : (
         <>
           <p className="pwra-warn">

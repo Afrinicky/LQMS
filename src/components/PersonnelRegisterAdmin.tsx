@@ -237,13 +237,6 @@ export default function PersonnelRegisterAdmin() {
       <div className="reg-head">
         <div className="reg-head-text">
           <h3>Master Personnel Register</h3>
-          <p className="muted">
-            Everyone currently working in the laboratory, with the same record Personnel Management holds.
-            Somebody who leaves is recorded with the reason — retirement, transfer, end of contract — and moves
-            to <strong>Former staff</strong>, out of the register, the roster and the export, where that list can
-            be exported in its own right. Import and export use the one approved workbook — rows are matched on
-            Staff ID, so existing people are updated and new ones created.
-          </p>
         </div>
         <div className="reg-head-actions">
           <label className="reg-search">
@@ -469,10 +462,6 @@ export default function PersonnelRegisterAdmin() {
             placeholder="e.g. Transferred to Regional Hospital laboratory" />
         </label>
       </div>
-      <p className="dialog-lead muted">
-        They move to <strong>Former staff</strong>, where the reason and date are kept and can be exported. If they
-        come back, returning them to the register clears the departure.
-      </p>
     </DetailModal>
 
     {/* --- Erase ------------------------------------------------------------ */}
@@ -516,7 +505,6 @@ export default function PersonnelRegisterAdmin() {
                 {deleting.historicReferences.slice(0, 6).map(r => <li key={`${r.table}.${r.column}`}>{r.label}</li>)}
                 {deleting.historicReferences.length > 6 && <li className="muted">…and {deleting.historicReferences.length - 6} more</li>}
               </ul>
-              <p className="muted">If this was a real colleague, record their departure instead — the record keeps their name and the trail stays intact.</p>
             </div>
           </div>
 

@@ -168,8 +168,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
   const mayClose = can('complaints', 'void_archive');
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Customer Focus" title="Complaints"
-      subtitle="Receive, acknowledge, investigate, review and answer — ISO 15189 §7.4." />}
+    {!embedded && <PageHeader eyebrow="Customer Focus" title="Complaints" />}
     <PermissionTabs moduleKey="complaints" tabs={COMPLAINT_TABS.filter(n => !embedded || n !== 'Dashboard')} active={tab} onChange={setTab} />
     {loadState.error && <Notice kind="error">{loadState.error}</Notice>}
     {notice && <Notice kind="success">{notice}</Notice>}
@@ -297,10 +296,6 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
 
     {tab === 'Process targets' && <div className="card">
       <h3>Process targets</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        An assessor asks whether the laboratory meets the targets its own documented complaints procedure states.
-        Set them to match that procedure — every complaint logged afterwards is dated against them.
-      </p>
       {can('complaints', 'edit') && <form className="form-grid" onSubmit={saveTargets}>
         <label>Acknowledge receipt within
           <NumberField min={1} max={365} value={targets.acknowledgeDays}
@@ -380,10 +375,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
         {/* Independent review */}
         {stage === 'awaiting_review' && mayApprove && <section className="cx-act cx-review">
           <h4>Independent review</h4>
-          <p className="muted">
-            §7.4 requires the decision to be made or reviewed by somebody not involved in the activity complained
-            about. The investigator{selected.assigned_to_staff_id ? ` (${staffName(selected.assigned_to_staff_id)})` : ''} cannot review it.
-          </p>
+          <p className="muted">The investigator{selected.assigned_to_staff_id ? ` (${staffName(selected.assigned_to_staff_id)})` : ''} cannot review it.</p>
           <div className="form-grid">
             <label>Reviewer
               <select value={rev.reviewedByStaffId} onChange={e => setRev({ ...rev, reviewedByStaffId: e.target.value })}>
@@ -409,7 +401,6 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
         {/* Tell the complainant */}
         {selected.reviewed_at && !selected.outcome_communicated_at && mayEdit && <section className="cx-act">
           <h4>Tell the complainant</h4>
-          <p className="muted">The formal notice that handling has ended. §7.4 asks for it, and it is what closes the loop for the person who complained.</p>
           <div className="form-grid">
             <label>How<select value={out.method} onChange={e => setOut({ ...out, method: e.target.value })}>
               <option value="">Select…</option>{CONTACT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></label>

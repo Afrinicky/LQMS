@@ -204,7 +204,7 @@ function IndicatorAnalyst() {
   const [out, setOut] = useState<string>('');
   const [busy, setBusy] = useState(false);
   async function run() { setBusy(true); try { const r = await api<{ draft: string }>('/dennis/helper', { method: 'POST', body: JSON.stringify({ module: 'quality_indicators', task: 'summarize', inputText: `Summarise the ${sel} quality indicator. Do not change any values.` }) }); setOut(r.draft); } catch (e) { setOut(errorText(e)); } finally { setBusy(false); } }
-  return <div className="card"><h3>Quality Indicator Analyst</h3><p className="muted">Dennis summarises and explains indicators — he never edits indicator values.</p>
+  return <div className="card"><h3>Quality Indicator Analyst</h3>
     <div style={{ display: 'flex', gap: 8 }}><select value={sel} onChange={e=>setSel(e.target.value)}>{items.map(i=><option key={i}>{i}</option>)}</select>{can('dennis', 'view') && <button onClick={run} disabled={busy}>{busy?'Summarising…':'Summarize'}</button>}</div>
     <div className="dennis-output" style={{ marginTop: 10 }}><strong>{sel}</strong><p style={{ whiteSpace: 'pre-wrap' }}>{out || 'Select an indicator and click Summarize.'}</p><Notice/></div>
   </div>;
@@ -216,7 +216,7 @@ function Alerts() {
   useEffect(() => { api<{ alerts: any[] }>('/dennis/alerts').then(r=>setAlerts(r.alerts)).catch(()=>setAlerts([])); }, []);
   return <div className="card"><h3><Bell size={18}/> Dennis Alerts</h3>
     {!alerts && <p>Loading…</p>}
-    {alerts && alerts.length === 0 && <p className="muted">No active alerts. Dennis will surface overdue CAPA, SOP reviews, calibration, expiries and pending approvals here.</p>}
+    {alerts && alerts.length === 0 && <p className="muted">No active alerts.</p>}
     <div className="alert-grid">{(alerts ?? []).map((a,i)=><div className="alert-card" key={i}><strong>{a.title}</strong><span>Module: {a.module}</span><span className="badge">{a.priority} priority</span><span>Count: {a.count}</span><button className="secondary" onClick={()=>navigate(`/${a.module}`)}>Open module</button></div>)}</div>
   </div>;
 }
@@ -263,7 +263,6 @@ function Settings() {
       <option value="Hybrid recommended">Hybrid (recommended) — Ollama for everything; online AI only for uploaded SOP/document analysis</option>
       <option value="Online drafting only">Online drafting only — online AI for non-sensitive SOP/document drafting; never patient or operational records</option>
     </select></label>
-    <p className="muted" style={{ marginTop: 4 }}>Ollama (offline) is the default runtime for normal chat and <strong>all operational records</strong> (NC/CAPA, audit, complaints, blood bank, staff, equipment, inventory, quality indicators, management review). Online AI is used <strong>only</strong> for SOP/document analysis, and only after redaction.</p>
 
     <h4 style={{ marginBottom: 4 }}>Local / offline AI (Phase DENNIS-4)</h4>
     <label><input type="checkbox" checked={bool('dennis.local.enabled')} onChange={e=>set('dennis.local.enabled', String(e.target.checked))}/> Local AI enabled</label>
@@ -283,7 +282,6 @@ function Settings() {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{can('dennis', 'edit') && <button className="secondary" type="button" onClick={()=>testConn('online')}>Test online connection</button>}<span className="badge">{test.online || 'not tested'}</span></div>
 
     <div className="warning" style={{ marginTop: 12 }}><AlertTriangle size={18}/>Online AI may send document text outside the hospital network. Use only for SOPs and non-patient documents. Online AI is restricted to the SOP/document analysis tools and is <strong>never</strong> used for patient records, NC/CAPA, audit findings, complaints, blood bank, staff, equipment, inventory, quality indicators, management review or any live operational data. Dennis redacts identifiers before any online call, and blocks online use entirely when patient/operational data is detected.</div>
-    <p className="muted">TODO: API keys are stored in the local SECH_LIMS database. Use OS secure storage where available in a later hardening pass.</p>
     <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>{can('dennis', 'edit') && <button onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</button>}{msg && <span className="muted" style={{ alignSelf: 'center' }}>{msg}</span>}</div>
   </div><SafetyPanel/></div>;
 }
@@ -300,6 +298,6 @@ export function DennisPage(){
     if(tab==='Dennis Settings')return <Settings/>;
     return <Helper tab={tab}/>;
   },[tab]);
-  return <div className="page dennis-page"><div className="page-header"><div><p className="eyebrow">Documents and Records</p><h2>Dennis</h2><p>Dennis helps you search approved documents, explain, draft, suggest, summarize and remind — with sources. He is an assistant, not a final decision-maker.</p></div></div>
+  return <div className="page dennis-page"><div className="page-header"><div><p className="eyebrow">Documents and Records</p><h2>Dennis</h2></div></div>
     <div className="tabbar dennis-tabs">{tabs.map(t=><button className={tab===t?'active':''} key={t} onClick={()=>setTab(t)}>{t}</button>)}</div>{body}</div>;
 }

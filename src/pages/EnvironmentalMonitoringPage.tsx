@@ -181,7 +181,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
   if (!enabled) return <DisabledModule />;
 
   return <div className="module-page env-mon">
-    {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
+    {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" />}
     {tabBar(tab, permittedTabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
     {notice && <Notice kind="success">{notice}</Notice>}
@@ -227,7 +227,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
       </div>
       {chartAsset
         ? <div className="card"><TrendChart readings={chartData} min={assets.find(a => String(a.id) === chartAsset)?.temp_min} max={assets.find(a => String(a.id) === chartAsset)?.temp_max} /></div>
-        : <p className="muted">Choose an asset to view its temperature trend. Exports available as CSV; PDF/Excel reporting is on the roadmap.</p>}
+        : <p className="muted">Choose an asset to view its temperature trend.</p>}
     </div>}
 
     {tab === 'Settings' && <SettingsTab settings={settings} assets={assets}
@@ -300,7 +300,7 @@ function LiveDashboard({ dashboard, onOpenChart, onRefresh }: { dashboard: EnvDa
       { label: 'Active alerts', value: s.activeAlerts, tone: s.activeAlerts ? 'warning' : undefined },
       { label: 'Open excursions', value: s.openExcursions, tone: s.openExcursions ? 'danger' : undefined },
     ]} />
-    {dashboard.cards.length === 0 && <p className="muted" style={{ marginTop: 16 }}>No environmental assets yet. Add refrigerators, freezers, incubators or rooms under the Assets tab.</p>}
+    {dashboard.cards.length === 0 && <p className="muted" style={{ marginTop: 16 }}>No environmental assets yet.</p>}
     <div className="env-cards" style={{ marginTop: 18 }}>
       {dashboard.cards.map(c => <button key={c.id} type="button" className={`env-card tone-${CARD_TONE[c.status] || 'off'}`} onClick={() => onOpenChart(c.id)} title="View trend">
         <div className="env-card-top">
@@ -383,7 +383,6 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
   return <>
     <div className="card">
       <h3>Register device / data logger</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Pick a communication method. The <strong>Simulator</strong> driver generates live readings so you can trial the dashboard, alarms and excursions before hardware arrives. REST API and CSV import are ready; other protocols are listed and store configuration for when their adapter is installed.</p>
       {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
         <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
         <label>Communication<select value={form.communicationMethod} onChange={e => setForm({ ...form, communicationMethod: e.target.value, driverKey: e.target.value })}>{(commMethods.length ? commMethods : ['manual']).map((m: string) => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
@@ -435,9 +434,7 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
   }
   return <div className="card">
     <h3>Manual reading</h3>
-    <p className="muted" style={{ marginTop: 0 }}>Manual entries are tagged as <em>manual</em> and evaluated by the same alarm/excursion engine as automated readings.</p>
     <XlsxToolbar module={ENV} exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
-    <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Export/import temperature &amp; humidity readings in Excel. Imported rows are matched to assets by their <strong>Asset code</strong> and pass through the same excursion engine, so out-of-range values raise alerts automatically.</p>
     {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })} required><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name} ({a.temp_min ?? '−'}–{a.temp_max ?? '−'}°C)</option>)}</select></label>
       <label>Temperature (°C)<input type="number" step="any" value={form.temperature} onChange={e => setForm({ ...form, temperature: e.target.value })} required /></label>
@@ -477,7 +474,6 @@ function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
   async function createNc(id: number) { try { const r = await api<{ ncNumber: string }>(`/environmental/excursions/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); onFlash(`Created ${r.ncNumber}.`); } catch (e) { onError(errorText(e)); } }
   return <div className="card">
     <h3>Temperature excursions</h3>
-    <p className="muted" style={{ marginTop: 0 }}>An excursion opens when temperature leaves the acceptable band and closes when it returns. Sustained excursions auto-create a Nonconformity (and linked CAPA).</p>
     <table className="data-table"><thead><tr><th>Asset</th><th>Band °C</th><th>Started</th><th>Ended</th><th>Min/Max</th><th>Duration</th><th>Status</th><th>NC / CAPA</th><th></th></tr></thead><tbody>
       {excursions.map((e: EnvExcursion) => <tr key={e.id}><td>{e.asset_name || '—'}</td><td>{e.acceptable_min ?? '−'}–{e.acceptable_max ?? '−'}</td><td>{fmtTime(e.started_at)}</td><td>{e.ended_at ? fmtTime(e.ended_at) : <span className="badge critical">ongoing</span>}</td><td>{e.min_value ?? '−'} / {e.max_value ?? '−'}</td><td>{e.duration_minutes != null ? `${e.duration_minutes}m` : '—'}</td><td>{badge(e.status)}</td><td>{e.nc_number || '—'}{e.capa_number ? ` / ${e.capa_number}` : ''}</td>
         <td style={{ whiteSpace: 'nowrap' }}>{can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => ack(e.id)}>Acknowledge</button>}{' '}{!e.nc_id && <button className="secondary" onClick={() => createNc(e.id)}>Create NC</button>}</td></tr>)}
@@ -538,7 +534,6 @@ function SettingsTab({ settings, assets, onSaved, onError, onFlash }: any) {
       <label>Webhook URL (Teams/Slack incoming webhook)<TextField value={f.webhookUrl} onValue={nextValue => setF({ ...f, webhookUrl: nextValue })} placeholder="https://…" /></label>
       <button type="submit">Save settings</button>
     </form>}
-    <p className="muted" style={{ marginTop: 12 }}>Configure who gets notified under the <strong>Notifications</strong> tab. The interactive floor plan, predictive maintenance and Dennis analysis build on this data in later phases.</p>
   </div>
   <RangesPanel assets={assets ?? []} onSaved={onSaved} onError={onError} onFlash={onFlash} />
   </>;
@@ -599,9 +594,6 @@ function RangesPanel({ assets, onSaved, onError, onFlash }: {
 
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Acceptable ranges</h3>
-    <p className="muted" style={{ marginTop: 0 }}>
-      What each asset is monitored for, and the range it must stay inside. Completed months keep the range that was in force while they ran.
-    </p>
     <label style={{ maxWidth: 420, display: 'block' }}>Asset
       <select value={assetId} onChange={e => setAssetId(e.target.value)}>
         <option value="">Select an asset</option>
@@ -640,9 +632,6 @@ function RangesPanel({ assets, onSaved, onError, onFlash }: {
       </div>}
       {/* A parameter taken off the list is kept against the months already
           charted for it — it stops being asked for, it is not erased. */}
-      <p className="muted" style={{ marginTop: 10 }}>
-        A parameter removed here stops being charted from now on; the months already recorded against it keep it.
-      </p>
     </>}
   </div>;
 }
@@ -667,14 +656,12 @@ function NotificationsTab({ onError, onFlash }: any) {
   return <>
     <div className="card">
       <h3>Notification channels</h3>
-      <p className="muted" style={{ marginTop: 0 }}>In-app is always on. The Webhook channel posts to a Teams/Slack incoming webhook (set the URL under Settings). Email/SMS/WhatsApp are ready to plug in once a relay is configured on the host.</p>
       <table className="data-table"><thead><tr><th>Channel</th><th>Status</th><th></th></tr></thead><tbody>
         {channels.map(c => <tr key={c.key}><td>{c.label}</td><td>{c.ready ? <span className="badge active">ready</span> : <span className="badge">not configured</span>}</td><td>{can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => test(c.key)}>Send test</button>}</td></tr>)}
       </tbody></table>
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Escalation rules</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Each rule notifies a channel when a matching alert has gone unacknowledged for the delay. Delay 0 = notify immediately; larger delays form the escalation ladder.</p>
       {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={addRule}>
         <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
         <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>{['any', 'information', 'warning', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
@@ -719,12 +706,10 @@ function InsightsTab({ onError, onFlash }: any) {
   return <>
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h3 style={{ margin: 0 }}>Dennis observations</h3><button className="secondary" onClick={load}>Re-analyse</button></div>
-      <p className="muted" style={{ marginTop: 4 }}>Automatic analysis of the last 30 days. These are recommendations only — nothing is changed automatically; you approve any action.</p>
       {loading ? <p>Analysing…</p> : observations.length ? observations.map(row) : <p className="muted">No noteworthy patterns detected.</p>}
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Predictive maintenance</h3>
-      <p className="muted" style={{ marginTop: 4 }}>Signals that suggest servicing before failure (recurrent excursions, unstable readings, battery, communication, calibration).</p>
       {loading ? <p>Analysing…</p> : maintenance.length ? maintenance.map(row) : <p className="muted">No maintenance signals detected.</p>}
     </div>
   </>;
@@ -759,7 +744,6 @@ function ReportsTab({ onError }: any) {
   }
   return <div className="card">
     <h3>Reports</h3>
-    <p className="muted" style={{ marginTop: 0 }}>Generate environmental reports as Excel or printable PDF. Date range applies to time-based reports (readings, excursions, alarms, audit, summary).</p>
     <div className="form-grid">
       <label>Report<select value={type} onChange={e => setType(e.target.value)}>{types.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
       <label>From<input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label>
