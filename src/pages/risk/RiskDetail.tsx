@@ -31,7 +31,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section style={{ marginTop: 18 }}>
-    <h4 style={{ margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--border, #dde)' }}>{title}</h4>
+    <h4 style={{ margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--border)' }}>{title}</h4>
     {children}
   </section>;
 }

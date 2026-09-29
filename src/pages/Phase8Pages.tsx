@@ -848,25 +848,25 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
         const yMax = hi + span * 0.1;
         const x = (i: number) => padL + (ordered.length === 1 ? innerW / 2 : (i * innerW) / (ordered.length - 1));
         const y = (v: number) => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
-        const colorFor = (status?: string) => status === 'within_target' ? 'var(--success, #2a9d4a)' : status === 'warning' ? 'var(--warning, #d99500)' : status === 'critical' ? 'var(--danger, #d23a2a)' : 'var(--muted, #888)';
+        const colorFor = (status?: string) => status === 'within_target' ? 'var(--success)' : status === 'warning' ? 'var(--warning)' : status === 'critical' ? 'var(--danger)' : 'var(--muted)';
         const linePath = ordered.map((p, i) => p.calculated_value === null || p.calculated_value === undefined ? '' : `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.calculated_value).toFixed(1)}`).filter(Boolean).join(' ');
         const refLine = (val: number, label: string, color: string) => <g key={label}>
           <line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke={color} strokeWidth={1} strokeDasharray="4 4" />
-          <text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted, #666)">{label}</text>
+          <text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted)">{label}</text>
         </g>;
         return <>
-          <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Indicator trend" style={{ width: '100%', maxWidth: w, height: 'auto', background: '#fff', border: '1px solid var(--border, #ddd)', borderRadius: 8 }}>
-            {target !== null && target !== undefined && refLine(target, `Target ${target}`, '#2a9d4a')}
-            {warning !== null && warning !== undefined && refLine(warning, `Warning ${warning}`, '#d99500')}
-            {critical !== null && critical !== undefined && refLine(critical, `Critical ${critical}`, '#d23a2a')}
-            <path d={linePath} fill="none" stroke="#1B3A6B" strokeWidth={1.5} />
+          <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Indicator trend" style={{ width: '100%', maxWidth: w, height: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
+            {target !== null && target !== undefined && refLine(target, `Target ${target}`, 'var(--success)')}
+            {warning !== null && warning !== undefined && refLine(warning, `Warning ${warning}`, 'var(--warning)')}
+            {critical !== null && critical !== undefined && refLine(critical, `Critical ${critical}`, 'var(--danger)')}
+            <path d={linePath} fill="none" stroke="var(--navy)" strokeWidth={1.5} />
             {ordered.map((p, i) => p.calculated_value === null || p.calculated_value === undefined ? null : (
-              <circle key={i} cx={x(i)} cy={y(p.calculated_value)} r={4} fill={colorFor(p.status)} stroke="#fff" strokeWidth={1}>
+              <circle key={i} cx={x(i)} cy={y(p.calculated_value)} r={4} fill={colorFor(p.status)} stroke="var(--surface)" strokeWidth={1}>
                 <title>{p.period_start} → {p.period_end}: {p.calculated_value.toFixed(2)} ({p.status})</title>
               </circle>
             ))}
-            <text x={padL} y={h - 8} fontSize={10} fill="var(--muted, #666)">{ordered[0].period_start}</text>
-            <text x={w - padR} y={h - 8} fontSize={10} textAnchor="end" fill="var(--muted, #666)">{ordered[ordered.length - 1].period_end}</text>
+            <text x={padL} y={h - 8} fontSize={10} fill="var(--muted)">{ordered[0].period_start}</text>
+            <text x={w - padR} y={h - 8} fontSize={10} textAnchor="end" fill="var(--muted)">{ordered[ordered.length - 1].period_end}</text>
           </svg>
           <table className="data-table" style={{ marginTop: 12 }}><thead><tr><th>Period start</th><th>Period end</th><th>Calculated value</th><th>Status</th><th>Interpretation</th></tr></thead><tbody>
             {ordered.map(r => <tr key={r.id}><td>{r.period_start}</td><td>{r.period_end}</td><td>{r.calculated_value !== null && r.calculated_value !== undefined ? r.calculated_value.toFixed(2) : '—'}</td><td>{formatBadge(r.status)}</td><td>{r.interpretation || '—'}</td></tr>)}

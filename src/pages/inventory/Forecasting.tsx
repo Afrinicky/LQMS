@@ -35,9 +35,9 @@ type Advice = {
 };
 
 const CONFIDENCE_TONE: Record<string, { bg: string; fg: string }> = {
-  good: { bg: '#e4f7ec', fg: '#155c34' },
-  moderate: { bg: '#fff7df', fg: '#6b4b05' },
-  low: { bg: '#fde2e2', fg: '#b42318' },
+  good: { bg: 'var(--success-bg)', fg: 'var(--success)' },
+  moderate: { bg: 'var(--warning-bg)', fg: 'var(--warning)' },
+  low: { bg: 'var(--danger-bg)', fg: 'var(--danger)' },
   none: { bg: 'transparent', fg: 'inherit' },
 };
 

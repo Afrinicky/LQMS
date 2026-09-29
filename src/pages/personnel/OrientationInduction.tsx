@@ -30,10 +30,10 @@ function ProgressBar({ done, total, na }: { done: number; total: number; na: num
   const applicable = Math.max(0, total - na);
   const pct = applicable > 0 ? Math.round((100 * done) / applicable) : 0;
   return <div>
-    <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
-      <div style={{ width: `${pct}%`, height: '100%', background: pct >= 100 ? '#16a34a' : pct >= 40 ? '#f59e0b' : '#dc2626' }} />
+    <div style={{ height: 6, background: 'var(--track)', borderRadius: 3, overflow: 'hidden' }}>
+      <div style={{ width: `${pct}%`, height: '100%', background: pct >= 100 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)' }} />
     </div>
-    <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>{done} of {applicable} done ({pct}%){na ? ` · ${na} N/A` : ''}</div>
+    <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 2 }}>{done} of {applicable} done ({pct}%){na ? ` · ${na} N/A` : ''}</div>
   </div>;
 }
 
@@ -58,9 +58,9 @@ export default function OrientationInduction({ staff, sections, departments }: {
         <h3 style={{ margin: 0 }}>Orientation &amp; Induction</h3>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>Set the laboratory's induction checklists as frameworks, then raise a record against a framework for each new starter and work it down item by item — the same way competency assessments are built and used.</p>
       </div>
-      <div className="segmented" style={{ display: 'inline-flex', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
+      <div className="segmented" style={{ display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: 8, overflow: 'hidden' }}>
         {(['records', 'frameworks'] as const).map(v => <button key={v} type="button" onClick={() => setView(v)}
-          style={{ padding: '6px 14px', border: 'none', background: view === v ? 'var(--accent-soft, #eef4ff)' : 'transparent', fontWeight: view === v ? 600 : 400, cursor: 'pointer' }}>
+          style={{ padding: '6px 14px', border: 'none', background: view === v ? 'var(--accent-soft)' : 'transparent', fontWeight: view === v ? 600 : 400, cursor: 'pointer' }}>
           {v === 'records' ? 'Records' : 'Frameworks'}
         </button>)}
       </div>
@@ -218,17 +218,17 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
       <div className="card" style={{ padding: 12 }}>
         <h4 style={{ marginTop: 0 }}>Orientation records</h4>
         {records.length === 0 ? <p className="muted">No orientation records yet.</p> :
-          <div style={{ maxHeight: '60vh', overflowY: 'auto', borderTop: '1px solid #e2e8f0' }}>
+          <div style={{ maxHeight: '60vh', overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
             {records.map(r => {
               const isSel = selected?.id === r.id;
               const total = r.item_count ?? 0, done = r.item_done ?? 0, na = r.item_na ?? 0;
               return <button key={r.id} type="button" onClick={() => openRecord(r.id)}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #eef0f4', background: isSel ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer' }}>
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--panel-2)', background: isSel ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <span style={{ fontWeight: 600 }}>{r.staff_name}</span>
                   {r.orientation_complete ? badge('completed', 'Complete') : badge(r.status)}
                 </div>
-                <div style={{ fontSize: 11, color: '#64748b', margin: '3px 0' }}>{r.framework_title || (total === 0 ? 'Legacy record' : '—')}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', margin: '3px 0' }}>{r.framework_title || (total === 0 ? 'Legacy record' : '—')}</div>
                 {total > 0 && <ProgressBar done={done} total={total} na={na} />}
               </button>;
             })}
@@ -272,8 +272,8 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
                         disabled={!mayEdit}
                         onClick={() => setItemStatus(it, st)}
                         title={ORIENTATION_ITEM_STATUS_LABELS[st]}
-                        style={{ marginRight: 4, padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e1', cursor: mayEdit ? 'pointer' : 'default',
-                          background: it.status === st ? (st === 'completed' ? '#16a34a' : st === 'not_applicable' ? '#64748b' : '#f59e0b') : 'transparent',
+                        style={{ marginRight: 4, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border-strong)', cursor: mayEdit ? 'pointer' : 'default',
+                          background: it.status === st ? (st === 'completed' ? 'var(--success)' : st === 'not_applicable' ? 'var(--muted)' : 'var(--warning)') : 'transparent',
                           color: it.status === st ? '#fff' : '#334155', fontSize: 11 }}>
                         {st === 'completed' ? '✓ Done' : st === 'not_applicable' ? 'N/A' : 'Pending'}
                       </button>)}
@@ -422,15 +422,15 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
           </select>
         </div>
         {mayCreate && <button style={{ width: '100%', marginTop: 8 }} onClick={() => { setCreating(true); setSelected(null); setForm(emptyFramework); }}>＋ New framework</button>}
-        <div style={{ maxHeight: '58vh', overflowY: 'auto', marginTop: 8, borderTop: '1px solid #e2e8f0' }}>
+        <div style={{ maxHeight: '58vh', overflowY: 'auto', marginTop: 8, borderTop: '1px solid var(--border)' }}>
           {frameworks.length === 0 ? <p className="muted" style={{ padding: 8 }}>No frameworks.</p> : frameworks.map(f => {
             const isSel = selected?.id === f.id;
             return <button key={f.id} type="button" onClick={() => { setCreating(false); void openFramework(f.id); }}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', borderBottom: '1px solid #eef0f4', background: isSel ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer' }}>
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', borderBottom: '1px solid var(--panel-2)', background: isSel ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
                 <span style={{ fontWeight: 600 }}>{f.title}</span>{badge(f.status)}
               </div>
-              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 {ORIENTATION_AUDIENCE_LABELS[f.applies_to] || f.applies_to} · {f.item_count ?? 0} items{f.is_default ? ' · default' : ''}
               </div>
             </button>;
@@ -472,7 +472,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
               {mayApprove && selected.status === 'active' && <button className="secondary" onClick={() => setStatus(selected.id, 'draft')}>Move to draft</button>}
               {mayCreate && <button className="secondary" onClick={() => duplicate(selected.id)}>Duplicate</button>}
               {mayArchive && selected.status !== 'archived' && <button className="secondary" onClick={() => setStatus(selected.id, 'archived')}>Archive</button>}
-              {mayArchive && selected.status === 'draft' && (selected.records_raised ?? 0) === 0 && <button className="secondary" style={{ color: '#dc2626' }} onClick={() => removeFramework(selected.id)}>Delete</button>}
+              {mayArchive && selected.status === 'draft' && (selected.records_raised ?? 0) === 0 && <button className="secondary" style={{ color: 'var(--danger)' }} onClick={() => removeFramework(selected.id)}>Delete</button>}
             </div>
           </div>
           {(selected.purpose || selected.scope) && <div style={{ marginTop: 10 }}>
@@ -480,7 +480,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
             {selected.scope && <p className="muted" style={{ margin: '4px 0', fontSize: 12.5 }}><strong>Scope:</strong> {selected.scope}</p>}
           </div>}
           {mayEdit && <details style={{ marginTop: 8 }}>
-            <summary style={{ cursor: 'pointer', fontSize: 12, color: '#64748b' }}>Edit framework details</summary>
+            <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>Edit framework details</summary>
             <div className="form-grid" style={{ marginTop: 8 }}>
               <label>Title<input defaultValue={selected.title} onBlur={e => { if (e.target.value !== selected.title) void saveMeta({ title: e.target.value }); }} /></label>
               <label>Applies to<select value={selected.applies_to} onChange={e => void saveMeta({ appliesTo: e.target.value })}>{ORIENTATION_AUDIENCES.map(a => <option key={a} value={a}>{ORIENTATION_AUDIENCE_LABELS[a]}</option>)}</select></label>
@@ -513,7 +513,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
                 <td style={{ width: 120, whiteSpace: 'nowrap', textAlign: 'right' }}>
                   {mayEdit && <>
                     <button type="button" className="link-button" onClick={() => setEditingItem(it)} style={{ marginRight: 8 }}>Edit</button>
-                    <button type="button" className="link-button danger" onClick={() => deleteItem(it.id)} style={{ color: '#dc2626' }}>Delete</button>
+                    <button type="button" className="link-button danger" onClick={() => deleteItem(it.id)} style={{ color: 'var(--danger)' }}>Delete</button>
                   </>}
                 </td>
               </>}

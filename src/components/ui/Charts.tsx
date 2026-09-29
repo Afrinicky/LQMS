@@ -2,20 +2,21 @@ import type { ReactNode } from 'react';
 
 /* ============================================================================
    Lightweight, dependency-free SVG chart kit for the SECH_LIMS dashboards.
-   All charts are theme-aware (use the dark palette), responsive (viewBox based)
-   and gracefully render an empty state when there is no data. No external
-   charting library is used so the offline Electron build stays dependency-free.
+   Every colour is a design token, so the same chart repaints with the theme.
+   Charts are responsive (viewBox based) and gracefully render an empty state
+   when there is no data. No external charting library is used so the offline
+   Electron build stays dependency-free.
    ========================================================================= */
 
 export const CHART_COLORS = [
-  '#4E8DFF', // accent bright
-  '#34D399', // success
-  '#F5B544', // warning
-  '#FF6B7D', // danger
-  '#A78BFA', // violet
-  '#2DD4BF', // teal
-  '#F472B6', // pink
-  '#60A5FA', // sky
+  'var(--c1)', // blue
+  'var(--c5)', // green
+  'var(--c4)', // amber
+  'var(--c7)', // coral
+  'var(--c3)', // violet
+  'var(--c2)', // teal
+  'var(--c6)', // pink
+  'var(--c8)', // sky
 ];
 
 type Datum = {
@@ -67,7 +68,7 @@ export function DonutChart({
     <div className="chart-donut">
       <div className="donut-svg" style={{ width: size, height: size }}>
         <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
-          <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+          <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--track)" strokeWidth={thickness} />
           {total > 0 && (
             <g transform={`rotate(-90 ${cx} ${cx})`}>
               {items.map((d, i) => {
@@ -205,7 +206,7 @@ export function RadialGauge({
       <div className="gauge-svg" style={{ width: size, height: size * 0.82 }}>
         <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
           <g transform={`rotate(135 ${cx} ${cx})`}>
-            <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={thickness} strokeDasharray={trackDash} strokeLinecap="round" />
+            <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--track)" strokeWidth={thickness} strokeDasharray={trackDash} strokeLinecap="round" />
             <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth={thickness} strokeDasharray={dash} strokeLinecap="round" />
           </g>
         </svg>

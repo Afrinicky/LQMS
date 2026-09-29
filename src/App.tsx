@@ -3,6 +3,7 @@ import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import AppLayout from './layouts/AppLayout';
 import SettingsLayout from './layouts/SettingsLayout';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { ThemeProvider } from './hooks/useTheme';
 import { ModuleProvider } from './hooks/useModules';
 import { PermissionProvider, usePermissions } from './hooks/usePermissions';
 import { DutyReminderProvider } from './hooks/useDutyReminders';
@@ -278,10 +279,10 @@ function AppRoutes() {
   </Routes>;
 }
 export default function App() {
-  return <AuthProvider>
+  return <ThemeProvider><AuthProvider>
     <Gate><AppRoutes/></Gate>
     {/* Answers follow the action: a message whose banner is off-screen is
         repeated beside the control that caused it. See ui/Feedback.tsx. */}
     <FeedbackHost/>
-  </AuthProvider>;
+  </AuthProvider></ThemeProvider>;
 }

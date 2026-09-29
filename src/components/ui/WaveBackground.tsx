@@ -21,18 +21,18 @@ export default function WaveBackground({ variant = 'header', className }: WaveBa
     >
       <defs>
         <linearGradient id="wave-royal" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#2F6BFF" stopOpacity="0" />
-          <stop offset="45%" stopColor="#4E8DFF" stopOpacity={strong ? 0.55 : 0.4} />
-          <stop offset="100%" stopColor="#2F6BFF" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0" />
+          <stop offset="45%" stopColor="var(--accent-bright)" stopOpacity={strong ? 0.55 : 0.4} />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
         </linearGradient>
         <linearGradient id="wave-white" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#F5F8FF" stopOpacity="0" />
-          <stop offset="50%" stopColor="#F5F8FF" stopOpacity={strong ? 0.16 : 0.1} />
-          <stop offset="100%" stopColor="#F5F8FF" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--text)" stopOpacity="0" />
+          <stop offset="50%" stopColor="var(--text)" stopOpacity={strong ? 0.16 : 0.1} />
+          <stop offset="100%" stopColor="var(--text)" stopOpacity="0" />
         </linearGradient>
         <radialGradient id="wave-glow" cx="78%" cy="8%" r="60%">
-          <stop offset="0%" stopColor="#2F6BFF" stopOpacity={strong ? 0.22 : 0.14} />
-          <stop offset="100%" stopColor="#2F6BFF" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity={strong ? 0.22 : 0.14} />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
         </radialGradient>
       </defs>
 
@@ -72,7 +72,7 @@ export default function WaveBackground({ variant = 'header', className }: WaveBa
       <path
         d="M0,235 C260,175 420,315 700,235 C980,155 1120,295 1440,225"
         fill="none"
-        stroke="#4E8DFF"
+        stroke="var(--accent-bright)"
         strokeWidth="1.2"
         strokeDasharray="2 12"
         strokeLinecap="round"

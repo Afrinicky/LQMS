@@ -4,6 +4,7 @@ import { FlaskConical, User, Lock, Building2, IdCard, ArrowRight, KeyRound, Eye,
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { WaveBackground, MedicalLabBackgroundMarks } from '../components/ui';
+import { ThemeToggle } from '../components/ui/ThemeToggle';
 import PasswordResetDialog from '../components/PasswordResetDialog';
 import { Notice } from '../components/ui/Feedback';
 
@@ -94,6 +95,7 @@ export function LoginPage() {
   return (
     <div className="auth">
       <div className="bg-deco"><WaveBackground variant="hero" /><MedicalLabBackgroundMarks waveform /></div>
+      <ThemeToggle className="icon-btn auth-theme" />
       <form className="card form" onSubmit={submit}>
         <AuthBrand tagline="by Nickland" />
         <div className="auth-head">
@@ -143,6 +145,7 @@ export function SetupPage() {
   return (
     <div className="auth">
       <div className="bg-deco"><WaveBackground variant="hero" /><MedicalLabBackgroundMarks /></div>
+      <ThemeToggle className="icon-btn auth-theme" />
       <form className="card form" onSubmit={submit}>
         <AuthBrand tagline="First-time setup" />
         <div className="auth-head">
