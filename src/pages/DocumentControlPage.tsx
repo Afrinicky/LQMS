@@ -1216,14 +1216,14 @@ function SopTools({ docId, versionId, documents, startOpen }: { docId: number; v
   const others = (documents || []).filter(d => d.id !== docId);
   return <div className="sop-tools">
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-      <strong style={{ color: 'var(--text)', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
+      <strong style={{ color: 'var(--dv-text)', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
       <button className="secondary" onClick={() => setOpen(o => !o)}>{open ? 'Hide' : 'Show tools'}</button>
     </div>
     {open && <>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
         {SOP_ACTIONS.map(a => can('dennis', 'view') && <button key={a.task} className="secondary" disabled={!!busy} onClick={() => run(a.task)}>{busy === a.task ? 'Working…' : a.label}</button>)}
       </div>
-      {others.length > 0 && <label style={{ fontSize: 12, color: 'var(--muted)' }}>Compare with:&nbsp;
+      {others.length > 0 && <label style={{ fontSize: 12, color: 'var(--dv-muted)' }}>Compare with:&nbsp;
         <select value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">— choose document —</option>{others.map(d => <option key={d.id} value={d.id}>{d.document_code ? `${d.document_code} — ` : ''}{d.title}</option>)}</select>
       </label>}
       {confirm && <div className="sop-confirm">
@@ -1232,7 +1232,7 @@ function SopTools({ docId, versionId, documents, startOpen }: { docId: number; v
       </div>}
       {result && <div style={{ marginTop: 8 }}>
         {result.error ? <Notice kind="error">{result.error}</Notice> : <>
-          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--dv-muted)', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="badge">{result.mode}{result.provider && result.provider !== 'none' ? ` · ${result.provider}` : ''}</span>
             {result.onlineUsed ? <span className="badge warning">online · redacted</span> : <span className="badge">offline · on-premises</span>}
             <span>Review before use.</span>
@@ -1578,56 +1578,56 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 .doc-content img{max-width:100%;height:auto}.doc-content .docx-img{text-align:center;margin:10px 0}
 .doc-content .docx-diagram{border:1px dashed #b9c4d6;border-radius:6px;padding:8px 12px;margin:10px 0;background:#f8fafc}
 .doc-reader{display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
-.doc-toc{width:236px;flex:none;overflow:auto;background:var(--panel);border-right:1px solid var(--border);padding:10px 8px}
-.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:2px 8px 8px}
-.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:var(--muted);cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
+.doc-toc{width:236px;flex:none;overflow:auto;background:var(--dv-panel);border-right:1px solid var(--dv-border);padding:10px 8px}
+.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dv-faint);padding:2px 8px 8px}
+.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:var(--dv-muted);cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
 .doc-toc-item:hover{background:rgba(255,255,255,.06);color:#fff}
 .doc-toc-item.active{background:var(--accent-soft,rgba(47,107,255,.16));color:#fff}
-.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:var(--muted)}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:var(--faint)}
+.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:var(--dv-muted)}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:var(--dv-faint)}
 .doc-scroll{flex:1;overflow:auto;background:#525659;padding:18px;min-width:0}
 .doc-page{background:#fff;color:#111;max-width:820px;margin:0 auto;padding:34px 44px;box-shadow:0 2px 14px rgba(0,0,0,.45);line-height:1.55;border-radius:2px}
 @media (max-width:760px){.doc-toc{display:none}}
-.word-editor{border:1px solid var(--border);border-radius:6px;overflow:hidden}
-.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--border)}
-.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid var(--border)}
+.word-editor{border:1px solid var(--dv-border);border-radius:6px;overflow:hidden}
+.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--dv-panel);border-bottom:1px solid var(--dv-border)}
+.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid var(--dv-border)}
 .word-toolbar .wt-group:last-child{border-right:0}
-.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:5px;color:var(--text);cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
-.wt-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
+.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:var(--dv-panel-2);border:1px solid var(--dv-border-strong);border-radius:5px;color:var(--dv-text);cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
+.wt-btn:hover{background:var(--dv-on);border-color:var(--accent)}
 .wt-color{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-.wt-select{height:26px;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:5px;color:var(--text);font-size:12px;padding:0 4px;cursor:pointer}
+.wt-select{height:26px;background:var(--dv-panel-2);border:1px solid var(--dv-border-strong);border-radius:5px;color:var(--dv-text);font-size:12px;padding:0 4px;cursor:pointer}
 .doc-page[contenteditable="true"]{cursor:text}
 .doc-page[contenteditable="true"]:focus{outline:none}
-.dv-window{background:var(--surface);border:1px solid var(--border);box-shadow:0 18px 60px rgba(0,0,0,.55)}
-.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:var(--panel);border-bottom:1px solid var(--border);user-select:none;touch-action:none;flex:none}
-.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--text)}
+.dv-window{background:var(--dv-surface);border:1px solid var(--dv-border);box-shadow:0 18px 60px rgba(0,0,0,.55)}
+.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:var(--dv-panel);border-bottom:1px solid var(--dv-border);user-select:none;touch-action:none;flex:none}
+.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--dv-text)}
 .dv-winbtns{display:flex;gap:2px;flex:none}
-.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:var(--muted);font-size:13px;cursor:pointer;line-height:1;padding:0}
+.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:var(--dv-muted);font-size:13px;cursor:pointer;line-height:1;padding:0}
 .dv-winbtn:hover{background:rgba(255,255,255,.09);color:#fff}
 .dv-winbtn.dv-close:hover{background:#c42b1c;color:#fff}
-.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none;flex-wrap:wrap}
-.dv-tabs{display:inline-flex;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;flex:none}
-.dv-tabs button{border:0;background:transparent;box-shadow:none;color:var(--muted);font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
-.dv-tabs button.on{background:var(--accent-soft);color:#fff}
+.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--dv-panel);border-bottom:1px solid var(--dv-border);flex:none;flex-wrap:wrap}
+.dv-tabs{display:inline-flex;background:var(--dv-panel-2);border:1px solid var(--dv-border);border-radius:8px;padding:2px;gap:2px;flex:none}
+.dv-tabs button{border:0;background:transparent;box-shadow:none;color:var(--dv-muted);font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
+.dv-tabs button.on{background:var(--dv-on);color:#fff}
 .dv-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:var(--accent,#2f6bff);border:1px solid transparent;border-radius:7px;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
 .dv-btn:hover{filter:brightness(1.12)}
 .dv-btn:disabled{opacity:.55;cursor:default}
-.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
-.dv-ghost:hover{background:var(--accent-soft);border-color:var(--accent)}
+.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--dv-border-strong);border-radius:7px;color:var(--dv-text);font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
+.dv-ghost:hover{background:var(--dv-on);border-color:var(--accent)}
 .dv-ghost:disabled{opacity:.55;cursor:default}
-.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;padding:2px}
-.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:var(--text);font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
-.dv-zoom button:hover{background:var(--accent-soft)}
-.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:var(--muted)}
+.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:var(--dv-panel-2);border:1px solid var(--dv-border);border-radius:7px;padding:2px}
+.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:var(--dv-text);font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
+.dv-zoom button:hover{background:var(--dv-on)}
+.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:var(--dv-muted)}
 .dv-menuwrap{position:relative;flex:none}
-.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:var(--panel);border:1px solid var(--border-strong);border-radius:9px;padding:5px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
-.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:var(--text);font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
-.dv-menu button:hover{background:var(--accent-soft)}
+.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:var(--dv-panel);border:1px solid var(--dv-border-strong);border-radius:9px;padding:5px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
+.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:var(--dv-text);font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.dv-menu button:hover{background:var(--dv-on)}
 .dv-menu button:disabled{opacity:.5;cursor:default}
-.dv-menu .dv-menu-sep{height:1px;background:var(--border);margin:4px 6px}
-.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:var(--success-bg);border-bottom:1px solid var(--border);font-size:12px;color:var(--success);flex:none}
-.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--surface);padding:8px}
-.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:12px;flex:none}
-.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid var(--border-strong);border-radius:7px;background:var(--panel-2);color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap}
+.dv-menu .dv-menu-sep{height:1px;background:var(--dv-border);margin:4px 6px}
+.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:var(--success-bg);border-bottom:1px solid var(--dv-border);font-size:12px;color:var(--success);flex:none}
+.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--dv-surface);padding:8px}
+.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:var(--dv-panel-2);border:1px solid var(--dv-border);border-radius:8px;color:var(--dv-muted);font-size:12px;flex:none}
+.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid var(--dv-border-strong);border-radius:7px;background:var(--dv-panel-2);color:var(--dv-muted);font-size:12.5px;font-weight:600;white-space:nowrap}
 /* The Office handoff panel: one document, one obvious action, one line of
    state. Deliberately quiet — the document itself is elsewhere, in Word. */
 .oh{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}
@@ -1791,7 +1791,7 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 
       {/* Collapsible drawers keep the preview large until these are needed. */}
       {panel === 'workflow' && <div className="dv-drawer">
-        {workflowStatus && <div style={{ fontSize: 12.5, color: 'var(--text)', marginBottom: 8 }}>
+        {workflowStatus && <div style={{ fontSize: 12.5, color: 'var(--dv-text)', marginBottom: 8 }}>
           Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
         </div>}
         <div style={{ display: 'flex', gap: 8 }}>
