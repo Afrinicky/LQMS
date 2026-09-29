@@ -696,7 +696,7 @@ export function DocumentControlPage() {
       })}
     </div>}
     {error && <Notice kind="error">{error}</Notice>}
-    {notice && <Notice kind="success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
+    {notice && <Notice kind="success" style={{ background: 'var(--success-bg)', border: '1px solid var(--success-line)', color: 'var(--success)', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
 
     {viewer && <DocumentViewer key={`${viewer.docId}-${viewer.versionId}`} docId={viewer.docId} versionId={viewer.versionId} attestationId={viewer.attestationId}
       workflowStatus={viewer.workflowStatus} onWorkflowAction={(action: string) => workflowAction(viewer.docId, action)}
@@ -897,7 +897,7 @@ export function DocumentControlPage() {
       {/* Administrator-only permanent deletion — a typed confirmation guards it. */}
       {deleteModal && <div className="dm-modal-overlay" onClick={() => !deleteModal.busy && setDeleteModal(null)}>
         <div className="dm-modal" onClick={e => e.stopPropagation()}>
-          <h3 style={{ marginTop: 0, color: '#FF8D9C' }}>Permanently delete {deleteModal.docs.length === 1 ? 'this document' : `${deleteModal.docs.length} documents`}</h3>
+          <h3 style={{ marginTop: 0, color: 'var(--danger)' }}>Permanently delete {deleteModal.docs.length === 1 ? 'this document' : `${deleteModal.docs.length} documents`}</h3>
           <p className="muted" style={{ marginTop: 0 }}>
             This removes {deleteModal.docs.length === 1 ? 'the document' : 'these documents'}, every version, attestation, review, distribution and print log,
             and deletes the underlying files from disk. <strong>This cannot be undone.</strong> To retire a document while keeping its history, use “Mark obsolete” instead.
@@ -1115,7 +1115,7 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
       {can('documents.masterlist', 'export') && exports.map(([label, path, fallback]) => <button key={path} className="secondary" disabled={!!exportBusy} onClick={() => onExport(path, fallback)}>{exportBusy === path ? 'Preparing…' : label}</button>)}
     </div>
     <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-      <div style={{ padding: '10px 14px', fontWeight: 700, borderBottom: '1px solid #e3e8f0' }}>{data.facility} — {sub.toUpperCase()}</div>
+      <div style={{ padding: '10px 14px', fontWeight: 700, borderBottom: '1px solid var(--border)' }}>{data.facility} — {sub.toUpperCase()}</div>
       <table className="data-table"><thead><tr>{reg.headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>
         {reg.rows.map((row, i) => {
           const codeStr = row.map(c => String(c ?? '')).join('  ');
@@ -1214,31 +1214,32 @@ function SopTools({ docId, versionId, documents, startOpen }: { docId: number; v
   }
 
   const others = (documents || []).filter(d => d.id !== docId);
-  return <div className="sop-tools">
+  return <div style={{ marginTop: 12, padding: 12, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-      <strong style={{ color: 'var(--dv-text)', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
+      <strong style={{ color: 'var(--text)', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
       <button className="secondary" onClick={() => setOpen(o => !o)}>{open ? 'Hide' : 'Show tools'}</button>
     </div>
     {open && <>
+      <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '6px 0 8px' }}>Offline Ollama runs these by default. If you enable Hybrid mode with an online provider, Dennis may use it for stronger SOP understanding — only after redaction, and never when patient/operational data is detected.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
         {SOP_ACTIONS.map(a => can('dennis', 'view') && <button key={a.task} className="secondary" disabled={!!busy} onClick={() => run(a.task)}>{busy === a.task ? 'Working…' : a.label}</button>)}
       </div>
-      {others.length > 0 && <label style={{ fontSize: 12, color: 'var(--dv-muted)' }}>Compare with:&nbsp;
+      {others.length > 0 && <label style={{ fontSize: 12, color: 'var(--muted)' }}>Compare with:&nbsp;
         <select value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">— choose document —</option>{others.map(d => <option key={d.id} value={d.id}>{d.document_code ? `${d.document_code} — ` : ''}{d.title}</option>)}</select>
       </label>}
-      {confirm && <div className="sop-confirm">
+      {confirm && <div style={{ marginTop: 8, padding: 10, background: 'var(--warning-bg)', border: '1px solid var(--warning-line)', borderRadius: 6, color: 'var(--warning)', fontSize: 12.5 }}>
         Online AI may send this document's text outside the hospital network. Use only for SOPs and non-patient documents. Continue?
         <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>{can('dennis', 'view') && <button onClick={() => run(confirm.task, true)}>Yes, use online AI</button>}<button className="secondary" onClick={() => setConfirm(null)}>Cancel</button></div>
       </div>}
       {result && <div style={{ marginTop: 8 }}>
         {result.error ? <Notice kind="error">{result.error}</Notice> : <>
-          <div style={{ fontSize: 11.5, color: 'var(--dv-muted)', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="badge">{result.mode}{result.provider && result.provider !== 'none' ? ` · ${result.provider}` : ''}</span>
             {result.onlineUsed ? <span className="badge warning">online · redacted</span> : <span className="badge">offline · on-premises</span>}
             <span>Review before use.</span>
           </div>
           {result.warning && <div className="warning" style={{ margin: '4px 0' }}>⚠ {result.warning}</div>}
-          <pre className="sop-output">{result.output}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: 12, color: 'var(--text)', fontSize: 12.5, maxHeight: '38vh', overflow: 'auto' }}>{result.output}</pre>
           <button className="secondary" onClick={() => navigator.clipboard?.writeText(result.output)}>Copy</button>
         </>}
       </div>}
@@ -1565,94 +1566,94 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
         ...(winPos ? { position: 'fixed' as const, left: winPos.x, top: winPos.y } : { position: 'relative' as const }),
       };
 
-  return <div style={{ position: 'fixed', inset: 0, background: maximized ? 'transparent' : 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', pointerEvents: maximized ? 'none' : 'auto' }} onClick={onClose}>
+  return <div style={{ position: 'fixed', inset: 0, background: maximized ? 'transparent' : 'var(--scrim)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', pointerEvents: maximized ? 'none' : 'auto' }} onClick={onClose}>
     <div ref={cardRef} className="card dv-window" style={{ ...cardStyle, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', pointerEvents: 'auto' }} onClick={e => e.stopPropagation()}
       onPointerMove={e => { moveWinDrag(e); moveResize(e); }} onPointerUp={e => { stopWinDrag(e); stopResize(e); }} onPointerCancel={e => { stopWinDrag(e); stopResize(e); }}>
       <style>{`.doc-content table.docx-table,.doc-content table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
 .doc-content table td,.doc-content table th{border:1px solid #c9d2e0;padding:5px 8px;vertical-align:top;text-align:left}
 .doc-content h1{font-size:18px;margin:14px 0 6px}
-.doc-content h2{font-size:16px;color:#1B3A6B;margin:14px 0 6px;border-bottom:1px solid #e2e8f0;padding-bottom:3px}
+.doc-content h2{font-size:16px;color:var(--navy);margin:14px 0 6px;border-bottom:1px solid var(--border);padding-bottom:3px}
 .doc-content h3{font-size:14px;color:#243b63;margin:12px 0 4px}
 .doc-content h4,.doc-content h5,.doc-content h6{font-size:13px;color:#33415a;margin:10px 0 4px}
 .doc-content p{margin:5px 0}.doc-content ul{margin:6px 0 6px 22px}.doc-content li{margin:2px 0}
 .doc-content img{max-width:100%;height:auto}.doc-content .docx-img{text-align:center;margin:10px 0}
 .doc-content .docx-diagram{border:1px dashed #b9c4d6;border-radius:6px;padding:8px 12px;margin:10px 0;background:#f8fafc}
-.doc-reader{display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
-.doc-toc{width:236px;flex:none;overflow:auto;background:var(--dv-panel);border-right:1px solid var(--dv-border);padding:10px 8px}
-.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dv-faint);padding:2px 8px 8px}
-.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:var(--dv-muted);cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
-.doc-toc-item:hover{background:rgba(255,255,255,.06);color:#fff}
-.doc-toc-item.active{background:var(--accent-soft,rgba(47,107,255,.16));color:#fff}
-.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:var(--dv-muted)}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:var(--dv-faint)}
-.doc-scroll{flex:1;overflow:auto;background:#525659;padding:18px;min-width:0}
+.doc-reader{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.doc-toc{width:236px;flex:none;overflow:auto;background:var(--panel);border-right:1px solid var(--border);padding:10px 8px}
+.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:2px 8px 8px}
+.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:var(--muted);cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
+.doc-toc-item:hover{background:var(--overlay-2);color:var(--text)}
+.doc-toc-item.active{background:var(--accent-soft);color:var(--accent-bright)}
+.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:var(--faint)}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:var(--faint)}
+.doc-scroll{flex:1;overflow:auto;background:var(--reader-bg);padding:18px;min-width:0}
 .doc-page{background:#fff;color:#111;max-width:820px;margin:0 auto;padding:34px 44px;box-shadow:0 2px 14px rgba(0,0,0,.45);line-height:1.55;border-radius:2px}
 @media (max-width:760px){.doc-toc{display:none}}
-.word-editor{border:1px solid var(--dv-border);border-radius:6px;overflow:hidden}
-.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--dv-panel);border-bottom:1px solid var(--dv-border)}
-.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid var(--dv-border)}
+.word-editor{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--panel-2);border-bottom:1px solid var(--border)}
+.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid var(--border)}
 .word-toolbar .wt-group:last-child{border-right:0}
-.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:var(--dv-panel-2);border:1px solid var(--dv-border-strong);border-radius:5px;color:var(--dv-text);cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
-.wt-btn:hover{background:var(--dv-on);border-color:var(--accent)}
+.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);border-radius:5px;color:var(--text);cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
+.wt-btn:hover{background:var(--accent-soft);border-color:var(--border-strong)}
 .wt-color{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-.wt-select{height:26px;background:var(--dv-panel-2);border:1px solid var(--dv-border-strong);border-radius:5px;color:var(--dv-text);font-size:12px;padding:0 4px;cursor:pointer}
+.wt-select{height:26px;background:var(--surface);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12px;padding:0 4px;cursor:pointer}
 .doc-page[contenteditable="true"]{cursor:text}
 .doc-page[contenteditable="true"]:focus{outline:none}
-.dv-window{background:var(--dv-surface);border:1px solid var(--dv-border);box-shadow:0 18px 60px rgba(0,0,0,.55)}
-.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:var(--dv-panel);border-bottom:1px solid var(--dv-border);user-select:none;touch-action:none;flex:none}
-.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--dv-text)}
+.dv-window{background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow-lg)}
+.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:var(--panel);border-bottom:1px solid var(--border);user-select:none;touch-action:none;flex:none}
+.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--text)}
 .dv-winbtns{display:flex;gap:2px;flex:none}
-.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:var(--dv-muted);font-size:13px;cursor:pointer;line-height:1;padding:0}
-.dv-winbtn:hover{background:rgba(255,255,255,.09);color:#fff}
+.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:var(--muted);font-size:13px;cursor:pointer;line-height:1;padding:0}
+.dv-winbtn:hover{background:var(--overlay-3);color:var(--text)}
 .dv-winbtn.dv-close:hover{background:#c42b1c;color:#fff}
-.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--dv-panel);border-bottom:1px solid var(--dv-border);flex:none;flex-wrap:wrap}
-.dv-tabs{display:inline-flex;background:var(--dv-panel-2);border:1px solid var(--dv-border);border-radius:8px;padding:2px;gap:2px;flex:none}
-.dv-tabs button{border:0;background:transparent;box-shadow:none;color:var(--dv-muted);font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
-.dv-tabs button.on{background:var(--dv-on);color:#fff}
-.dv-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:var(--accent,#2f6bff);border:1px solid transparent;border-radius:7px;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
+.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none;flex-wrap:wrap}
+.dv-tabs{display:inline-flex;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;flex:none}
+.dv-tabs button{border:0;background:transparent;box-shadow:none;color:var(--muted);font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
+.dv-tabs button.on{background:var(--accent);color:var(--on-accent)}
+.dv-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:var(--accent);border:1px solid transparent;border-radius:7px;color:var(--on-accent);font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
 .dv-btn:hover{filter:brightness(1.12)}
 .dv-btn:disabled{opacity:.55;cursor:default}
-.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--dv-border-strong);border-radius:7px;color:var(--dv-text);font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
-.dv-ghost:hover{background:var(--dv-on);border-color:var(--accent)}
+.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
+.dv-ghost:hover{background:var(--accent-soft);border-color:var(--border-strong)}
 .dv-ghost:disabled{opacity:.55;cursor:default}
-.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:var(--dv-panel-2);border:1px solid var(--dv-border);border-radius:7px;padding:2px}
-.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:var(--dv-text);font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
-.dv-zoom button:hover{background:var(--dv-on)}
-.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:var(--dv-muted)}
+.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;padding:2px}
+.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:var(--text);font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
+.dv-zoom button:hover{background:var(--accent-soft)}
+.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:var(--muted)}
 .dv-menuwrap{position:relative;flex:none}
-.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:var(--dv-panel);border:1px solid var(--dv-border-strong);border-radius:9px;padding:5px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
-.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:var(--dv-text);font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
-.dv-menu button:hover{background:var(--dv-on)}
+.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:5px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:var(--text);font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.dv-menu button:hover{background:var(--accent-soft)}
 .dv-menu button:disabled{opacity:.5;cursor:default}
-.dv-menu .dv-menu-sep{height:1px;background:var(--dv-border);margin:4px 6px}
-.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:var(--success-bg);border-bottom:1px solid var(--dv-border);font-size:12px;color:var(--success);flex:none}
-.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--dv-surface);padding:8px}
-.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:var(--dv-panel-2);border:1px solid var(--dv-border);border-radius:8px;color:var(--dv-muted);font-size:12px;flex:none}
-.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid var(--dv-border-strong);border-radius:7px;background:var(--dv-panel-2);color:var(--dv-muted);font-size:12.5px;font-weight:600;white-space:nowrap}
+.dv-menu .dv-menu-sep{height:1px;background:var(--border);margin:4px 6px}
+.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:var(--success-bg);border-bottom:1px solid var(--success-line);font-size:12px;color:var(--success);flex:none}
+.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--card);padding:8px}
+.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:var(--info-bg);border:1px solid var(--info-line);border-radius:8px;color:var(--text);font-size:12px;flex:none}
+.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid var(--border);border-radius:7px;background:var(--panel-2);color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap}
 /* The Office handoff panel: one document, one obvious action, one line of
    state. Deliberately quiet — the document itself is elsewhere, in Word. */
 .oh{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}
-.oh-card{width:min(430px,100%);text-align:center;background:#101c36;border:1px solid #22345c;border-radius:12px;padding:28px 26px}
-.oh-icon{width:50px;height:50px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:#16243f;border:1px solid #2c416f;color:#8fb4ff}
-.oh-name{margin:0;font-size:15px;font-weight:600;color:#eaf1ff;word-break:break-word;line-height:1.4}
-.oh-meta{margin:5px 0 0;font-size:11.5px;color:#7c8db0}
+.oh-card{width:min(430px,100%);text-align:center;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px 26px}
+.oh-icon{width:50px;height:50px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:var(--panel-2);border:1px solid var(--border);color:var(--accent-bright)}
+.oh-name{margin:0;font-size:15px;font-weight:600;color:var(--text);word-break:break-word;line-height:1.4}
+.oh-meta{margin:5px 0 0;font-size:11.5px;color:var(--faint)}
 .oh-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:20px}
 .oh-actions button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;height:34px;border-radius:8px;font-size:12.5px}
-.oh-primary{padding:0 16px;background:var(--accent,#2f6bff);border:1px solid transparent;color:#fff;font-weight:600;cursor:pointer;box-shadow:none}
+.oh-primary{padding:0 16px;background:var(--accent);border:1px solid transparent;color:var(--on-accent);font-weight:600;cursor:pointer;box-shadow:none}
 .oh-primary:hover:not(:disabled){filter:brightness(1.1)}
 .oh-primary:disabled{opacity:.6;cursor:default}
 .oh-actions .secondary{padding:0 13px}
-.oh-state{display:flex;align-items:center;gap:7px;margin-top:18px;padding:7px 11px;border-radius:8px;background:#12281b;border:1px solid #1f5334;color:#a8c7b6;font-size:11.5px;text-align:left}
-.oh-dot{width:7px;height:7px;border-radius:50%;background:#3fbf72;flex:none}
-.oh-link{background:none;border:0;box-shadow:none;padding:2px 4px;color:#8fb4ff;font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.oh-state{display:flex;align-items:center;gap:7px;margin-top:18px;padding:7px 11px;border-radius:8px;background:var(--success-bg);border:1px solid var(--success-line);color:var(--success);font-size:11.5px;text-align:left}
+.oh-dot{width:7px;height:7px;border-radius:50%;background:var(--success);flex:none}
+.oh-link{background:none;border:0;box-shadow:none;padding:2px 4px;color:var(--accent-bright);font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
 .oh-link:hover{text-decoration:underline}
-.oh-warn{margin-top:16px;padding:10px 12px;border-radius:8px;background:rgba(214,66,88,.08);border:1px solid rgba(214,66,88,.4);text-align:left}
-.oh-warn p{margin:0;font-size:12px;line-height:1.6;color:#f3c9cf}
-.oh-warn p.muted{margin-top:4px;color:#9fb0d4}
-.oh-note{margin-top:14px;font-size:11.5px;color:#9fb0d4}
+.oh-warn{margin-top:16px;padding:10px 12px;border-radius:8px;background:var(--danger-bg);border:1px solid var(--danger-line);text-align:left}
+.oh-warn p{margin:0;font-size:12px;line-height:1.6;color:var(--danger)}
+.oh-warn p.muted{margin-top:4px;color:var(--muted)}
+.oh-note{margin-top:14px;font-size:11.5px;color:var(--muted)}
 .dv-fidelity span{flex:1;min-width:220px}
-.dv-drawer{flex:none;max-height:38%;overflow:auto;border-top:1px solid #22345c;background:#0d1830;padding:10px 12px}
-.dv-footer{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid #22345c;background:#0e1930;flex:none;flex-wrap:wrap}
-.dv-meta{font-size:11px;color:#7c8db0;margin-left:auto;text-align:right}
+.dv-drawer{flex:none;max-height:38%;overflow:auto;border-top:1px solid var(--border);background:var(--panel);padding:10px 12px}
+.dv-footer{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--border);background:var(--panel);flex:none;flex-wrap:wrap}
+.dv-meta{font-size:11px;color:var(--faint);margin-left:auto;text-align:right}
 .dv-rs{position:absolute;z-index:30;touch-action:none}
 .dv-rs-n{top:0;left:12px;right:12px;height:6px;cursor:ns-resize}
 .dv-rs-s{bottom:0;left:12px;right:12px;height:6px;cursor:ns-resize}
@@ -1772,18 +1773,18 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
           : (content.content_html
               ? <DocReader html={content.content_html} zoom={zoom} height="100%" />
               : (content.content_text
-                  ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #22345c', borderRadius: 8, padding: 16, flex: 1, minHeight: 0, overflow: 'auto', background: '#fff', color: '#111', zoom, margin: 0 }}>{content.content_text}</pre>
-                  : <p className="muted" style={{ padding: 16 }}>No readable content was captured.</p>)))}
+                  ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid var(--border)', borderRadius: 8, padding: 16, flex: 1, minHeight: 0, overflow: 'auto', background: '#fff', color: '#111', zoom, margin: 0 }}>{content.content_text}</pre>
+                  : <p className="muted" style={{ padding: 16 }}>No readable content was captured. Use “Edit” to author it in-app, or open the original file.</p>)))}
 
         {!isOfficeFile && mode === 'original' && (isPdf || isImage
-          ? <div style={{ flex: 1, minHeight: 0, border: '1px solid #22345c', borderRadius: 8, overflow: 'hidden', background: '#525659' }}>
-              {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
+          ? <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--reader-bg)' }}>
+              {!fileUrl ? <p style={{ color: 'var(--reader-fg)', padding: 16 }}>Loading file…</p>
                 : isPdf ? <iframe title="document" src={fileUrl} style={{ width: '100%', height: '100%', border: 'none', display: 'block' }} />
                 : <div style={{ height: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ width: `${zoomPct}%`, maxWidth: 'none' }} /></div>}
             </div>
           : content?.content_html
             ? <DocReader html={content.content_html} zoom={zoom} height="100%" />
-            : <div style={{ flex: 1, border: '1px solid #22345c', borderRadius: 8, background: '#525659', color: '#fff', padding: 24 }}>
+            : <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--reader-bg)', color: 'var(--reader-fg)', padding: 24 }}>
                 <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
                 {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
               </div>)}
@@ -1791,7 +1792,7 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 
       {/* Collapsible drawers keep the preview large until these are needed. */}
       {panel === 'workflow' && <div className="dv-drawer">
-        {workflowStatus && <div style={{ fontSize: 12.5, color: 'var(--dv-text)', marginBottom: 8 }}>
+        {workflowStatus && <div style={{ fontSize: 12.5, color: 'var(--text)', marginBottom: 8 }}>
           Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
         </div>}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1799,8 +1800,8 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
           {can('documents.library', 'view') && <button className="secondary" onClick={() => void addComment()} disabled={busy || !newComment.trim()}>Comment</button>}
         </div>
         {comments.length > 0 && <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
-          {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: '#c2cde3', padding: '4px 0', borderBottom: '1px solid #1c2a4a' }}>
-            <strong>{c.author_name || 'Staff'}</strong> <span style={{ color: '#7c8db0' }}>· {c.stage || ''} · {String(c.created_at).slice(0, 16).replace('T', ' ')}</span><br />{c.comment}
+          {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+            <strong>{c.author_name || 'Staff'}</strong> <span style={{ color: 'var(--faint)' }}>· {c.stage || ''} · {String(c.created_at).slice(0, 16).replace('T', ' ')}</span><br />{c.comment}
           </li>)}
         </ul>}
       </div>}
@@ -1810,10 +1811,10 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 
       {/* Footer: workflow action + panel toggles + attestation + read status. */}
       <div className="dv-footer">
-        <button className={`dv-ghost${panel === 'workflow' ? ' on' : ''}`} onClick={() => setPanel(p => p === 'workflow' ? null : 'workflow')}>
+        <button className="dv-ghost" onClick={() => setPanel(p => p === 'workflow' ? null : 'workflow')} style={panel === 'workflow' ? { background: 'var(--accent-soft)', borderColor: 'var(--accent)' } : undefined}>
           💬 {workflowStatus ? 'Workflow & comments' : 'Comments'}{comments.length ? ` (${comments.length})` : ''}
         </button>
-        <button className={`dv-ghost${panel === 'dennis' ? ' on' : ''}`} onClick={() => setPanel(p => p === 'dennis' ? null : 'dennis')}>
+        <button className="dv-ghost" onClick={() => setPanel(p => p === 'dennis' ? null : 'dennis')} style={panel === 'dennis' ? { background: 'var(--accent-soft)', borderColor: 'var(--accent)' } : undefined}>
           🤖 Dennis AI tools
         </button>
         {wf && <button className="dv-btn" onClick={() => doWorkflow(wf.action)} disabled={busy}>{busy ? 'Working…' : wf.label}</button>}
@@ -1839,9 +1840,9 @@ function WorkflowStepper({ status }: { status: string }) {
   const activeIdx = LIFECYCLE.indexOf(status === 'approved' ? 'current' : status);
   return <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0 12px' }}>
     {LIFECYCLE.map((s, i) => <span key={s} style={{ padding: '3px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600,
-      background: i <= activeIdx && activeIdx >= 0 ? (s === 'obsolete' ? '#fde2e1' : '#dceafe') : '#eef2f7',
-      color: i <= activeIdx && activeIdx >= 0 ? (s === 'obsolete' ? '#a4341f' : '#1B3A6B') : '#94a3b8',
-      border: i === activeIdx ? '1px solid #1B3A6B' : '1px solid transparent' }}>{i + 1}. {labels[s]}</span>)}
+      background: i <= activeIdx && activeIdx >= 0 ? (s === 'obsolete' ? 'var(--danger-bg)' : 'var(--accent-soft)') : 'var(--panel-2)',
+      color: i <= activeIdx && activeIdx >= 0 ? (s === 'obsolete' ? 'var(--danger)' : 'var(--accent-bright)') : 'var(--faint)',
+      border: i === activeIdx ? '1px solid var(--accent)' : '1px solid transparent' }}>{i + 1}. {labels[s]}</span>)}
   </div>;
 }
 
@@ -2300,15 +2301,15 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
       <div className="card" style={{ padding: 12 }}>
         <h4 style={{ margin: '0 0 8px' }}>1 · Choose a document</h4>
         <TextField placeholder="Search document code, title or type…" value={searchTerm} onValue={nextValue => setSearchTerm(nextValue)} style={{ width: '100%', marginBottom: 8 }} />
-        <div style={{ maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border, #e2e8f0)', borderRadius: 6 }}>
+        <div style={{ maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
           {filteredDocs.length === 0 && <p className="muted" style={{ padding: 12 }}>No documents with attestations found.</p>}
           {filteredDocs.map(d => {
             const isSelected = selectedDocId === d.id;
             return <button key={d.id} type="button" onClick={() => setSelectedDocId(d.id)}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #e2e8f0', background: isSelected ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer' }}>
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--border)', background: isSelected ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}>
               <div style={{ fontWeight: 600 }}>{d.document_code || '—'} {d.title}</div>
-              <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
-                {d.document_type || 'Document'} · <span style={{ color: '#16a34a' }}>{d.attestations_signed} signed</span>{d.attestations_pending ? <> · <span style={{ color: '#dc2626' }}>{d.attestations_pending} pending</span></> : null}
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+                {d.document_type || 'Document'} · <span style={{ color: 'var(--success)' }}>{d.attestations_signed} signed</span>{d.attestations_pending ? <> · <span style={{ color: 'var(--danger)' }}>{d.attestations_pending} pending</span></> : null}
               </div>
             </button>;
           })}
@@ -2321,7 +2322,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
             <div style={{ flex: 1, minWidth: 240 }}>
               <span className="hint" style={{ fontSize: 11, letterSpacing: 0.2 }}>ATTESTATION LIST</span>
               <h3 style={{ margin: '2px 0 4px' }}>{selectedDoc.document_code || '—'} — {selectedDoc.title}</h3>
-              <p className="muted" style={{ margin: 0, fontSize: 12 }}>{selectedDoc.document_type || 'Document'} · <span style={{ color: '#16a34a' }}>{signedCount} signed</span>{pendingCount ? <> · <span style={{ color: '#dc2626' }}>{pendingCount} pending</span></> : null}</p>
+              <p className="muted" style={{ margin: 0, fontSize: 12 }}>{selectedDoc.document_type || 'Document'} · <span style={{ color: 'var(--success)' }}>{signedCount} signed</span>{pendingCount ? <> · <span style={{ color: 'var(--danger)' }}>{pendingCount} pending</span></> : null}</p>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="secondary" onClick={() => onOpenDoc(selectedDoc.id, documents.find(d => d.id === selectedDoc.id)?.current_version_id, undefined)}>Open document</button>

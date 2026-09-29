@@ -58,7 +58,7 @@ const verdictBadge = (v: string) => {
   return <span className={`badge ${tone}`}>{(VERDICTS.find(x => x.v === v)?.l || v)}</span>;
 };
 const outcomeChip = (o: string) => {
-  const bg = o === 'pass' ? '#1a7f37' : o === 'fail' ? '#c1121f' : o === 'na' ? '#6b7280' : '#b8860b';
+  const bg = o === 'pass' ? '#1a7f37' : o === 'fail' ? 'var(--danger)' : o === 'na' ? 'var(--muted)' : '#b8860b';
   return <span style={{ background: bg, color: '#fff', fontWeight: 700, fontSize: 10, padding: '2px 7px', borderRadius: 4 }}>{o.toUpperCase()}</span>;
 };
 
@@ -178,8 +178,8 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
           <DonutChart centerLabel="Studies" data={[
             { label: 'Acceptable', value: studies.filter(s => s.verdict === 'acceptable').length, color: '#1a7f37' },
             { label: 'With limitations', value: studies.filter(s => s.verdict === 'acceptable_with_limitations').length, color: '#b8860b' },
-            { label: 'Not acceptable', value: studies.filter(s => s.verdict === 'not_acceptable').length, color: '#c1121f' },
-            { label: 'Pending', value: studies.filter(s => s.verdict === 'pending').length, color: '#6b7280' },
+            { label: 'Not acceptable', value: studies.filter(s => s.verdict === 'not_acceptable').length, color: 'var(--danger)' },
+            { label: 'Pending', value: studies.filter(s => s.verdict === 'pending').length, color: 'var(--muted)' },
           ]} />
         </ChartCard>
         <ChartCard title="Study types" subtitle="Verification vs validation">
@@ -369,7 +369,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
       </div>
       <div>
         <h4 style={{ marginBottom: 4 }}>Report &amp; sign-off</h4>
-        <div className="card" style={{ background: 'var(--panel-2, #f6f8fc)' }}>
+        <div className="card" style={{ background: 'var(--panel-2)' }}>
           <p style={{ margin: '0 0 8px' }}><strong>Report file:</strong> {study.report_file_name ? study.report_file_name : <span className="muted">none attached</span>}</p>
           {canManage && <>
             <input ref={reportRef} type="file" accept="image/*,application/pdf,.doc,.docx,.xlsx" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUploadReport(f); }} />
@@ -387,7 +387,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
           <button type="button" className="secondary" onClick={() => onAuthorize(false)}>Approve without authorising</button>
           <button type="button" className="secondary" onClick={() => onAuthorize(false, true)}>Reject</button>
         </div>}
-        {failed > 0 && <p className="muted" style={{ color: '#c1121f', fontSize: 12, marginTop: 8 }}>{failed} characteristic(s) failed — authorising will record a <strong>not acceptable</strong> verdict and raise a nonconformity.</p>}
+        {failed > 0 && <p className="muted" style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{failed} characteristic(s) failed — authorising will record a <strong>not acceptable</strong> verdict and raise a nonconformity.</p>}
       </div>
     </div>
   </div>;
@@ -422,7 +422,7 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
     : /^precision|reproducibility/.test(param.parameter) ? 'Enter the replicate results. Mean, SD and CV% are computed.'
     : /trueness|bias|interference/.test(param.parameter) ? 'Enter the replicate results; set a claimed/target value on the row to compute bias%.'
     : 'Enter the values; mean and SD are computed.';
-  return <div className="card" style={{ marginTop: 12, background: 'var(--panel-2, #f6f8fc)' }}>
+  return <div className="card" style={{ marginTop: 12, background: 'var(--panel-2)' }}>
     <div className="section-head" style={{ alignItems: 'center' }}><h4 style={{ margin: 0 }}>Raw data — {param.parameter_label}</h4><button className="secondary" style={{ marginLeft: 'auto' }} onClick={onClose}>Close</button></div>
     <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{help}</p>
     <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>Sample</th><th>{aLabel}</th>{paired && <th>{bLabel}</th>}</tr></thead><tbody>

@@ -171,7 +171,7 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
               <td><span className="reg-primary">{s.name}</span></td>
               <td>{s.deliveries}</td><td>{s.rejected}</td><td>{s.awaiting}</td>
               <td>{s.deliveries === 0 ? <span className="muted">—</span>
-                : <span className="badge" style={rate > 5 ? { background: '#fde2e2', color: '#b42318' } : { background: '#e4f7ec', color: '#155c34' }}>{rate}%</span>}</td>
+                : <span className="badge" style={rate > 5 ? { background: 'var(--danger-bg)', color: 'var(--danger)' } : { background: 'var(--success-bg)', color: 'var(--success)' }}>{rate}%</span>}</td>
               <td className="nowrap">{dateOnly(s.next_evaluation_due)}</td>
             </tr>;
           })}

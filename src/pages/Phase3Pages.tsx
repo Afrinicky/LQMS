@@ -62,9 +62,9 @@ import type { SupplySource } from './StockSettingsPage';
 // Where a supplier stands on evaluation, in one word. Ordered worst-first so
 // the management view can simply sort by it.
 const EVALUATION_TONE: Record<string, { label: string; style: Record<string, string> }> = {
-  overdue: { label: 'overdue', style: { background: '#fde2e2', color: 'var(--danger)' } },
-  never_evaluated: { label: 'never evaluated', style: { background: '#fff7df', color: '#6b4b05' } },
-  current: { label: 'up to date', style: { background: '#e4f7ec', color: '#155c34' } },
+  overdue: { label: 'overdue', style: { background: 'var(--danger-bg)', color: 'var(--danger)' } },
+  never_evaluated: { label: 'never evaluated', style: { background: 'var(--warning-bg)', color: 'var(--warning)' } },
+  current: { label: 'up to date', style: { background: 'var(--success-bg)', color: 'var(--success)' } },
   not_required: { label: 'not required', style: {} },
 };
 const evaluationRank = (s: { evaluation_status?: string }) =>
@@ -78,8 +78,8 @@ function evaluationBadge(s: { evaluation_status?: string }) {
 // how close it is. Drawn once here so every register says it the same way.
 function expiryCell(date?: string | null, status?: string | null) {
   if (!date) return <span className="muted">—</span>;
-  const tone = status === 'expired' ? { background: '#fde2e2', color: 'var(--danger)' }
-    : status === 'expiring_soon' ? { background: '#fff7df', color: '#6b4b05' } : null;
+  const tone = status === 'expired' ? { background: 'var(--danger-bg)', color: 'var(--danger)' }
+    : status === 'expiring_soon' ? { background: 'var(--warning-bg)', color: 'var(--warning)' } : null;
   return <>
     <span className="reg-primary nowrap">{String(date).slice(0, 10)}</span>
     {tone && <span className="badge" style={tone}>{String(status).replace(/_/g, ' ')}</span>}
@@ -644,7 +644,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       </div>
     </div>
 
-    {showLabel && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2, #f6f8f9)' }}>
+    {showLabel && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }}>
       <h4 style={{ marginTop: 0 }}>Print label</h4>
       <div className="form-grid">
         <label>Label size<select value={labelSize} onChange={e => setLabelSize(e.target.value)}>{LABEL_SIZES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
@@ -656,7 +656,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       <div style={{ marginTop: 10 }}><button type="button" onClick={printLabel}>Print label</button></div>
     </div>}
 
-    {showDecommission && !item.decommissioned && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2, #f6f8f9)' }}>
+    {showDecommission && !item.decommissioned && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }}>
       <h4 style={{ marginTop: 0 }}>Decommission &amp; safe disposal</h4>
       <div className="form-grid">
         <label>Date decommissioned<input type="date" value={decomForm.decommissionedAt} onChange={e => setDecomForm({ ...decomForm, decommissionedAt: e.target.value })} required /></label>
@@ -676,7 +676,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       </div>
     </div>}
 
-    {item.decommissioned ? <div className="card" style={{ marginTop: 12, borderLeft: '3px solid var(--crit, #a63d34)' }}>
+    {item.decommissioned ? <div className="card" style={{ marginTop: 12, borderLeft: '3px solid var(--crit)' }}>
       <h4 style={{ marginTop: 0 }}>Decommissioned &amp; disposed</h4>
       <div className="profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
         <div>{dv('Decommissioned on', item.decommissioned_at)}{dv('By', staffName(staff, item.decommissioned_by_staff_id))}{dv('Reason', item.decommission_reason)}</div>
@@ -860,7 +860,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
       ? 'Record verification or validation before use, answering the review checklist and attaching evidence. Records are reviewed and approved by an authorised person.'
       : 'Record calibration (internal or external), capture metrological traceability, answer the review checklist with evidence, and review before the item returns to use.'}</p>
 
-    {showConfig && <div className="card" style={{ background: 'var(--surface-2, #f6f8f9)' }}>
+    {showConfig && <div className="card" style={{ background: 'var(--surface-2)' }}>
       <h4 style={{ marginTop: 0 }}>Checklist questions</h4>
       <table className="data-table"><thead><tr><th>#</th><th>Question</th><th></th></tr></thead><tbody>
         {items.map((it, i) => <tr key={it.id}>
@@ -904,7 +904,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
 
       {items.length > 0 && <div style={{ gridColumn: '1 / -1' }}>
         <h4>Review checklist</h4>
-        {items.map(it => <div key={it.id} className="checklist-row" style={{ borderTop: '1px solid var(--line, #e7ebed)', padding: '10px 0' }}>
+        {items.map(it => <div key={it.id} className="checklist-row" style={{ borderTop: '1px solid var(--line)', padding: '10px 0' }}>
           <div style={{ fontSize: 14, marginBottom: 6 }}>{it.prompt}</div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: 10 }}>{RESPONSE_OPTIONS.map(o => <label key={o.v} className="check-inline" style={{ fontSize: 13 }}><input type="radio" name={`resp-${kind}-${it.id}`} checked={responses[it.id]?.response === o.v} onChange={() => setResp(it.id, { response: o.v })} /> {o.l}</label>)}</div>
@@ -936,7 +936,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
       </tbody></table>}
     </div>}
 
-    {openRecord && <div className="card" style={{ marginTop: 14, background: 'var(--surface-2, #f6f8f9)' }}>
+    {openRecord && <div className="card" style={{ marginTop: 14, background: 'var(--surface-2)' }}>
       <div className="section-head"><h4 style={{ margin: 0 }}>{openRecord.verification_number || openRecord.calibration_number}</h4><button type="button" className="secondary" onClick={() => setOpenRecord(null)}>Close</button></div>
       <table className="table"><thead><tr><th>Question</th><th>Response</th><th>Notes</th><th>Evidence</th></tr></thead><tbody>
         {(openRecord.responses || []).map((r: any) => <tr key={r.id}><td>{r.prompt}</td><td>{r.response ? formatBadge(r.response) : '—'}</td><td>{r.notes || '—'}</td><td>{r.evidence_file_id ? <a href={`${API_BASE}/files/${r.evidence_file_id}/raw`} target="_blank" rel="noreferrer">file</a> : '—'}</td></tr>)}

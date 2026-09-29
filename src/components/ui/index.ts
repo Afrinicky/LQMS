@@ -17,3 +17,4 @@ export { OrgChartSheet, OrgChartBoard, OrgLegend, organogramPrintHtml } from './
 export { Notice, FeedbackHost, notifyAtAction } from './Feedback';
 export type { NoticeKind } from './Feedback';
 export { default as TextField, default as TextBox } from './TextField';
+export { default as ThemeToggle } from './ThemeToggle';

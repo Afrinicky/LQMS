@@ -180,8 +180,8 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
       {canEdit && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
         <span className="muted" style={{ fontSize: 12 }}>Paint:</span>
         {enabledShifts.map(s => <button key={s.code} type="button" onClick={() => { setPaint(s.code); setErase(false); }} title={s.label}
-          style={{ padding: '4px 10px', border: paint === s.code && !erase ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: s.bg_color, color: s.text_color, fontWeight: 700, cursor: 'pointer' }}>{s.code}</button>)}
-        <button type="button" onClick={() => setErase(true)} style={{ padding: '4px 10px', border: erase ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
+          style={{ padding: '4px 10px', border: paint === s.code && !erase ? '2px solid #111' : '1px solid var(--border-strong)', borderRadius: 5, background: s.bg_color, color: s.text_color, fontWeight: 700, cursor: 'pointer' }}>{s.code}</button>)}
+        <button type="button" onClick={() => setErase(true)} style={{ padding: '4px 10px', border: erase ? '2px solid #111' : '1px solid var(--border-strong)', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>Click a cell to apply · click the ✎ on a row to fill the whole row.</span>
       </div>}
 
@@ -232,8 +232,8 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
   </div>;
 }
 
-const gridHead: CSSProperties = { border: '1px solid #6b7280', color: '#fff', background: '#c85a2a', fontWeight: 700, textAlign: 'center', padding: 2, fontSize: 10 };
-const gridCell: CSSProperties = { border: '1px solid #6b7280', textAlign: 'center', padding: 1, height: 20 };
+const gridHead: CSSProperties = { border: '1px solid var(--muted)', color: '#fff', background: '#c85a2a', fontWeight: 700, textAlign: 'center', padding: 2, fontSize: 10 };
+const gridCell: CSSProperties = { border: '1px solid var(--muted)', textAlign: 'center', padding: 1, height: 20 };
 
 // ========================= Reassignment (memo) Board =========================
 type ReRow = { id: number; unit_label: string; is_span: number; section_id: number | null; supervisor_staff_id: number | null; supervisor_text: string | null; supervisor_name?: string | null; supervisor_is_acting?: number; supervisor_locked?: number; deputy_staff_id: number | null; deputy_text: string | null; deputy_name?: string | null; members_text: string | null; member_ids: string | null; span_text: string | null; display_order: number };
@@ -566,8 +566,8 @@ export function BenchScheduleBoard({ sections, staff, canEdit }: { sections: Sec
       </div>
       {bs.benches.length === 0 ? <div className="notice">No benches configured for this unit yet. Add them in <em>Settings → Section/Unit Configuration → Benches</em>.</div> : mayWork(bs.section_id) && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
         <span className="muted" style={{ fontSize: 12 }}>Paint bench:</span>
-        {bs.benches.filter(b => b.is_active).map(b => { const v = b.code || b.name; return <button key={b.id} type="button" onClick={() => setPaint(v)} title={b.name} style={{ padding: '4px 10px', border: paint === v ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#eef2f7', color: '#111', cursor: 'pointer', fontWeight: 700 }}>{v}</button>; })}
-        <button type="button" onClick={() => setPaint('')} style={{ padding: '4px 10px', border: paint === '' ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
+        {bs.benches.filter(b => b.is_active).map(b => { const v = b.code || b.name; return <button key={b.id} type="button" onClick={() => setPaint(v)} title={b.name} style={{ padding: '4px 10px', border: paint === v ? '2px solid #111' : '1px solid var(--border-strong)', borderRadius: 5, background: 'var(--panel-2)', color: '#111', cursor: 'pointer', fontWeight: 700 }}>{v}</button>; })}
+        <button type="button" onClick={() => setPaint('')} style={{ padding: '4px 10px', border: paint === '' ? '2px solid #111' : '1px solid var(--border-strong)', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
       </div>}
 
       <table style={{ borderCollapse: 'collapse', fontSize: 11, tableLayout: 'fixed', width: 'max-content' }}>

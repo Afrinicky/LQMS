@@ -360,15 +360,15 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         const innerW = w - padL - padR, innerH = h - padT - padB;
         const x = (i: number) => padL + (points.length === 1 ? innerW / 2 : (i * innerW) / (points.length - 1));
         const y = (v: number) => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
-        const colorFor = (status: string) => status === 'accepted' ? 'var(--success, #2a9d4a)' : status === 'warning' ? 'var(--warning, #d99500)' : status === 'failed' ? 'var(--danger, #d23a2a)' : 'var(--muted, #888)';
+        const colorFor = (status: string) => status === 'accepted' ? 'var(--success)' : status === 'warning' ? 'var(--warning)' : status === 'failed' ? 'var(--danger)' : 'var(--muted)';
         const linePath = points.map((p, i) => p.result_value === null || p.result_value === undefined ? '' : `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.result_value).toFixed(1)}`).filter(Boolean).join(' ');
-        const refLine = (val: number, label: string, color: string) => <g key={label}><line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke={color} strokeWidth={1} strokeDasharray="4 4" /><text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted, #666)">{label}</text></g>;
-        return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="POCT QC trend" style={{ width: '100%', maxWidth: w, height: 'auto', background: '#fff', border: '1px solid var(--border, #ddd)', borderRadius: 8 }}>
-          {target !== null && refLine(target, `Target ${target}`, '#2a9d4a')}
-          {low !== null && refLine(low, `Low ${low}`, '#d99500')}
-          {high !== null && refLine(high, `High ${high}`, '#d99500')}
-          <path d={linePath} fill="none" stroke="#1B3A6B" strokeWidth={1.5} />
-          {points.map((p, i) => p.result_value === null || p.result_value === undefined ? null : <circle key={i} cx={x(i)} cy={y(p.result_value)} r={4} fill={colorFor(p.status)} stroke="#fff" strokeWidth={1}><title>{p.qc_date}: {p.result_value} ({p.status})</title></circle>)}
+        const refLine = (val: number, label: string, color: string) => <g key={label}><line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke={color} strokeWidth={1} strokeDasharray="4 4" /><text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted)">{label}</text></g>;
+        return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="POCT QC trend" style={{ width: '100%', maxWidth: w, height: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
+          {target !== null && refLine(target, `Target ${target}`, 'var(--success)')}
+          {low !== null && refLine(low, `Low ${low}`, 'var(--warning)')}
+          {high !== null && refLine(high, `High ${high}`, 'var(--warning)')}
+          <path d={linePath} fill="none" stroke="var(--navy)" strokeWidth={1.5} />
+          {points.map((p, i) => p.result_value === null || p.result_value === undefined ? null : <circle key={i} cx={x(i)} cy={y(p.result_value)} r={4} fill={colorFor(p.status)} stroke="var(--surface)" strokeWidth={1}><title>{p.qc_date}: {p.result_value} ({p.status})</title></circle>)}
         </svg>;
       })()}
       {trendData && (!trendData.points || trendData.points.length === 0) && <p>No QC results for the selected filters.</p>}

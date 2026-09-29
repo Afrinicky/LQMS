@@ -74,6 +74,6 @@ export default function BarcodeScanner({ onScan, placeholder = 'Scan or type a b
       <span className="muted" style={{ fontSize: 12 }}>USB scanners type into the box automatically.</span>
     </div>
     {camError && <Notice kind="error" style={{ marginTop: 6 }}>{camError}</Notice>}
-    {camOn && <div style={{ marginTop: 8 }}><video ref={videoRef} style={{ width: '100%', maxWidth: 360, borderRadius: 8, border: '1px solid #ccc' }} muted playsInline /></div>}
+    {camOn && <div style={{ marginTop: 8 }}><video ref={videoRef} style={{ width: '100%', maxWidth: 360, borderRadius: 8, border: '1px solid var(--border-strong)' }} muted playsInline /></div>}
   </div>;
 }

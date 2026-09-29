@@ -99,14 +99,14 @@ function TrendChart({ readings, min, max }: { readings: EnvReading[]; min?: numb
   const y = (v: number) => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
   const color = (s: string) => s === 'critical' ? 'var(--danger)' : s === 'warning' ? 'var(--warning)' : 'var(--success)';
   const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
-  return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Temperature trend" style={{ width: '100%', height: 'auto', background: '#fff', border: '1px solid var(--border)', borderRadius: 12 }}>
+  return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Temperature trend" style={{ width: '100%', height: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
     {min != null && max != null && <rect x={padL} y={y(max)} width={innerW} height={Math.max(0, y(min) - y(max))} fill="rgba(42,157,74,0.10)" />}
     {max != null && <line x1={padL} x2={w - padR} y1={y(max)} y2={y(max)} stroke="var(--danger)" strokeDasharray="4 4" strokeWidth={1} />}
     {min != null && <line x1={padL} x2={w - padR} y1={y(min)} y2={y(min)} stroke="var(--danger)" strokeDasharray="4 4" strokeWidth={1} />}
     {max != null && <text x={padL - 6} y={y(max) + 4} fontSize={10} textAnchor="end" fill="var(--muted)">{max}</text>}
     {min != null && <text x={padL - 6} y={y(min) + 4} fontSize={10} textAnchor="end" fill="var(--muted)">{min}</text>}
-    <path d={line} fill="none" stroke="var(--navy, #1B3A6B)" strokeWidth={1.5} />
-    {pts.map((p, i) => <circle key={i} cx={x(p.t)} cy={y(p.v)} r={3} fill={color(p.s)} stroke="#fff" strokeWidth={0.8}><title>{new Date(p.t).toLocaleString()} — {p.v}°C ({p.s})</title></circle>)}
+    <path d={line} fill="none" stroke="var(--navy)" strokeWidth={1.5} />
+    {pts.map((p, i) => <circle key={i} cx={x(p.t)} cy={y(p.v)} r={3} fill={color(p.s)} stroke="var(--surface)" strokeWidth={0.8}><title>{new Date(p.t).toLocaleString()} — {p.v}°C ({p.s})</title></circle>)}
     <text x={padL} y={h - 8} fontSize={10} fill="var(--muted)">{new Date(t0).toLocaleString()}</text>
     <text x={w - padR} y={h - 8} fontSize={10} textAnchor="end" fill="var(--muted)">{new Date(t1).toLocaleString()}</text>
   </svg>;

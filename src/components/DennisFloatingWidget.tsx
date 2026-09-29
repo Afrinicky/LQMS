@@ -21,40 +21,41 @@ const PANEL_HEIGHT = 520;
 
 // Self-contained styling so the widget looks right regardless of the global
 // stylesheet — a round, draggable chat icon that expands into a mini chat popup.
+// Colours come from the design tokens, so the widget follows the active theme.
 const FLOAT_CSS = `
 .dennis-fab{position:fixed;z-index:1200;width:${ICON_SIZE}px;height:${ICON_SIZE}px;border-radius:50%;border:none;cursor:grab;
-  display:flex;align-items:center;justify-content:center;color:#fff;touch-action:none;
-  background:radial-gradient(circle at 30% 25%,#2f6df0,#1B3A6B);box-shadow:0 8px 22px rgba(8,16,40,.45);transition:transform .12s ease,box-shadow .12s ease}
-.dennis-fab:hover{transform:scale(1.06);box-shadow:0 10px 28px rgba(8,16,40,.55)}
+  display:flex;align-items:center;justify-content:center;color:var(--on-accent);touch-action:none;
+  background:radial-gradient(circle at 30% 25%,var(--accent),#1B3A6B);box-shadow:var(--shadow);transition:transform .12s ease,box-shadow .12s ease}
+.dennis-fab:hover{transform:scale(1.06);box-shadow:var(--shadow-lg)}
 .dennis-fab:active{cursor:grabbing}
-.dennis-fab .dot{position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:#37d67a;border:2px solid #0f1830}
+.dennis-fab .dot{position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;background:var(--success);border:2px solid var(--surface)}
 .dennis-fab .ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(255,255,255,.18)}
 .dennis-pop{position:fixed;z-index:1200;width:${PANEL_WIDTH}px;max-width:94vw;height:${PANEL_HEIGHT}px;max-height:84vh;display:flex;flex-direction:column;
-  background:#0f1830;border:1px solid #25365f;border-radius:16px;overflow:hidden;box-shadow:0 18px 50px rgba(4,8,24,.6);color:#e7edf8}
-.dennis-pop .hd{display:flex;align-items:center;gap:10px;padding:11px 12px;background:linear-gradient(90deg,#16284b,#1B3A6B);cursor:grab;touch-action:none}
+  background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-lg);color:var(--text)}
+.dennis-pop .hd{display:flex;align-items:center;gap:10px;padding:11px 12px;background:linear-gradient(90deg,#16284b,#1B3A6B);color:#EAF1FF;cursor:grab;touch-action:none}
 .dennis-pop .hd:active{cursor:grabbing}
-.dennis-pop .av{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 30% 25%,#2f6df0,#13315f);display:flex;align-items:center;justify-content:center;color:#fff;flex:0 0 auto}
+.dennis-pop .av{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 30% 25%,var(--accent),#13315f);display:flex;align-items:center;justify-content:center;color:#fff;flex:0 0 auto}
 .dennis-pop .ti{display:flex;flex-direction:column;line-height:1.15;flex:1;min-width:0}
 .dennis-pop .ti strong{font-size:14px}
-.dennis-pop .ti small{font-size:11px;color:#9fb2d6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dennis-pop .ic{background:transparent;border:none;color:#cfe0ff;cursor:pointer;padding:4px;border-radius:6px;display:flex}
+.dennis-pop .ti small{font-size:11px;color:#9FB2D6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dennis-pop .ic{background:transparent;border:none;color:#CFE0FF;cursor:pointer;padding:4px;border-radius:6px;display:flex}
 .dennis-pop .ic:hover{background:rgba(255,255,255,.12)}
-.dennis-pop .qa{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid #1e2c4d}
-.dennis-pop .qa button{font-size:11px;padding:4px 9px;border-radius:20px;border:1px solid #2c416f;background:#16243f;color:#cdddf7;cursor:pointer}
-.dennis-pop .qa button:hover{background:#1d3257}
+.dennis-pop .qa{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border)}
+.dennis-pop .qa button{font-size:11px;padding:4px 9px;border-radius:20px;border:1px solid var(--border);background:var(--panel-2);color:var(--muted);cursor:pointer}
+.dennis-pop .qa button:hover{background:var(--accent-soft);color:var(--accent-bright)}
 .dennis-pop .qa button:disabled{opacity:.5;cursor:default}
-.dennis-pop .ms{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.dennis-pop .ms{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface)}
 .dennis-pop .b{max-width:88%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
-.dennis-pop .b.user{align-self:flex-end;background:#2f6df0;color:#fff;border-bottom-right-radius:4px}
-.dennis-pop .b.dennis{align-self:flex-start;background:#17233f;border:1px solid #243663;border-bottom-left-radius:4px}
-.dennis-pop .b .src{margin-top:6px;font-size:11px;color:#9fb2d6;border-top:1px dashed #2c416f;padding-top:5px}
-.dennis-pop .b .ntc{display:block;margin-top:5px;font-size:10.5px;color:#7d8fb5}
-.dennis-pop .typing span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:#9fb2d6;animation:dblink 1s infinite}
+.dennis-pop .b.user{align-self:flex-end;background:var(--accent);color:var(--on-accent);border-bottom-right-radius:4px}
+.dennis-pop .b.dennis{align-self:flex-start;background:var(--panel);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:4px}
+.dennis-pop .b .src{margin-top:6px;font-size:11px;color:var(--muted);border-top:1px dashed var(--border-strong);padding-top:5px}
+.dennis-pop .b .ntc{display:block;margin-top:5px;font-size:10.5px;color:var(--faint)}
+.dennis-pop .typing span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:var(--muted);animation:dblink 1s infinite}
 .dennis-pop .typing span:nth-child(2){animation-delay:.2s}.dennis-pop .typing span:nth-child(3){animation-delay:.4s}
 @keyframes dblink{0%,60%,100%{opacity:.3}30%{opacity:1}}
-.dennis-pop .cp{display:flex;gap:8px;padding:10px;border-top:1px solid #1e2c4d;background:#0c1428}
-.dennis-pop .cp textarea{flex:1;resize:none;height:40px;border-radius:10px;border:1px solid #2c416f;background:#0f1d38;color:#e7edf8;padding:9px 11px;font-family:inherit;font-size:13px}
-.dennis-pop .cp button{border:none;border-radius:10px;background:#2f6df0;color:#fff;padding:0 14px;cursor:pointer;display:flex;align-items:center;gap:6px}
+.dennis-pop .cp{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--panel)}
+.dennis-pop .cp textarea{flex:1;resize:none;height:40px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:9px 11px;font-family:inherit;font-size:13px}
+.dennis-pop .cp button{border:none;border-radius:10px;background:var(--accent);color:var(--on-accent);padding:0 14px;cursor:pointer;display:flex;align-items:center;gap:6px}
 .dennis-pop .cp button:disabled{opacity:.5;cursor:default}
 `;
 

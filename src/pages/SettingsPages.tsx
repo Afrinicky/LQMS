@@ -2693,7 +2693,7 @@ function LabLogo() {
     <h3>Laboratory logo</h3>
     {error && <Notice kind="error">{error}</Notice>}
     <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-      <div style={{ width: 120, height: 120, border: '1px dashed #bbb', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa', overflow: 'hidden' }}>
+      <div style={{ width: 120, height: 120, border: '1px dashed var(--border-strong)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel)', overflow: 'hidden' }}>
         {url ? <img src={url} alt="Laboratory logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span className="muted" style={{ fontSize: 12 }}>No logo</span>}
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -3366,7 +3366,7 @@ export function RosterSettings() {
           <td><strong>{r.code}</strong></td>
           <td><input defaultValue={r.label} onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ label: e.target.value }) })} /></td>
           <td><select defaultValue={r.category} onChange={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ category: e.target.value }) })}>{SHIFT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></td>
-          <td style={{ textAlign: 'center' }}><span style={{ display: 'inline-block', minWidth: 26, padding: '2px 8px', borderRadius: 4, background: r.bg_color, color: r.text_color, fontWeight: 700, border: '1px solid #ccc' }}>{r.code}</span></td>
+          <td style={{ textAlign: 'center' }}><span style={{ display: 'inline-block', minWidth: 26, padding: '2px 8px', borderRadius: 4, background: r.bg_color, color: r.text_color, fontWeight: 700, border: '1px solid var(--border-strong)' }}>{r.code}</span></td>
           <td style={{ whiteSpace: 'nowrap' }}>
             <input type="color" defaultValue={r.bg_color} title="Background" onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ bgColor: e.target.value }) })} />
             <input type="color" defaultValue={r.text_color} title="Text" onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ textColor: e.target.value }) })} />

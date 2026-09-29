@@ -10,6 +10,7 @@ import { canEnterSettings, settingsBlurb } from '../constants/settingsAccess';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
+import { ThemeToggle } from '../components/ui/ThemeToggle';
 import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
 
 type CountRow = { count: number };
@@ -107,6 +108,7 @@ export function Home() {
               {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
             </button>
           )}
+          <ThemeToggle />
           <button className="user-chip" type="button" title="My Portal"
             onClick={() => navigate('/my-portal')}>
             <span className="user-avatar">{initials(user?.fullName)}</span>

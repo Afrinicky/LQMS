@@ -243,7 +243,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
       {items.length === 0 && <EmptyRow colSpan={7}>Nothing awaiting {stage === 'risk_assessment' ? 'risk assessment' : investigationLabel.toLowerCase()}.</EmptyRow>}
     </tbody></table>
 
-    {sel && <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--primary, #2563eb)' }}>
+    {sel && <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--primary)' }}>
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>{sel.ref}</h3>
         <button style={{ marginLeft: 'auto' }} className="secondary" onClick={() => setSel(null)}>Close</button>
@@ -693,7 +693,7 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
     catch (e) { onError(errorText(e)); }
   }
 
-  return <div className="card" style={{ marginTop: 16, borderTop: '3px solid #c1121f' }}>
+  return <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--danger)' }}>
     <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ margin: 0 }}>{i.incident_number} {formatBadge(i.status)} {i.risk_level ? riskLevelBadge(i.risk_level, riskBands) : null}
         {i.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>patient safety</span> : null}</h3>
@@ -766,10 +766,10 @@ function CapaStepper({ status, effectiveness }: { status: string; effectiveness?
     {steps.map((s, k) => <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span style={{
         fontSize: 12, fontWeight: k === idx ? 700 : 500, padding: '3px 10px', borderRadius: 999,
-        background: k === idx ? 'var(--primary, #2563eb)' : k < idx ? '#e6f4ea' : 'var(--surface-2, #eef1f6)',
-        color: k === idx ? '#fff' : k < idx ? '#1a7f37' : 'var(--muted, #667)',
+        background: k === idx ? 'var(--accent)' : k < idx ? 'var(--success-bg)' : 'var(--panel-2)',
+        color: k === idx ? 'var(--on-accent)' : k < idx ? 'var(--success)' : 'var(--muted)',
       }}>{k < idx ? '✓ ' : ''}{s.label}</span>
-      {k < steps.length - 1 && <span style={{ color: 'var(--muted, #99a)', fontSize: 12 }}>→</span>}
+      {k < steps.length - 1 && <span style={{ color: 'var(--muted)', fontSize: 12 }}>→</span>}
     </span>)}
   </div>;
 }
@@ -940,7 +940,7 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
     </p>
     <CapaStepper status={capa.status} effectiveness={c.effectiveness_status} />
 
-    <Notice kind="success" style={{ background: 'var(--surface-2, #eef1f6)', color: 'inherit', marginBottom: 12 }} silent>
+    <Notice kind="success" style={{ background: 'var(--surface-2)', color: 'inherit', marginBottom: 12 }} silent>
       <strong>Next step: {next.label}.</strong> <span className="muted">{next.hint}</span>
     </Notice>
 

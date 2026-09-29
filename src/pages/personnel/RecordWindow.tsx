@@ -129,18 +129,18 @@ export default function RecordWindow({ title, subtitle, toolbar, onClose, childr
 }
 
 const WINDOW_CSS = `.rw-scrim{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.rw-window{display:flex;flex-direction:column;overflow:hidden;background:var(--panel,#0b1428);border:1px solid var(--border,#22345c);border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
-.rw-titlebar{display:flex;align-items:center;gap:12px;padding:0 4px 0 16px;height:40px;flex:none;background:var(--panel-2,#101c36);border-bottom:1px solid var(--border,#22345c);user-select:none;touch-action:none}
-.rw-title{font-size:13.5px;font-weight:650;color:var(--text,#e7eefc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none;max-width:52%}
-.rw-subtitle{flex:1;min-width:0;font-size:12px;color:var(--muted,#7c8db0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rw-window{display:flex;flex-direction:column;overflow:hidden;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.rw-titlebar{display:flex;align-items:center;gap:12px;padding:0 4px 0 16px;height:40px;flex:none;background:var(--panel-2);border-bottom:1px solid var(--border);user-select:none;touch-action:none}
+.rw-title{font-size:13.5px;font-weight:650;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none;max-width:52%}
+.rw-subtitle{flex:1;min-width:0;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rw-winbtns{display:flex;gap:2px;flex:none;margin-left:auto}
-.rw-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:7px;color:var(--muted,#c8d4ec);font-size:13px;cursor:pointer;line-height:1;padding:0}
+.rw-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:7px;color:var(--muted);font-size:13px;cursor:pointer;line-height:1;padding:0}
 .rw-winbtn:hover{background:rgba(255,255,255,.09);color:#fff}
 .rw-winbtn.rw-close:hover{background:#c42b1c;color:#fff}
-.rw-toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px;flex:none;flex-wrap:wrap;background:var(--panel-2,#0e1930);border-bottom:1px solid var(--border,#1d2c4e)}
+.rw-toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px;flex:none;flex-wrap:wrap;background:var(--panel-2);border-bottom:1px solid var(--border)}
 .rw-body{flex:1;min-height:0;overflow:auto}
-.rw-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--border,#2c416f);border-radius:8px;color:var(--text,#dbe6fb);font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
-.rw-btn:hover:not(:disabled){background:var(--accent-soft,#1d3257);border-color:var(--accent-bright,#3a5694)}
+.rw-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
+.rw-btn:hover:not(:disabled){background:var(--accent-soft);border-color:var(--accent-bright)}
 .rw-btn:disabled{opacity:.5;cursor:default}
 .rw-rs{position:absolute;z-index:30;touch-action:none}
 .rw-rs-n{top:0;left:14px;right:14px;height:6px;cursor:ns-resize}
@@ -153,6 +153,6 @@ const WINDOW_CSS = `.rw-scrim{position:fixed;inset:0;display:flex;align-items:ce
 .rw-rs-sw{bottom:0;left:0;width:14px;height:14px;cursor:nesw-resize}`;
 
 const PILL_CSS = `.rw-pill{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:10px;font-size:12.5px;font-weight:600;
-background:var(--panel-2,#101c36);border:1px solid var(--border,#2c416f);color:var(--text,#e7eefc);cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.45)}
-.rw-pill span{font-weight:500;color:var(--muted,#7c8db0)}
-.rw-pill:hover{border-color:var(--accent-bright,#4e8dff)}`;
+background:var(--panel-2);border:1px solid var(--border);color:var(--text);cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.45)}
+.rw-pill span{font-weight:500;color:var(--muted)}
+.rw-pill:hover{border-color:var(--accent-bright)}`;

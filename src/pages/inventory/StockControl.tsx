@@ -39,12 +39,12 @@ export type LedgerRow = {
 };
 
 const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
-  stockout: { bg: '#fde2e2', fg: '#b42318' },
-  blocked: { bg: '#fde2e2', fg: '#b42318' },
-  critical: { bg: '#fde2e2', fg: '#b42318' },
-  low: { bg: '#fff7df', fg: '#6b4b05' },
-  adequate: { bg: '#e4f7ec', fg: '#155c34' },
-  overstock: { bg: '#e8eefc', fg: '#1e40af' },
+  stockout: { bg: 'var(--danger-bg)', fg: 'var(--danger)' },
+  blocked: { bg: 'var(--danger-bg)', fg: 'var(--danger)' },
+  critical: { bg: 'var(--danger-bg)', fg: 'var(--danger)' },
+  low: { bg: 'var(--warning-bg)', fg: 'var(--warning)' },
+  adequate: { bg: 'var(--success-bg)', fg: 'var(--success)' },
+  overstock: { bg: 'var(--info-bg)', fg: 'var(--info)' },
   unknown: { bg: 'transparent', fg: 'inherit' },
 };
 
@@ -182,7 +182,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
             <td className="nowrap">{qty(r.minimum_stock || 0)} / {qty(r.reorder_level || 0)} / {r.maximum_stock == null ? '—' : qty(r.maximum_stock)}</td>
             <td className="nowrap">{r.earliest_expiry
               ? <>{dateOnly(r.earliest_expiry)}{r.expiry_status && r.expiry_status !== 'valid' &&
-                  <span className="badge" style={{ background: r.expiry_status === 'expired' ? '#fde2e2' : '#fff7df', color: r.expiry_status === 'expired' ? '#b42318' : '#6b4b05' }}>{r.expiry_status.replace('_', ' ')}</span>}</>
+                  <span className="badge" style={{ background: r.expiry_status === 'expired' ? 'var(--danger-bg)' : 'var(--warning-bg)', color: r.expiry_status === 'expired' ? 'var(--danger)' : 'var(--warning)' }}>{r.expiry_status.replace('_', ' ')}</span>}</>
               : <span className="muted">—</span>}</td>
             <td><StatusBadge status={r.status} /></td>
           </tr>)}
@@ -485,7 +485,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
               <td><input type="number" min={0} step="any" value={l.quantity} onChange={e => setLine(i, { quantity: e.target.value })}
                 className={short ? 'input-error' : ''} /></td>
               <td>{item && want > 0
-                ? (short ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>only {qty(item.issuable)} available</span>
+                ? (short ? <span className="badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>only {qty(item.issuable)} available</span>
                   : <span className="muted">{item.earliest_expiry ? `earliest expiry ${dateOnly(item.earliest_expiry)}` : 'earliest-expiry lot'}</span>)
                 : <span className="muted">—</span>}</td>
               <td>{lines.length > 1 && <button type="button" className="tiny danger" aria-label="Remove line"
@@ -567,9 +567,9 @@ export function IssueRegister({ refreshKey, canVoid, canCorrect, sections, staff
           <td>{r.line_count}</td>
           <td>{r.total_quantity}</td>
           <td>{r.issued_by_name || <span className="muted">—</span>}</td>
-          <td>{r.status === 'cancelled' ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>cancelled</span>
+          <td>{r.status === 'cancelled' ? <span className="badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>cancelled</span>
             : r.status === 'returned' ? <span className="badge">part returned</span>
-            : <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>issued</span>}</td>
+            : <span className="badge" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>issued</span>}</td>
           <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
             <RowMenu label={`Manage ${r.issue_number}`}>{close => <>
               <button type="button" role="menuitem" onClick={() => { close(); setOpen(r.id); }}><FileText size={14} /> Open the voucher</button>
@@ -776,7 +776,7 @@ function IssueDetail({ id, onClose, onChanged, canVoid, canCorrect, sections, st
   return <DetailModal open onClose={onClose} title={data ? data.issue_number : 'Issue voucher'}
     subtitle={data ? `${dateOnly(data.issue_date)} · ${data.destination_label || data.section_name || data.issued_to_name || ''}` : ''}
     header={data && <>
-      {data.status === 'cancelled' && <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>cancelled</span>}
+      {data.status === 'cancelled' && <span className="badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>cancelled</span>}
       <button type="button" className="secondary" onClick={() => window.print()}><Printer size={14} /> Print</button>
       {(canVoid || canCorrect) && data.status !== 'cancelled' && <RowMenu label={`Manage ${data.issue_number}`}>{close => <>
         {canCorrect && <button type="button" role="menuitem" onClick={() => { close(); setCorrecting(true); }}>
@@ -1019,8 +1019,8 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
             <td>{c.counted_lines} of {c.line_count}</td>
             <td>{c.variance_lines > 0 ? <span className="badge warn">{c.variance_lines}</span> : <span className="muted">none</span>}</td>
             <td className="nowrap">{c.variance_value ? Math.round(c.variance_value).toLocaleString() : <span className="muted">—</span>}</td>
-            <td>{c.status === 'posted' ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>posted</span>
-              : c.status === 'cancelled' ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>abandoned</span>
+            <td>{c.status === 'posted' ? <span className="badge" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>posted</span>
+              : c.status === 'cancelled' ? <span className="badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>abandoned</span>
               : <span className="badge warn">open</span>}</td>
             <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
               <RowMenu label={`Manage ${c.count_number}`}>{close => <>
@@ -1211,8 +1211,8 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
   return <DetailModal open onClose={onClose} title={data ? `${data.count_number} — count sheet` : 'Count sheet'}
     subtitle={data ? `${dateOnly(data.count_date)}${data.counted_by_name ? ` · counted by ${data.counted_by_name}` : ''}${data.storage_path ? ` · ${data.storage_path}` : ''}` : ''}
     header={data && <>
-      {posted ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>posted</span>
-        : abandoned ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>abandoned</span>
+      {posted ? <span className="badge" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>posted</span>
+        : abandoned ? <span className="badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>abandoned</span>
         : <span className="badge warn">open</span>}
       {Boolean(data.blind) && <span className="badge">blind count</span>}
       {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download(`/supplier-inventory/counts/${id}/export`, `${data.count_number}.xlsx`).catch(e => setError(errorText(e)))}>
@@ -1295,8 +1295,8 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
               onChange={e => patch(l, { counted: e.target.value })} /></td>
             <td>{v == null ? <span className="muted">—</span>
               : hideBook ? <span className="muted">on posting</span>
-              : v === 0 ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>agrees</span>
-              : <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>{v > 0 ? '+' : ''}{Math.round(v * 100) / 100}</span>}</td>
+              : v === 0 ? <span className="badge" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>agrees</span>
+              : <span className="badge" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>{v > 0 ? '+' : ''}{Math.round(v * 100) / 100}</span>}</td>
             <td><TextField disabled={locked} placeholder={v ? 'Why?' : ''} style={{ minWidth: 160 }}
               value={edits[l.id]?.reason ?? l.reason ?? ''}
               onValue={nextValue => patch(l, { reason: nextValue })} /></td>

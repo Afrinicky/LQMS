@@ -2,20 +2,21 @@ import type { ReactNode } from 'react';
 
 /* ============================================================================
    Lightweight, dependency-free SVG chart kit for the SECH_LIMS dashboards.
-   All charts are theme-aware (use the dark palette), responsive (viewBox based)
-   and gracefully render an empty state when there is no data. No external
-   charting library is used so the offline Electron build stays dependency-free.
+   Every colour is a design token, so the same chart repaints with the theme.
+   Charts are responsive (viewBox based) and gracefully render an empty state
+   when there is no data. No external charting library is used so the offline
+   Electron build stays dependency-free.
    ========================================================================= */
 
 export const CHART_COLORS = [
-  '#4E8DFF', // accent bright
-  '#34D399', // success
-  '#F5B544', // warning
-  '#FF6B7D', // danger
-  '#A78BFA', // violet
-  '#2DD4BF', // teal
-  '#F472B6', // pink
-  '#60A5FA', // sky
+  'var(--c1)', // blue
+  'var(--c5)', // green
+  'var(--c4)', // amber
+  'var(--c7)', // coral
+  'var(--c3)', // violet
+  'var(--c2)', // teal
+  'var(--c6)', // pink
+  'var(--c8)', // sky
 ];
 
 type Datum = {
