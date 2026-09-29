@@ -442,7 +442,7 @@ function StaffFileDetail({ staffId, onClose, onError }: { staffId: number; onClo
 const SF_CSS = `.sf-page{padding:18px 20px 26px;display:flex;flex-direction:column;gap:18px}
 .sf-identity{display:flex;align-items:center;gap:16px}
 .sf-avatar{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;
-  background:linear-gradient(140deg,var(--accent,#2f6bff),#1B49C0);color:#fff;font-weight:700;font-size:17px;letter-spacing:.02em}
+  background:linear-gradient(140deg,var(--accent),#1B49C0);color:#fff;font-weight:700;font-size:17px;letter-spacing:.02em}
 .sf-who h3{margin:0;font-size:19px;letter-spacing:-.01em}
 .sf-who p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
 .sf-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
@@ -455,7 +455,7 @@ const SF_CSS = `.sf-page{padding:18px 20px 26px;display:flex;flex-direction:colu
 .sf-field strong{font-size:12.5px;font-weight:600;overflow-wrap:anywhere;line-height:1.35}
 .sf-sig{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .sf-sig-box{display:inline-flex;align-items:center;justify-content:center;width:150px;height:46px;border:1px solid var(--border);border-radius:8px;background:#fff;padding:4px}
-.sf-sig-none{font-size:12px;color:var(--warning,#e0a33a);max-width:26ch;line-height:1.4}
+.sf-sig-none{font-size:12px;color:var(--warning);max-width:26ch;line-height:1.4}
 .sf-form{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--panel)}
 .sf-form h4{margin:0 0 10px;font-size:13px}
 .sf-form .form-grid{margin:0}

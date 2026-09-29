@@ -13,6 +13,7 @@ import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { SignatureModal } from '../components/SignatureModal';
 import DailyBriefing from '../components/DailyBriefing';
+import { ThemeToggle } from '../components/ui/ThemeToggle';
 
 const API_HOST = (() => {
   try { return new URL((window as any).sechLims?.apiBaseUrl ?? 'http://127.0.0.1:4317/api').host; }
@@ -207,6 +208,7 @@ export default function AppLayout() {
                 <span>{user?.roleName ?? 'Member'}</span>
               </span>
             </button>
+            <ThemeToggle />
             <button className="icon-btn" type="button" aria-label="My signature" title="My signature" onClick={() => setShowSignature(true)}><PenLine size={18} /></button>
             <button className="icon-btn" type="button" aria-label="Change password" title="Change password" onClick={() => setShowPassword(true)}><KeyRound size={18} /></button>
             <button className="icon-btn" type="button" aria-label="Logout" onClick={logout}><LogOut size={18} /></button>

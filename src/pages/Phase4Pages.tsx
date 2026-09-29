@@ -78,7 +78,7 @@ function LeveyJenningsChart({ data }: { data: LeveyJenningsData }) {
     <line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke="var(--border)" strokeWidth={1} strokeDasharray={dashed ? '4 4' : undefined} />
     <text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted)">{label}</text>
   </g>;
-  return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Levey-Jennings chart" style={{ width: '100%', maxWidth: w, height: 'auto', background: '#fff', border: '1px solid var(--border)', borderRadius: 12 }}>
+  return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Levey-Jennings chart" style={{ width: '100%', maxWidth: w, height: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
     {hasStats && <>
       {refLine(mean + 3 * sd, '+3 SD', true)}
       {refLine(mean + 2 * sd, '+2 SD', true)}
@@ -90,7 +90,7 @@ function LeveyJenningsChart({ data }: { data: LeveyJenningsData }) {
     </>}
     {!hasStats && refLine((yMin + yMax) / 2, 'mid', false)}
     <path d={linePath} fill="none" stroke="var(--navy)" strokeWidth={1.5} />
-    {points.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.result_value)} r={4} fill={colorFor(p.status)} stroke="#fff" strokeWidth={1}>
+    {points.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.result_value)} r={4} fill={colorFor(p.status)} stroke="var(--surface)" strokeWidth={1}>
       <title>{p.run_date}{p.run_time ? ' ' + p.run_time : ''} – {p.result_value}{p.z_score === null || p.z_score === undefined ? '' : ` (z=${p.z_score.toFixed(2)})`} – ${p.status}${p.rule_violation ? ' / ' + p.rule_violation : ''}</title>
     </circle>)}
     <text x={padL} y={h - 8} fontSize={10} fill="var(--muted)">{points[0].run_date}</text>

@@ -541,7 +541,7 @@ export function OrganisationPage() {
     <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, ethical declarations, organogram, budgetary projections and routine record reviews." />
     {tabBar(tab, enabledTabs, t => { setTab(t); setSearchParams(prev => { prev.set('tab', t); return prev; }); })}
     {error && <Notice kind="error">{error}</Notice>}
-    {notice && <Notice kind="success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
+    {notice && <Notice kind="success" style={{ background: 'var(--success-bg)', border: '1px solid var(--success-line)', color: 'var(--success)', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
 
     {tab === 'Laboratory Profile' && <LaboratoryProfileView config={config} staff={staff} registrations={registrations} />}
 
@@ -918,7 +918,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         <div className="card" style={{ padding: 12 }}>
           <h4 style={{ marginTop: 0 }}>Declaration forms</h4>
           {forms.length === 0 ? <p className="muted">No declarations set up yet.</p> :
-            <div style={{ maxHeight: '58vh', overflowY: 'auto', borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ maxHeight: '58vh', overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
               {forms.map(f => {
                 const isSelected = selected?.id === f.id;
                 const signedByMe = !!f.my_signature;
@@ -929,20 +929,20 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                 // goes on looking current.
                 const inForce = (f.status ?? 'active') === 'active';
                 return <button key={f.id} type="button" onClick={() => openForm(f)}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #eef0f4', background: isSelected ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer', opacity: inForce ? 1 : 0.62 }}>
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--panel-2)', background: isSelected ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', opacity: inForce ? 1 : 0.62 }}>
                   <div style={{ fontWeight: 600, textDecoration: f.status === 'obsolete' ? 'line-through' : undefined }}>{f.title}</div>
-                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
                     {FORM_TYPES.find(t => t.key === f.form_type)?.label || f.form_type} · v{f.version || '—'}
                     {!inForce
-                      ? <span className="badge" style={{ marginLeft: 6, background: '#e2e8f0', color: '#475569' }}>{DECLARATION_STATUS_LABELS[f.status ?? ''] ?? f.status}</span>
+                      ? <span className="badge" style={{ marginLeft: 6, background: 'var(--neutral-bg)', color: 'var(--muted)' }}>{DECLARATION_STATUS_LABELS[f.status ?? ''] ?? f.status}</span>
                       : signedByMe
-                        ? <span className="badge" style={{ marginLeft: 6, background: '#dcfce7', color: '#166534' }}>signed</span>
-                        : <span className="badge" style={{ marginLeft: 6, background: '#fef3c7', color: '#92400e' }}>to sign</span>}
+                        ? <span className="badge" style={{ marginLeft: 6, background: 'var(--success-bg)', color: 'var(--success)' }}>signed</span>
+                        : <span className="badge" style={{ marginLeft: 6, background: 'var(--warning-bg)', color: 'var(--warning)' }}>to sign</span>}
                   </div>
-                  <div style={{ marginTop: 5, height: 5, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? '#16a34a' : pct >= 40 ? '#f59e0b' : '#dc2626' }} />
+                  <div style={{ marginTop: 5, height: 5, background: 'var(--track)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)' }} />
                   </div>
-                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                  <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 2 }}>
                     {f.signature_count} of {f.total_staff} signed ({pct}%)
                     {f.status === 'obsolete' && ' \u00b7 no longer in force'}
                   </div>
@@ -963,7 +963,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                 <h3 style={{ margin: '2px 0 0' }}>
                   {selected.title}
                   {selected.status !== 'active' && (
-                    <span className="badge" style={{ marginLeft: 8, background: '#e2e8f0', color: '#475569', verticalAlign: 'middle', fontSize: 11 }}>
+                    <span className="badge" style={{ marginLeft: 8, background: 'var(--neutral-bg)', color: 'var(--muted)', verticalAlign: 'middle', fontSize: 11 }}>
                       {DECLARATION_STATUS_LABELS[selected.status ?? ''] ?? selected.status}
                     </span>
                   )}
@@ -981,19 +981,19 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
               {/* Manage is deliberately understated — a small ⋯ that reveals edit/delete.
                   It is not shown at all to somebody who may only read and sign. */}
               {(canEditForm || canDeleteForm) && <button type="button" title="Manage this declaration" aria-label="Manage this declaration" onClick={() => setShowManage(v => !v)}
-                style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 18, lineHeight: 1, padding: '0 6px' }}>⋯</button>}
+                style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: 'var(--faint)', fontSize: 18, lineHeight: 1, padding: '0 6px' }}>⋯</button>}
             </div>
-            {showManage && (canEditForm || canDeleteForm) && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed #e2e8f0', paddingTop: 8 }}>
+            {showManage && (canEditForm || canDeleteForm) && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
               {canEditForm && <button type="button" className="secondary" onClick={() => startEdit(selected)}>✎ Edit declaration</button>}
-              {canDeleteForm && <button type="button" className="secondary" style={{ color: '#dc2626' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>}
+              {canDeleteForm && <button type="button" className="secondary" style={{ color: 'var(--danger)' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>}
               {/* Out of force, or back into it. Keeps every signature. */}
               {canEditForm && (selected.status === 'obsolete'
                 ? <button type="button" className="secondary" onClick={() => void setDeclarationStatus(selected, 'active')}>↩ Make active again</button>
                 : <button type="button" className="secondary" onClick={() => void setDeclarationStatus(selected, 'obsolete')}>⊘ Mark obsolete</button>)}
             </div>}
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
-            {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}
-            {selected.acknowledgement_statement && <p style={{ marginTop: 10, fontStyle: 'italic', borderLeft: '3px solid #94a3b8', paddingLeft: 10, color: '#475569' }}>{selected.acknowledgement_statement}</p>}
+            {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid var(--border)', paddingTop: 10 }}>{selected.body_content}</div>}
+            {selected.acknowledgement_statement && <p style={{ marginTop: 10, fontStyle: 'italic', borderLeft: '3px solid var(--faint)', paddingLeft: 10, color: 'var(--muted)' }}>{selected.acknowledgement_statement}</p>}
             {isFileOnly && (previewUrl && (selected.file_mime === 'application/pdf' || /\.pdf$/i.test(selected.file_name || ''))
               ? <iframe title="declaration" src={previewUrl} style={{ width: '100%', height: '60vh', border: '1px solid #cbd5e0', borderRadius: 6, marginTop: 10 }} />
               : isFileOnly && <p className="muted" style={{ marginTop: 10 }}>Preview not available — download the form to read it.</p>)}
@@ -1001,16 +1001,16 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
 
           {selected.my_signature ? <div className="card" style={{ marginTop: 12 }}>
             <h4 style={{ marginTop: 0 }}>Your acknowledgement</h4>
-            <p>Signed on {String(selected.my_signature.signed_at).slice(0, 19).replace('T', ' ')}. {selected.my_signature.conflict_declared ? <strong style={{ color: '#dc2626' }}>Conflict declared.</strong> : 'No conflict declared.'}</p>
+            <p>Signed on {String(selected.my_signature.signed_at).slice(0, 19).replace('T', ' ')}. {selected.my_signature.conflict_declared ? <strong style={{ color: 'var(--danger)' }}>Conflict declared.</strong> : 'No conflict declared.'}</p>
             {selected.my_signature.conflict_details && <p className="muted">Conflict details: {selected.my_signature.conflict_details}</p>}
-            {selected.my_signature.signed_file_id && <p style={{ marginTop: 6 }}>Signed copy: <a onClick={() => void downloadFileById(selected.my_signature!.signed_file_id!, `signed-${selected.form_number || selected.id}`)} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>⬇ download your signed document</a></p>}
+            {selected.my_signature.signed_file_id && <p style={{ marginTop: 6 }}>Signed copy: <a onClick={() => void downloadFileById(selected.my_signature!.signed_file_id!, `signed-${selected.form_number || selected.id}`)} style={{ cursor: 'pointer', color: 'var(--accent)' }}>⬇ download your signed document</a></p>}
           </div> : <div className="card" style={{ marginTop: 12 }}>
             <h4 style={{ marginTop: 0 }}>Read &amp; sign your acknowledgement</h4>
             <p className="muted" style={{ marginTop: 0 }}>{selected.acknowledgement_statement || 'By signing you confirm you have read and understood this declaration and agree to be bound by it.'} Your signature is personal and cannot be delegated.</p>
-            {isFileOnly && <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 12px', margin: '8px 0', fontSize: 13 }}>
+            {isFileOnly && <div style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning-line)', borderRadius: 6, padding: '10px 12px', margin: '8px 0', fontSize: 13 }}>
               <strong>This declaration is a form document.</strong> To sign it:
               <ol style={{ margin: '6px 0 0', paddingLeft: 20 }}>
-                <li><a onClick={() => selected.file_id && void downloadFileById(selected.file_id, selected.file_name || 'declaration')} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>Download the form</a></li>
+                <li><a onClick={() => selected.file_id && void downloadFileById(selected.file_id, selected.file_name || 'declaration')} style={{ cursor: 'pointer', color: 'var(--accent)' }}>Download the form</a></li>
                 <li>Print and sign it (or sign it electronically).</li>
                 <li>Attach the signed copy below, then submit.</li>
               </ol>
@@ -1032,7 +1032,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             </div>
             {signatures.length === 0 ? <p className="muted">No signatures yet.</p> :
               <table className="data-table" style={{ marginTop: 8 }}><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Signature</th><th>Conflict</th>{isFileOnly && <th>Signed copy</th>}</tr></thead><tbody>
-                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td><SignatureImage staffId={s.staff_id} hasSignature={!!s.signature_file_id} name={s.staff_name || staffName(s.staff_id)} /></td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td>{isFileOnly && <td>{s.signed_file_id ? <a onClick={() => void downloadFileById(s.signed_file_id!, s.signed_file_name || `signed-${i + 1}`)} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>⬇ {s.signed_file_name || 'download'}</a> : '—'}</td>}</tr>)}
+                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td><SignatureImage staffId={s.staff_id} hasSignature={!!s.signature_file_id} name={s.staff_name || staffName(s.staff_id)} /></td><td>{s.conflict_declared ? <span style={{ color: 'var(--danger)' }}>Declared</span> : '—'}</td>{isFileOnly && <td>{s.signed_file_id ? <a onClick={() => void downloadFileById(s.signed_file_id!, s.signed_file_name || `signed-${i + 1}`)} style={{ cursor: 'pointer', color: 'var(--accent)' }}>⬇ {s.signed_file_name || 'download'}</a> : '—'}</td>}</tr>)}
               </tbody></table>}
           </div>
         </>}
@@ -1202,7 +1202,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
               <td>{formatBadge(p.status)}</td>
               <td>
                 <button className="link-btn" onClick={() => startEdit(p)}>Edit</button>{' '}
-                {can('organisation.structure', 'edit') && <button className="link-btn" style={{ color: '#dc2626' }} onClick={() => removePlan(p.id)}>Delete</button>}
+                {can('organisation.structure', 'edit') && <button className="link-btn" style={{ color: 'var(--danger)' }} onClick={() => removePlan(p.id)}>Delete</button>}
               </td>
             </tr>)}
           </tbody>
@@ -1361,8 +1361,8 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
                 if (scopeRows.length === 0) return null;
                 const scopeTotal = scopeRows.reduce((n, r) => n + (r.projected_amount || 0), 0);
                 return [
-                  <tr key={`h-${s.key}`} style={{ background: '#f8fafc' }}>
-                    <td colSpan={6} style={{ fontWeight: 700, color: '#1B3A6B' }}>{s.label}</td>
+                  <tr key={`h-${s.key}`} style={{ background: 'var(--panel)' }}>
+                    <td colSpan={6} style={{ fontWeight: 700, color: 'var(--navy)' }}>{s.label}</td>
                     <td style={{ fontWeight: 700 }}>{Math.round(scopeTotal).toLocaleString()}</td>
                     <td colSpan={3} />
                   </tr>,

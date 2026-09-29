@@ -350,7 +350,7 @@ export function TreatmentStage({ rows, criteria, staff, onChanged, onOpen }: Sta
       </div>
       <button style={{ marginTop: 8 }} className="secondary" disabled={busy || !criteria.canAssess} onClick={addControl}>Add control</button>
 
-      <div style={{ marginTop: 18, borderTop: '1px solid var(--border, #dde)', paddingTop: 12 }}>
+      <div style={{ marginTop: 18, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         {outstanding > 0
           ? <p className="muted" style={{ marginTop: 0 }}>{outstanding} control measure(s) still outstanding. Mark each one implemented to move this risk on.</p>
           : <p className="muted" style={{ marginTop: 0 }}>All control measures are implemented. The risk can now be re-scored.</p>}

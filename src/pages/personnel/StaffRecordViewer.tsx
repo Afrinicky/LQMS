@@ -93,7 +93,7 @@ export default function StaffRecordViewer({ title, subtitle, open, onClose, laye
   </>}>
     <style>{`.srv-stage{height:100%;display:flex;flex-direction:column;background:#525659;padding:10px}
 .srv-frame{flex:1;min-height:0;width:100%;border:0;border-radius:8px;background:#fff;display:block}
-.srv-note{margin:auto;max-width:430px;text-align:center;background:var(--panel-2,#101c36);border:1px solid var(--border,#22345c);border-radius:12px;padding:26px;color:var(--text,#dbe6fb)}`}</style>
+.srv-note{margin:auto;max-width:430px;text-align:center;background:var(--panel-2);border:1px solid var(--border);border-radius:12px;padding:26px;color:var(--text)}`}</style>
 
     <div className="srv-stage">
       {error && <div className="srv-note"><p style={{ margin: 0 }}>{error}</p></div>}
