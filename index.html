@@ -29,13 +29,15 @@
   </script>
   <style>
     :root {
-      --boot-bg: radial-gradient(1000px 640px at 50% -12%, rgba(47,107,255,0.14), transparent 62%),
-                 linear-gradient(160deg, #F7F9FE 0%, #E9EFFA 100%);
-      --boot-text: #0F1B33;
-      --boot-muted: #5B6B87;
-      --boot-faint: #8A98B0;
-      --boot-panel: #E8EEF9;
-      --boot-track: rgba(47,107,255,0.18);
+      /* Matches the application's light workspace, so the splash and the first
+         painted screen are the same colour rather than two shades of white. */
+      --boot-bg: radial-gradient(900px 560px at 50% -14%, rgba(47,107,255,0.10), transparent 62%),
+                 linear-gradient(170deg, #EEF1F8 0%, #DCE3F0 100%);
+      --boot-text: #0B1524;
+      --boot-muted: #495872;
+      --boot-faint: #6C7B94;
+      --boot-panel: #E4EAF3;
+      --boot-track: rgba(47,107,255,0.22);
     }
     :root[data-theme="dark"] {
       --boot-bg: radial-gradient(1000px 640px at 50% -12%, rgba(47,107,255,0.18), transparent 60%),
