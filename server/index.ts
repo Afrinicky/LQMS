@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import setupRoutes from './routes/setup.js';
 import authRoutes from './routes/auth.js';
 import { commonRoutes } from './routes/common.js';
+import { searchRoutes } from './routes/search.js';
 import { configOptionsRoutes } from './routes/configOptions.js';
 import { nonconformityRoutes } from './routes/nonconformities.js';
 import { incidentRoutes } from './routes/incidents.js';
@@ -113,6 +114,7 @@ export function createApiServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(optionalAuth);
   app.get('/api/health', (_req, res) => res.json({ ok: true, product: 'SECH_LIMS by Nickland', lanReady: true }));
+  app.use('/api/search', searchRoutes());
   app.use('/api/setup', setupRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/nonconformities', nonconformityRoutes());

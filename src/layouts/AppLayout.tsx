@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical, KeyRound, PenLine } from 'lucide-react';
+import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, FlaskConical, KeyRound, PenLine } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
@@ -9,6 +9,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { canEnterSettings } from '../constants/settingsAccess';
 import { api } from '../services/api';
 import { moduleIcon, sectionIcon } from '../components/ui/moduleIcons';
+import GlobalSearch from '../components/ui/GlobalSearch';
 import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { SignatureModal } from '../components/SignatureModal';
@@ -181,13 +182,10 @@ export default function AppLayout() {
 
       <main className="main">
         <header className="topbar">
-          <div className="search" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--faint)' }}>
-            <Search size={16} />
-            <input
-              placeholder="Search documents, staff, equipment, actions, evidence…"
-              style={{ border: 0, background: 'transparent', padding: 0, boxShadow: 'none', flex: 1 }}
-            />
-          </div>
+          <GlobalSearch
+            placeholder="Search documents, staff, equipment, actions, evidence…"
+            style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--faint)' }}
+          />
           <div className="topbar-actions">
             <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
             {showInbox && (

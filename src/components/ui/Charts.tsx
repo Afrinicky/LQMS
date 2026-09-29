@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 /* ============================================================================
    Lightweight, dependency-free SVG chart kit for the SECH_LIMS dashboards.
@@ -8,6 +8,14 @@ import type { ReactNode } from 'react';
    Electron build stays dependency-free.
    ========================================================================= */
 
+/**
+ * Every colour here is a CSS custom property, not a literal — that is what lets
+ * one chart repaint with the theme. It also means a colour can only ever be
+ * handed to CSS whole: `${color}AA` produces `var(--c1)AA`, which is not a
+ * colour, so the whole declaration is dropped and the shape it was painting
+ * disappears. Alpha, where a chart wants it, belongs in the SVG (stopOpacity)
+ * or in a color-mix(), never in string concatenation.
+ */
 export const CHART_COLORS = [
   'var(--c1)', // blue
   'var(--c5)', // green
@@ -29,6 +37,10 @@ type Datum = {
 
 const num = (v: number | null | undefined): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : 0;
+
+/** A value's share of the scale, clamped so a bar can never overrun its track. */
+const pct = (value: number, max: number): number =>
+  max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
 
 function ChartEmpty({ height = 140, label = 'No data yet' }: { height?: number; label?: string }) {
   return (
@@ -129,13 +141,13 @@ export function BarChart({ data, height = 168 }: { data: Datum[]; height?: numbe
   return (
     <div className="chart-bars" style={{ height }}>
       {items.map((d, i) => {
-        const h = Math.max(2, (d.value / max) * 100);
+        const h = d.value > 0 ? Math.max(2, pct(d.value, max)) : 0;
         return (
           <div className={`bar-col ${d.onClick ? 'chart-click' : ''}`} key={i} onClick={d.onClick}
             role={d.onClick ? 'button' : undefined} title={d.onClick ? `Open ${d.label}` : d.label}>
             <span className="bar-val">{d.value}</span>
             <div className="bar-track">
-              <div className="bar-fill" style={{ height: `${h}%`, background: `linear-gradient(180deg, ${d.color}, ${d.color}99)` }} />
+              <div className="bar-fill" style={{ height: `${h}%`, background: d.color }} />
             </div>
             <span className="bar-label" title={d.label}>{d.label}</span>
           </div>
@@ -162,7 +174,8 @@ export function BarMeter({ data }: { data: Datum[] }) {
             <span className="meter-val">{d.value}</span>
           </div>
           <div className="meter-track">
-            <div className="meter-fill" style={{ width: `${(d.value / max) * 100}%`, background: `linear-gradient(90deg, ${d.color}AA, ${d.color})` }} />
+            <div className="meter-fill"
+              style={{ width: `${pct(d.value, max)}%`, minWidth: d.value > 0 ? 2 : 0, background: d.color }} />
           </div>
         </li>
       ))}
@@ -234,6 +247,10 @@ export function Sparkline({
   color?: string;
   fill?: boolean;
 }) {
+  // Hooks run before the early return below, never after it.
+  // useId's output carries punctuation that differs between React versions, so
+  // it is stripped down to characters that are safe inside a url(#…) reference.
+  const gradientKey = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const pts = data.map(num);
   if (pts.length < 2) return <ChartEmpty height={height} />;
   const w = 100;
@@ -244,7 +261,10 @@ export function Sparkline({
   const coords = pts.map((p, i) => [i * step, height - ((p - min) / range) * (height - 6) - 3]);
   const line = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c[0].toFixed(2)},${c[1].toFixed(2)}`).join(' ');
   const area = `${line} L${w},${height} L0,${height} Z`;
-  const id = `spark-${color.replace('#', '')}`;
+  // A DOM id, so it cannot be derived from the colour: a token colour spells
+  // `var(--c1)`, whose brackets break the url(#…) that references it, and two
+  // sparklines of one colour would collide on the same id anyway.
+  const id = `spark-${gradientKey}`;
 
   return (
     <svg className="chart-spark" viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" width="100%" height={height}>

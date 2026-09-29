@@ -6229,6 +6229,82 @@ button.cell-mark:disabled { cursor: default; }
 .rk-table tbody td button { padding: 5px 10px; font-size: 12px; }
 
 /* ============================================================================
+   GLOBAL SEARCH
+   The top bar's field and the panel of matches under it. The panel is anchored
+   to the field rather than to the bar, so it lines up with what was typed, and
+   it sits above the workspace and the page header without pushing either.
+   ========================================================================= */
+.global-search { position: relative; flex: 1; max-width: 560px; min-width: 0; }
+.global-search > .search { width: 100%; }
+.global-search input[type="search"]::-webkit-search-cancel-button { display: none; }
+
+.gs-clear {
+  flex: none;
+  display: inline-grid; place-items: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: var(--overlay-3);
+  color: var(--muted);
+  box-shadow: none;
+  cursor: pointer;
+}
+.gs-clear:hover { background: var(--overlay-4); color: var(--text); box-shadow: none; }
+
+.gs-panel {
+  position: absolute;
+  top: calc(100% + 8px); left: 0; right: 0;
+  z-index: 40;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+}
+.gs-note { margin: 0; padding: 12px 12px; font-size: 12.5px; color: var(--muted); }
+.gs-note.gs-more { border-top: 1px solid var(--border); color: var(--faint); font-size: 11.5px; }
+
+.gs-list { list-style: none; margin: 0; padding: 0; }
+.gs-list ul { list-style: none; margin: 0; padding: 0; }
+.gs-group + .gs-group { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+.gs-group-label {
+  margin: 0; padding: 7px 10px 4px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--faint);
+}
+
+.gs-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.gs-item .gs-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.gs-item .gs-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-item .gs-sub {
+  font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-item .gs-module {
+  flex: none; font-size: 10.5px; color: var(--faint);
+  white-space: nowrap;
+}
+.gs-item.is-active { background: var(--accent); }
+.gs-item.is-active .gs-title,
+.gs-item.is-active .gs-sub,
+.gs-item.is-active .gs-module { color: var(--on-accent); }
+.gs-item.is-active .gs-sub,
+.gs-item.is-active .gs-module { opacity: 0.85; }
+
+@media (max-width: 720px) {
+  .gs-item .gs-module { display: none; }
+}
+
+/* ============================================================================
    LIGHT THEME REFINEMENTS
    ----------------------------------------------------------------------------
    Everything in this section is scoped to the light theme and nothing else.
