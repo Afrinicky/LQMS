@@ -266,7 +266,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
         </label>
         {willEscalate
           ? <Notice kind="warn" style={{ marginTop: 6 }}>This event meets the automatic escalation rules — {investigationLabel.toLowerCase()} and corrective action will be raised on save{cfg.autoCreateCapaOnEscalation ? ', including a CAPA record' : ''}.</Notice>
-          : <p className="muted" style={{ fontSize: 12, marginTop: 2 }}>Tick this to investigate an event the rules would otherwise let through on a correction alone.</p>}
+          : null}
         <label style={{ display: 'block', marginTop: 8 }}>Assessment notes (optional)<TextField as="textarea" value={notes} onValue={nextValue => setNotes(nextValue)} /></label>
         <button style={{ marginTop: 10 }} disabled={busy || !cfg.canFollowUp} onClick={submitRisk}>{busy ? 'Saving…' : 'Complete risk assessment'}</button>
       </> : <>
@@ -311,8 +311,7 @@ export function NcCapaPage() {
     : location.pathname.startsWith('/capa') ? 'capa' : 'nonconformities';
   if (!isEnabled('nc_capa')) return <DisabledModule />;
   return <div>
-    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Event Management"
-      subtitle="Nonconformities, incidents & adverse events, and corrective/preventive action — one connected workflow from logging to closure." />
+    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Event Management" />
     {/* All three submodules are Nonconforming Event Management, so they stand
         or fall together with the right to view it. */}
     <div className="tabs">{NC_TOP_TABS.filter(() => canView('nc_capa')).map(t => <button key={t.key} type="button" className={active === t.key ? 'active' : ''} onClick={() => navigate(t.path)}>{t.label}</button>)}</div>
@@ -387,8 +386,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
   const TABS = ['Register', 'Log Event', 'Risk Assessment', 'Root Cause Analysis'];
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Nonconformities"
-      subtitle="Log a nonconforming event, assess its risk, investigate the cause where it matters, then drive corrective action to closure." />}
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Nonconformities" />}
     <Tabs tabs={TABS} tab={tab} setTab={setTab} counts={{ 'Risk Assessment': stages.risk, 'Root Cause Analysis': stages.rca }} />
     <Banner kind="error">{state.error}</Banner>
     <Banner kind="ok">{msg}</Banner>
@@ -440,7 +438,6 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
     {tab === 'Log Event' && <div className="card">
       <WorkflowStepper active="log" />
       <h3 style={{ marginTop: 0 }}>Log a nonconforming event</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Any staff member can record a nonconforming event. Capture the facts and any immediate action taken — nothing more is needed now. The event then flows to <strong>Risk Assessment</strong>, and where the risk warrants it, to <strong>Root Cause Analysis</strong> and <strong>CAPA</strong>.</p>
       {can('nc_capa', 'create') && <form onSubmit={submitNew}>
         <fieldset className="reg-section"><legend>Event details</legend><div className="form-grid">
           <label>Date of event<input type="date" value={form.eventDate} onChange={e => setForm({ ...form, eventDate: e.target.value })} required /></label>
@@ -539,7 +536,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
     <h4 style={{ marginBottom: 4, marginTop: 14 }}>Corrective &amp; preventive action</h4>
     {capa
       ? <p style={{ margin: 0 }}>Managed as <Link to="/capa"><strong>{capa.capa_number}</strong></Link> {formatBadge(capa.status)} <span className="muted">— open the CAPA submodule to plan, verify and review it.</span></p>
-      : <p className="muted" style={{ margin: 0 }}>No CAPA raised yet. One is created automatically when an event escalates; otherwise raise it from the CAPA register.</p>}
+      : <p className="muted" style={{ margin: 0 }}>No CAPA raised yet.</p>}
 
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
       {cfg.canAmend && !amend && nc.status !== 'closed' && <button className="secondary" onClick={() => setAmend(true)}>Amend logged details</button>}
@@ -601,8 +598,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
   const TABS = ['Register', 'Report Incident', 'Risk Assessment', 'Investigation'];
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Incidents &amp; Adverse Events"
-      subtitle="Report incidents, adverse events, occurrences and near-misses, then assess, investigate and act on them." />}
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Incidents &amp; Adverse Events" />}
     <Tabs tabs={TABS} tab={tab} setTab={setTab} counts={{ 'Risk Assessment': stages.risk, Investigation: stages.rca }} />
     <Banner kind="error">{error}</Banner>
     <Banner kind="ok">{msg}</Banner>
@@ -649,7 +645,6 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
     {tab === 'Report Incident' && <div className="card">
       <WorkflowStepper active="log" />
       <h3 style={{ marginTop: 0 }}>Report an incident or adverse event</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Any staff member can report an incident, adverse event, occurrence or near-miss — capture the facts and any immediate action. The event then flows to <strong>Risk Assessment</strong>, and where warranted, to <strong>Investigation</strong> and <strong>CAPA</strong>.</p>
       {can('nc_capa', 'create') && <form className="form-grid" onSubmit={create}>
         <label>Date &amp; time<input type="datetime-local" value={form.incidentDatetime} onChange={e => setForm({ ...form, incidentDatetime: e.target.value })} /></label>
         <label>Type<select value={form.incidentType} onChange={e => setForm({ ...form, incidentType: e.target.value })}>{INCIDENT_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
@@ -736,7 +731,7 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
     <h4 style={{ marginBottom: 4, marginTop: 14 }}>Corrective &amp; preventive action</h4>
     {i.capa_number
       ? <p style={{ margin: 0 }}>Managed as <Link to="/capa"><strong>{i.capa_number}</strong></Link> <span className="muted">— open the CAPA submodule to plan, verify and review it.</span></p>
-      : <p className="muted" style={{ margin: 0 }}>No CAPA raised yet. One is created automatically when an event escalates.</p>}
+      : <p className="muted" style={{ margin: 0 }}>No CAPA raised yet.</p>}
 
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
       {!i.nc_id && cfg.canFollowUp && <button onClick={escalateToNc}>Also raise a nonconformity</button>}
@@ -835,8 +830,7 @@ export function CapaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const TABS = ['Register', 'My Worklist', 'Overdue', 'Effectiveness Reviews'];
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Corrective &amp; Preventive Action (CAPA)"
-      subtitle="One register for every corrective and preventive action — from nonconformities, incidents, complaints or raised directly. Plan, implement, verify, prove it worked, close." />}
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Corrective &amp; Preventive Action (CAPA)" />}
     <Tabs tabs={TABS} tab={tab} setTab={setTab} counts={{ Overdue: summary?.overdue ?? 0, 'Effectiveness Reviews': summary?.awaitingEffectiveness ?? 0 }} />
     <Banner kind="error">{error}</Banner>
     <Banner kind="ok">{msg}</Banner>
@@ -986,14 +980,12 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
     </fieldset>}
 
     {capa.status === 'completed' && cfg.canFollowUp && <fieldset className="reg-section"><legend>Verification</legend>
-      <p className="muted" style={{ marginTop: 0 }}>Confirm the planned actions were actually carried out. This is a check of implementation, not yet of whether they worked.</p>
       <label style={{ display: 'block' }}>Verification notes<TextField as="textarea" value={verifyNotes} onValue={nextValue => setVerifyNotes(nextValue)} /></label>
       <button style={{ marginTop: 10 }} disabled={busy || !verifyNotes.trim()} onClick={() => call('verify', { verificationNotes: verifyNotes }, 'Implementation verified.')}>Verify implementation</button>
     </fieldset>}
 
     {capa.status === 'verified' && c.effectiveness_required && c.effectiveness_status !== 'effective' && cfg.canFollowUp &&
       <fieldset className="reg-section"><legend>Effectiveness review</legend>
-        <p className="muted" style={{ marginTop: 0 }}>Did the action actually stop the problem? Cite the evidence — repeat audit, QC trend, recurrence count, retraining records.</p>
         <div className="form-grid">
           <label>Review date<input type="date" value={eff.date} onChange={e => setEff({ ...eff, date: e.target.value })} /></label>
           <label>Verdict<select value={eff.verdict} onChange={e => setEff({ ...eff, verdict: e.target.value })}>

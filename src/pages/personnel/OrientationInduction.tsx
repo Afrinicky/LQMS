@@ -56,7 +56,6 @@ export default function OrientationInduction({ staff, sections, departments }: {
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <div>
         <h3 style={{ margin: 0 }}>Orientation &amp; Induction</h3>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Set the laboratory's induction checklists as frameworks, then raise a record against a framework for each new starter and work it down item by item — the same way competency assessments are built and used.</p>
       </div>
       <div className="segmented" style={{ display: 'inline-flex', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
         {(['records', 'frameworks'] as const).map(v => <button key={v} type="button" onClick={() => setView(v)}
@@ -236,9 +235,9 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
       </div>
 
       <div>
-        {!selected ? <div className="card" style={{ padding: 20 }}><p className="muted">Select a record to work its induction checklist.</p></div>
+        {!selected ? <div className="card" style={{ padding: 20 }}></div>
           : selected.items && selected.items.length === 0 && !selected.framework_id
-            ? <div className="card" style={{ padding: 20 }}><p className="muted">This is a legacy step-based record created before frameworks. Open it from the register export, or raise a new framework-based record.</p></div>
+            ? <div className="card" style={{ padding: 20 }}></div>
             : <>
               <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
@@ -458,7 +457,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
           </div>
         </form>}
       </div>
-      : !selected ? <div className="card" style={{ padding: 20 }}><p className="muted">Select a framework to view and edit it, or create a new one.</p></div>
+      : !selected ? <div className="card" style={{ padding: 20 }}></div>
       : <>
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>

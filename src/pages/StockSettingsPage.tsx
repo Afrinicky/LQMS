@@ -128,7 +128,6 @@ export default function StockSettingsPage() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>Stock &amp; Storage</h2>
-      <p>Where the laboratory keeps its reagents and consumables, where deliveries come from, and how its stock is barcoded. Stock item categories, units of measure, issue reasons, movement reasons and outside issue destinations live in <strong>Dropdown Lists</strong>.</p>
     </div>
 
     {error && <Notice kind="error">{error}</Notice>}
@@ -139,11 +138,6 @@ export default function StockSettingsPage() {
       <div className="reg-head">
         <div className="reg-head-text">
           <h3><Warehouse size={17} style={{ verticalAlign: '-3px', marginRight: 7 }} />Storage places</h3>
-          <p className="muted">
-            The stores, rooms, shelves, fridges and freezers stock actually sits in. Put places inside places —
-            a shelf in a store, a shelf in a fridge in a unit — and every stock item can then say exactly where
-            it is. A cold place carries the temperature range it is meant to hold.
-          </p>
         </div>
         <div className="reg-head-actions">
           <button type="button" onClick={() => { setForm(blankPlace); setAdding(true); }}><Plus size={15} /> Add a place</button>
@@ -191,12 +185,6 @@ export default function StockSettingsPage() {
     {/* ---- Where deliveries come from ------------------------------------- */}
     <div className="card" style={{ marginTop: 16 }}>
       <h3><Truck size={17} style={{ verticalAlign: '-3px', marginRight: 7 }} />Where stock comes from</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        A standalone laboratory buys what it uses. A hospital laboratory usually draws most of its reagents
-        from the hospital's main store and buys only a few items direct — and may also receive from a district,
-        regional or national medical store. Say which of those happens here, and the receiving screen asks for
-        the right thing instead of pretending every delivery came from a supplier.
-      </p>
       <div className="bc-choice">
         {PROCUREMENT_MODES.map(mode => (
           <button key={mode} type="button" className={procurement.mode === mode ? 'active' : ''}
@@ -224,10 +212,6 @@ export default function StockSettingsPage() {
         <div className="reg-head" style={{ marginTop: 20 }}>
           <div className="reg-head-text">
             <h4 style={{ margin: 0 }}>Stores this laboratory draws from</h4>
-            <p className="muted" style={{ margin: '2px 0 0' }}>
-              Every store a delivery can be received from — the hospital's own main store, and any district,
-              regional, national or partner store that supplies this laboratory. More than one is normal.
-            </p>
           </div>
           <div className="reg-head-actions">
             <button type="button" onClick={() => { setSourceForm(blankSource); setAddingSource(true); }}><Plus size={15} /> Add a store</button>
@@ -268,11 +252,6 @@ export default function StockSettingsPage() {
     {/* ---- Barcodes ------------------------------------------------------- */}
     <div className="card" style={{ marginTop: 16 }}>
       <h3><Barcode size={17} style={{ verticalAlign: '-3px', marginRight: 7 }} />Barcodes on stock</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Some reagents arrive with a barcode already printed on the box; others arrive with nothing. Choose what
-        this laboratory does by default. Whatever an item ends up carrying, scanning it finds it — the register
-        matches both the product's barcode and the one SECH_LIMS generates.
-      </p>
       <div className="bc-choice">
         {(['system', 'product'] as const).map(src => (
           <button key={src} type="button" className={policy.defaultSource === src ? 'active' : ''}
@@ -286,10 +265,6 @@ export default function StockSettingsPage() {
         <input type="checkbox" checked={policy.allowPerItem} onChange={e => setPolicy(p => ({ ...p, allowPerItem: e.target.checked }))} />
         Let individual items differ from this
       </label>
-      <p className="hint" style={{ marginTop: 4 }}>
-        Leave this on unless every single item is the same. A laboratory almost always has some boxes that carry
-        a barcode and some that do not.
-      </p>
       <div style={{ marginTop: 12 }}>
         <button type="button" disabled={busy === 'policy'}
           onClick={() => void run('policy', () => api('/supplier-inventory/barcode-policy', { method: 'PUT', body: JSON.stringify(policy) }), 'Barcode policy saved.')}>

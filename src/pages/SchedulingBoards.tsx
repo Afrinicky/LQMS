@@ -156,7 +156,6 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
           <button type="submit">+ Create roster</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>A single roster for the whole department each month. Creating a blank one adds every active staff member automatically; or <strong>copy a previous month</strong> to reuse its shifts as a starting point and make only a few edits. Colours and shift codes are configured in <em>Settings → Roster &amp; Scheduling</em>.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Month</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>
         {rosters.map(r => <tr key={r.id}>
           <td>{r.roster_number}</td><td>{r.month ? monthDays(r.month).label : '—'}</td><td>{r.title}</td><td>{statusBadge(r.status)}</td>
@@ -229,7 +228,6 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
         <label style={{ margin: 0 }}>label/spacer row <TextField value={addLabel} onValue={nextValue => setAddLabel(nextValue)} placeholder="e.g. MORNING SHIFT" /></label>
         <button type="submit">+ Add row</button>
       </form>}
-      {!canEdit && <p className="muted" style={{ marginTop: 12 }}>This roster is read-only for your account. It is prepared by the laboratory manager and posted in the laboratory.</p>}
     </div>}
   </div>;
 }
@@ -310,7 +308,6 @@ export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { st
           <button type="submit">+ Create</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>The monthly memo re-assigning staff to units (supervisor, deputy and members). Prepared by the laboratory manager. Creating one pre-fills the standard NB notes — or <strong>copy last month</strong> and edit a few rows. When a row is linked to a unit, publishing moves those staff to that unit on the master register.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Month</th><th>Subject</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{s.subject}</td><td>{statusBadge(s.status)}</td>
           <td><button onClick={() => open(s.id)}>Open</button> {can('personnel.rosters', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${s.id}/print`, setError)}>Print</button>}{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
@@ -549,7 +546,6 @@ export function BenchScheduleBoard({ sections, staff, canEdit }: { sections: Sec
           <button type="submit">+ Create</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit supervisors prepare these for their own unit — or <strong>copy last month</strong> and tweak.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Unit</th><th>Month</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.section_name}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{statusBadge(s.status)}</td>
           <td><button onClick={() => open(s.id)}>Open</button> {can('personnel.rosters', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>}{mayDelete(s.section_id) && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}

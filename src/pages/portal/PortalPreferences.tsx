@@ -104,10 +104,6 @@ export default function PortalPreferences() {
         <div className="pp-head">
           <div>
             <h3><BellRing size={16} /> Which areas may alert me</h3>
-            <p>
-              Turn an area off and it stops raising alerts for you. It does not change what you may
-              open — only what interrupts you. Email and SMS are recorded but not yet delivered.
-            </p>
           </div>
           <button type="button" onClick={() => void savePrefs()} disabled={saving}>
             {saving ? 'Saving…' : 'Save preferences'}

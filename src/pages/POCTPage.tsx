@@ -169,7 +169,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
   const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 
   return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />}
+    {!embedded && <PageHeader eyebrow="Process Management" title="POCT Oversight" />}
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 

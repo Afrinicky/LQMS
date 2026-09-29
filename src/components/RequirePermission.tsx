@@ -39,11 +39,6 @@ export function RequirePermission({
       <div className="disabled-module">
         <span className="es-ico"><ShieldOff size={26} /></span>
         <h3>You do not have access to this area</h3>
-        <p>
-          This workspace is not part of your role. If you need it for your work, ask a
-          System Administrator or the Quality Manager to grant you access under
-          Settings → People &amp; Access.
-        </p>
       </div>
     </div>
   );
@@ -70,11 +65,6 @@ export function RequireAnyPermission({
       <div className="disabled-module">
         <span className="es-ico"><ShieldOff size={26} /></span>
         <h3>You do not have access to this area</h3>
-        <p>
-          This workspace is not part of your role. If you need it for your work, ask a
-          System Administrator or the Quality Manager to grant you access under
-          Settings → People &amp; Access.
-        </p>
       </div>
     </div>
   );

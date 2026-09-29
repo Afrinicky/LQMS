@@ -477,7 +477,7 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
   if (items.length === 0) {
     return <EmptyState
       title="No rated items"
-      message="This appraisal was raised without a template. Add the items you are rating, or raise the appraisal again from a template."
+      message="This appraisal was raised without a template."
       action={mayEdit && editableStage
         ? <button type="button" onClick={() => setAdding(true)}>Add an item</button>
         : undefined}
@@ -624,10 +624,6 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
   }
 
   return <div className="objectives">
-    <p className="muted">
-      What the person is being asked to achieve, each with the measure that will decide whether it was met.
-      Objectives still open when the next appraisal is raised are carried across to it, so this year's promises open next year's review.
-    </p>
 
     {objectives.length === 0
       ? <EmptyState title="No objectives yet" message="Agree what the coming period is for, and how it will be judged." />
@@ -706,10 +702,6 @@ function DevelopmentPlan({ record, staff, mayEdit, onError, onChanged, onAct }: 
   }
 
   return <div className="development-plan">
-    <p className="muted">
-      What will be done about the development needs the appraisal identified. Raising these as tracked actions puts them on somebody's list of work
-      rather than leaving them in a document nobody reopens until next year.
-    </p>
 
     {actions.length === 0
       ? <EmptyState title="No development actions" message="Agree what training, mentoring or reassessment follows from this appraisal." />
@@ -901,7 +893,6 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
 
     {record.status === 'self_assessment' && isSubject && <section className="signoff-card">
       <h4>Submit your self-assessment</h4>
-      <p className="muted">Rate yourself against each item under <strong>Ratings</strong> first. Your ratings stay on the record beside your appraiser's, so the discussion starts from both views.</p>
       <div className="form-grid">
         <label className="wide">Anything you want to say about the period<TextField as="textarea" rows={3} value={self.selfOverallComments} onValue={nextValue => setSelf({ selfOverallComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/submit-self-assessment', self, 'Self-assessment sent to your appraiser.')}>Submit to my appraiser</button>
@@ -944,7 +935,6 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
 
     {record.status === 'pending_moderation' && mayApprove && <section className="signoff-card">
       <h4>Second-level review</h4>
-      <p className="muted">Moderation keeps ratings comparable across the laboratory. The reviewer cannot be the appraiser or the person being appraised.</p>
       <div className="form-grid">
         <label>Reviewer
           <select value={moderate.reviewerStaffId} onChange={e => setModerate({ ...moderate, reviewerStaffId: e.target.value })}>
@@ -965,7 +955,6 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
 
     {record.status === 'completed' && isSubject && <section className="signoff-card">
       <h4>Your signature</h4>
-      <p className="muted">Signing records that the appraisal was discussed with you. It does not signify agreement — anything you disagree with belongs in the box, and it stays on the record.</p>
       <div className="form-grid">
         <label className="wide">Your comments<TextField as="textarea" rows={3} value={ack.employeeComments} onValue={nextValue => setAck({ employeeComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/acknowledge', ack, 'Appraisal acknowledged.')}>Sign this appraisal</button>

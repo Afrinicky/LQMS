@@ -202,7 +202,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
   const tabs = ['Dashboard', 'Report Templates', 'Generate Report', 'Report Requests', 'Print Jobs', 'Evidence Packs', 'Audit Trail', 'Audit Trail Reviews', 'Retention Rules', 'Backup/Restore Checks', 'Data Integrity Checks'];
 
   return <div className={embedded ? '' : 'module-page'}>
-    {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />}
+    {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Records, Reports &amp; Evidence" />}
     {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 

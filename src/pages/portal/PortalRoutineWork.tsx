@@ -319,10 +319,6 @@ export function PortalRoutineDue({ sectionId }: { sectionId?: number | null } = 
         <div className="pp-head">
           <div>
             <h3><ClipboardCheck size={16} /> Due from me now</h3>
-            <p>
-              The recurring work of the bench that is on your list today — charting, decontamination,
-              equipment care, controls. Done is one tap; nothing here sends you away to record it.
-            </p>
           </div>
           {open.length > 0 && <span className="pp-count">{open.length}</span>}
         </div>
@@ -373,11 +369,6 @@ export function PortalRoutineDue({ sectionId }: { sectionId?: number | null } = 
         <div className="pp-head">
           <div>
             <h3><Repeat size={16} /> {unitName ? `${unitName} — the routine programme` : 'My unit’s routine programme'}</h3>
-            <p>
-              Everything this bench carries, how often it comes round, and who is competent to do it.
-              The whole programme is shown, including work somebody else performs — knowing the
-              analyser is serviced monthly is part of knowing your bench.
-            </p>
           </div>
           {data && data.counts.programme > 0 && <span className="pp-count">{data.counts.programme}</span>}
         </div>

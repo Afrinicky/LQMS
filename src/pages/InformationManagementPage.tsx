@@ -152,8 +152,7 @@ export function InformationManagementPage() {
   const tabs = ['Dashboard', 'Information Assets', 'Information Systems', 'Access Reviews', 'Security Incidents', 'Data Corrections', 'Change Requests', 'Software Releases', 'System Validations', 'Downtime Records', 'Information Reviews', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Information Management" title="Information Management" subtitle="Information assets, systems, access reviews, and changes." />
-    <p className="muted">QMS oversight of laboratory information assets and systems. SECH_LIMS does not replace LHIMS/Lightwave for patient registration, test requests, result entry, verification, dispatch, or reporting.</p>
+    <PageHeader eyebrow="Information Management" title="Information Management" />
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -274,7 +273,6 @@ export function InformationManagementPage() {
     </>}
 
     {tab === 'Data Corrections' && <>
-      <p className="muted">Records a request for correction. Does not directly edit patient/clinical data in LHIMS/Lightwave.</p>
       <form className="form-grid" onSubmit={submitCorrection}>
         <label>Request date<input type="date" value={correctionForm.requestDate} onChange={e => setCorrectionForm({ ...correctionForm, requestDate: e.target.value })} required /></label>
         <label>System<select value={correctionForm.systemId} onChange={e => setCorrectionForm({ ...correctionForm, systemId: e.target.value })}><option value="">—</option>{systems.map(s => <option key={s.id} value={s.id}>{s.system_name}</option>)}</select></label>
@@ -402,7 +400,6 @@ export function InformationManagementPage() {
 
     {tab === 'Reports' && <>
       <h3>Printable reports</h3>
-      <p>Detailed report templates for information management remain placeholders in this foundation. The cross-module Records, Reports & Evidence module can be used to generate CSV/JSON/HTML exports filtered by date for any of the tables in this module.</p>
       <ul>
         <li>Information asset register — placeholder</li>
         <li>Access review report — placeholder</li>

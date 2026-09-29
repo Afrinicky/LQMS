@@ -83,7 +83,7 @@ export function QmsActionTracker({ embedded = false }: { embedded?: boolean } = 
   if (!embedded && !isEnabled('actions')) return <DisabledModule />;
 
   return <div>
-    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Action Tracker" subtitle="Centralized actions, owners, due dates, and status." />}
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Action Tracker" />}
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading actions…</em></div>}
     <div className="card"><h3>Filters</h3><div className="form" style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end' }}><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(s => <option key={s} value={s}>{s}</option>)}</select></label><label>Assigned staff<select value={staffFilter} onChange={e => setStaffFilter(e.target.value)}><option value="">All</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label><label><input type="checkbox" checked={overdueFilter} onChange={e => setOverdueFilter(e.target.checked)} /> Overdue only</label><button onClick={load}>Refresh</button></div></div>

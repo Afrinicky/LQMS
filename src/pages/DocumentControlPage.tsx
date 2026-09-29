@@ -683,7 +683,7 @@ export function DocumentControlPage() {
   </tr>;
 
   return <div className="module-page">
-    <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
+    <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" />
     {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
     {section === 'Documents' && docTabs.length > 0 && <div className="tabs dm-doc-tabs">
       {docTabs.map(name => {
@@ -960,14 +960,12 @@ export function DocumentControlPage() {
             <option value="">— choose the position —</option>
             {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
           </select>
-          <span className="hint">Once issued, everybody holding this post sees it on their own portal and on their personnel record.</span>
         </label>
         <label>…or one named member of staff
           <select value={docForm.appliesToStaffId} onChange={e => setDocForm({ ...docForm, appliesToStaffId: e.target.value, appliesToPositionId: e.target.value ? '' : docForm.appliesToPositionId })}>
             <option value="">— none —</option>
             {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
           </select>
-          <span className="hint">For a personalised description. A description issued to one person overrides the one for their post.</span>
         </label>
       </>}
       <label>Review frequency (months)<input type="number" min={1} value={docForm.reviewFrequencyMonths} onChange={e => setDocForm({ ...docForm, reviewFrequencyMonths: e.target.value })} /></label>
@@ -992,7 +990,6 @@ export function DocumentControlPage() {
 
     {section === 'Documents' && tab === 'Bulk Import' && <div className="card">
       <h3 style={{ marginTop: 0 }}>Bulk import documents</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Import many SOPs, policies, forms or registers at once. Each file becomes a controlled document (Draft) and its full content is read for in-app viewing. Document numbers are taken from the file name when present (e.g. <em>“SECHPO026 Document Control Procedure”</em> → <strong>SECHPO026</strong>), otherwise auto-numbered from the prefix.</p>
       {can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitBulk}>
         <label>Document type<select value={bulkForm.documentType} onChange={e => setBulkForm({ ...bulkForm, documentType: e.target.value })}>{DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Numbering<select value={bulkForm.codeMode} onChange={e => setBulkForm({ ...bulkForm, codeMode: e.target.value })}>
@@ -1015,14 +1012,12 @@ export function DocumentControlPage() {
     </div>}
 
     {section === 'Documents' && tab === 'Review Queue' && <>
-      <p className="muted">Documents submitted for review. An authorised reviewer (technical staff / Quality Manager) opens each, reads it, and records a review — which advances it to <em>Reviewed</em> for approval.</p>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>
         {reviewQueue.map(queueRow)}{reviewQueue.length === 0 && <tr><td colSpan={6} className="muted">Nothing awaiting review.</td></tr>}
       </tbody></table>
     </>}
 
     {section === 'Documents' && tab === 'Approval Queue' && <>
-      <p className="muted">Documents that have been reviewed and are awaiting approval by the Laboratory Manager (or authorised approver). Approving issues the document as the current controlled version and distributes it to all staff for attestation.</p>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reviewed by</th><th>Status</th><th></th></tr></thead><tbody>
         {approvalQueue.map(d => <tr key={d.id}>
           <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
@@ -1044,7 +1039,6 @@ export function DocumentControlPage() {
     {section === 'Documents' && tab === 'Attestations' && <AttestationsTabView pending={pendingAttestations} staff={staff} documents={documents} onSignAttestation={signAttestation} onOpenDoc={(docId, versionId, attId) => setViewer({ docId, versionId: versionId || 0, attestationId: attId, workflowStatus: undefined })} onError={setError} />}
 
     {section === 'Documents' && tab === 'My Inbox' && <>
-      <p className="muted">Controlled documents distributed to you. Open each to read it, then attest. Your attestation is recorded against the document and appears on its printed attestation list.</p>
       <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Attestation status</th><th>Due</th><th>Signed</th><th>Actions</th></tr></thead><tbody>
         {inbox.map(e => <tr key={e.id}>
           <td>{e.document_code || '—'} — {e.title}</td>
@@ -1063,7 +1057,6 @@ export function DocumentControlPage() {
 
     {section === 'Documents' && tab === 'Obsolete Register' && <>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-        <p className="muted" style={{ margin: 0 }}>Documents withdrawn from circulation. Obsolete masters are retained in the archive until their destruction date, clearly separated from current documents.</p>
         <span style={{ flex: 1 }} />
         {mayExport && <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/obsolete-register/export', 'Obsolete_Document_Register.xlsx')}>{exportBusy === '/documents/obsolete-register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
       </div>
@@ -1116,7 +1109,6 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
       sub === 'Document Register' ? 'Document_Register.xlsx' : sub === 'Records Register' ? 'Records_Register.xlsx' : 'Obsolete_Document_Register.xlsx'],
   ];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>The controlled Document &amp; Records Master List: the single authoritative index of all controlled documents, controlled records and obsolete documents. The Excel export reproduces this list as a three-register workbook.</p>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
       {tabBar(sub, subs, setSub)}
       <span style={{ flex: 1 }} />
@@ -1222,32 +1214,31 @@ function SopTools({ docId, versionId, documents, startOpen }: { docId: number; v
   }
 
   const others = (documents || []).filter(d => d.id !== docId);
-  return <div style={{ marginTop: 12, padding: 12, background: '#0f1830', border: '1px solid #24365e', borderRadius: 8 }}>
+  return <div className="sop-tools">
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-      <strong style={{ color: '#cdd9f0', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
+      <strong style={{ color: 'var(--text)', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
       <button className="secondary" onClick={() => setOpen(o => !o)}>{open ? 'Hide' : 'Show tools'}</button>
     </div>
     {open && <>
-      <p style={{ fontSize: 11.5, color: '#8fa3c8', margin: '6px 0 8px' }}>Offline Ollama runs these by default. If you enable Hybrid mode with an online provider, Dennis may use it for stronger SOP understanding — only after redaction, and never when patient/operational data is detected.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
         {SOP_ACTIONS.map(a => can('dennis', 'view') && <button key={a.task} className="secondary" disabled={!!busy} onClick={() => run(a.task)}>{busy === a.task ? 'Working…' : a.label}</button>)}
       </div>
-      {others.length > 0 && <label style={{ fontSize: 12, color: '#9fb2d6' }}>Compare with:&nbsp;
+      {others.length > 0 && <label style={{ fontSize: 12, color: 'var(--muted)' }}>Compare with:&nbsp;
         <select value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">— choose document —</option>{others.map(d => <option key={d.id} value={d.id}>{d.document_code ? `${d.document_code} — ` : ''}{d.title}</option>)}</select>
       </label>}
-      {confirm && <div style={{ marginTop: 8, padding: 10, background: '#3a2a12', border: '1px solid #6b4e1f', borderRadius: 6, color: '#f3d9a6', fontSize: 12.5 }}>
+      {confirm && <div className="sop-confirm">
         Online AI may send this document's text outside the hospital network. Use only for SOPs and non-patient documents. Continue?
         <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>{can('dennis', 'view') && <button onClick={() => run(confirm.task, true)}>Yes, use online AI</button>}<button className="secondary" onClick={() => setConfirm(null)}>Cancel</button></div>
       </div>}
       {result && <div style={{ marginTop: 8 }}>
         {result.error ? <Notice kind="error">{result.error}</Notice> : <>
-          <div style={{ fontSize: 11.5, color: '#9fb2d6', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="badge">{result.mode}{result.provider && result.provider !== 'none' ? ` · ${result.provider}` : ''}</span>
             {result.onlineUsed ? <span className="badge warning">online · redacted</span> : <span className="badge">offline · on-premises</span>}
             <span>Review before use.</span>
           </div>
           {result.warning && <div className="warning" style={{ margin: '4px 0' }}>⚠ {result.warning}</div>}
-          <pre style={{ whiteSpace: 'pre-wrap', background: '#0c1428', border: '1px solid #24365e', borderRadius: 6, padding: 12, color: '#dbe6fb', fontSize: 12.5, maxHeight: '38vh', overflow: 'auto' }}>{result.output}</pre>
+          <pre className="sop-output">{result.output}</pre>
           <button className="secondary" onClick={() => navigator.clipboard?.writeText(result.output)}>Copy</button>
         </>}
       </div>}
@@ -1587,56 +1578,56 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 .doc-content img{max-width:100%;height:auto}.doc-content .docx-img{text-align:center;margin:10px 0}
 .doc-content .docx-diagram{border:1px dashed #b9c4d6;border-radius:6px;padding:8px 12px;margin:10px 0;background:#f8fafc}
 .doc-reader{display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
-.doc-toc{width:236px;flex:none;overflow:auto;background:#0f1830;border-right:1px solid #24365e;padding:10px 8px}
-.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#7c8db0;padding:2px 8px 8px}
-.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:#c2cde3;cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
+.doc-toc{width:236px;flex:none;overflow:auto;background:var(--panel);border-right:1px solid var(--border);padding:10px 8px}
+.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:2px 8px 8px}
+.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:var(--muted);cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
 .doc-toc-item:hover{background:rgba(255,255,255,.06);color:#fff}
 .doc-toc-item.active{background:var(--accent-soft,rgba(47,107,255,.16));color:#fff}
-.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:#9fb0cf}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:#8295b5}
+.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:var(--muted)}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:var(--faint)}
 .doc-scroll{flex:1;overflow:auto;background:#525659;padding:18px;min-width:0}
 .doc-page{background:#fff;color:#111;max-width:820px;margin:0 auto;padding:34px 44px;box-shadow:0 2px 14px rgba(0,0,0,.45);line-height:1.55;border-radius:2px}
 @media (max-width:760px){.doc-toc{display:none}}
-.word-editor{border:1px solid #24365e;border-radius:6px;overflow:hidden}
-.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:#16243f;border-bottom:1px solid #24365e}
-.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #2a3c63}
+.word-editor{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--border)}
+.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid var(--border)}
 .word-toolbar .wt-group:last-child{border-right:0}
-.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:#0f1d38;border:1px solid #2c416f;border-radius:5px;color:#dbe6fb;cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
-.wt-btn:hover{background:#1d3257;border-color:#3a5694}
+.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:5px;color:var(--text);cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
+.wt-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
 .wt-color{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-.wt-select{height:26px;background:#0f1d38;border:1px solid #2c416f;border-radius:5px;color:#dbe6fb;font-size:12px;padding:0 4px;cursor:pointer}
+.wt-select{height:26px;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:5px;color:var(--text);font-size:12px;padding:0 4px;cursor:pointer}
 .doc-page[contenteditable="true"]{cursor:text}
 .doc-page[contenteditable="true"]:focus{outline:none}
-.dv-window{background:#0b1428;border:1px solid #22345c;box-shadow:0 18px 60px rgba(0,0,0,.55)}
-.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:#101c36;border-bottom:1px solid #22345c;user-select:none;touch-action:none;flex:none}
-.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:#e7eefc}
+.dv-window{background:var(--surface);border:1px solid var(--border);box-shadow:0 18px 60px rgba(0,0,0,.55)}
+.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:var(--panel);border-bottom:1px solid var(--border);user-select:none;touch-action:none;flex:none}
+.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:var(--text)}
 .dv-winbtns{display:flex;gap:2px;flex:none}
-.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:#c8d4ec;font-size:13px;cursor:pointer;line-height:1;padding:0}
+.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:var(--muted);font-size:13px;cursor:pointer;line-height:1;padding:0}
 .dv-winbtn:hover{background:rgba(255,255,255,.09);color:#fff}
 .dv-winbtn.dv-close:hover{background:#c42b1c;color:#fff}
-.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#0e1930;border-bottom:1px solid #1d2c4e;flex:none;flex-wrap:wrap}
-.dv-tabs{display:inline-flex;background:#0a1226;border:1px solid #22345c;border-radius:8px;padding:2px;gap:2px;flex:none}
-.dv-tabs button{border:0;background:transparent;box-shadow:none;color:#9fb0d4;font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
-.dv-tabs button.on{background:#1d3257;color:#fff}
+.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none;flex-wrap:wrap}
+.dv-tabs{display:inline-flex;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;flex:none}
+.dv-tabs button{border:0;background:transparent;box-shadow:none;color:var(--muted);font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
+.dv-tabs button.on{background:var(--accent-soft);color:#fff}
 .dv-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:var(--accent,#2f6bff);border:1px solid transparent;border-radius:7px;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
 .dv-btn:hover{filter:brightness(1.12)}
 .dv-btn:disabled{opacity:.55;cursor:default}
-.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid #2c416f;border-radius:7px;color:#dbe6fb;font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
-.dv-ghost:hover{background:#1d3257;border-color:#3a5694}
+.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
+.dv-ghost:hover{background:var(--accent-soft);border-color:var(--accent)}
 .dv-ghost:disabled{opacity:.55;cursor:default}
-.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:#0a1226;border:1px solid #22345c;border-radius:7px;padding:2px}
-.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:#dbe6fb;font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
-.dv-zoom button:hover{background:#1d3257}
-.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:#9fb0d4}
+.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;padding:2px}
+.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:var(--text);font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
+.dv-zoom button:hover{background:var(--accent-soft)}
+.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:var(--muted)}
 .dv-menuwrap{position:relative;flex:none}
-.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:#101c36;border:1px solid #2c416f;border-radius:9px;padding:5px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
-.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:#dbe6fb;font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
-.dv-menu button:hover{background:#1d3257}
+.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:var(--panel);border:1px solid var(--border-strong);border-radius:9px;padding:5px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
+.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:var(--text);font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.dv-menu button:hover{background:var(--accent-soft)}
 .dv-menu button:disabled{opacity:.5;cursor:default}
-.dv-menu .dv-menu-sep{height:1px;background:#22345c;margin:4px 6px}
-.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:#12281b;border-bottom:1px solid #1f5334;font-size:12px;color:#a8c7b6;flex:none}
-.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:#0b1428;padding:8px}
-.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:#12233f;border:1px solid #294066;border-radius:8px;color:#b9cbe8;font-size:12px;flex:none}
-.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid #2c416f;border-radius:7px;background:#0a1226;color:#9fb0d4;font-size:12.5px;font-weight:600;white-space:nowrap}
+.dv-menu .dv-menu-sep{height:1px;background:var(--border);margin:4px 6px}
+.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:var(--success-bg);border-bottom:1px solid var(--border);font-size:12px;color:var(--success);flex:none}
+.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--surface);padding:8px}
+.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:12px;flex:none}
+.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid var(--border-strong);border-radius:7px;background:var(--panel-2);color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap}
 /* The Office handoff panel: one document, one obvious action, one line of
    state. Deliberately quiet — the document itself is elsewhere, in Word. */
 .oh{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}
@@ -1782,7 +1773,7 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
               ? <DocReader html={content.content_html} zoom={zoom} height="100%" />
               : (content.content_text
                   ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #22345c', borderRadius: 8, padding: 16, flex: 1, minHeight: 0, overflow: 'auto', background: '#fff', color: '#111', zoom, margin: 0 }}>{content.content_text}</pre>
-                  : <p className="muted" style={{ padding: 16 }}>No readable content was captured. Use “Edit” to author it in-app, or open the original file.</p>)))}
+                  : <p className="muted" style={{ padding: 16 }}>No readable content was captured.</p>)))}
 
         {!isOfficeFile && mode === 'original' && (isPdf || isImage
           ? <div style={{ flex: 1, minHeight: 0, border: '1px solid #22345c', borderRadius: 8, overflow: 'hidden', background: '#525659' }}>
@@ -1800,7 +1791,7 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 
       {/* Collapsible drawers keep the preview large until these are needed. */}
       {panel === 'workflow' && <div className="dv-drawer">
-        {workflowStatus && <div style={{ fontSize: 12.5, color: '#cdd9f0', marginBottom: 8 }}>
+        {workflowStatus && <div style={{ fontSize: 12.5, color: 'var(--text)', marginBottom: 8 }}>
           Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
         </div>}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1819,10 +1810,10 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
 
       {/* Footer: workflow action + panel toggles + attestation + read status. */}
       <div className="dv-footer">
-        <button className="dv-ghost" onClick={() => setPanel(p => p === 'workflow' ? null : 'workflow')} style={panel === 'workflow' ? { background: '#1d3257', borderColor: '#3a5694' } : undefined}>
+        <button className={`dv-ghost${panel === 'workflow' ? ' on' : ''}`} onClick={() => setPanel(p => p === 'workflow' ? null : 'workflow')}>
           💬 {workflowStatus ? 'Workflow & comments' : 'Comments'}{comments.length ? ` (${comments.length})` : ''}
         </button>
-        <button className="dv-ghost" onClick={() => setPanel(p => p === 'dennis' ? null : 'dennis')} style={panel === 'dennis' ? { background: '#1d3257', borderColor: '#3a5694' } : undefined}>
+        <button className={`dv-ghost${panel === 'dennis' ? ' on' : ''}`} onClick={() => setPanel(p => p === 'dennis' ? null : 'dennis')}>
           🤖 Dennis AI tools
         </button>
         {wf && <button className="dv-btn" onClick={() => doWorkflow(wf.action)} disabled={busy}>{busy ? 'Working…' : wf.label}</button>}
@@ -1931,7 +1922,6 @@ function DocumentDetailPanel(props: any) {
       <span className="dm-avatar">{initialsOf(ownerName === '—' ? null : ownerName)}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600 }}>{ownerName === '—' ? 'No owner assigned' : ownerName}</div>
-        <span className="hint">Document owner / author — responsible for keeping this document current.</span>
       </div>
       {canGovern
         ? <button className="secondary" onClick={onTransferOwner}>Change owner…</button>
@@ -2035,7 +2025,6 @@ function DocumentDetailPanel(props: any) {
     {isAdmin && <details className="doc-danger-zone dm-danger-details">
       <summary>Administrator tools</summary>
       <h4 style={{ marginTop: 10 }}>Delete document</h4>
-      <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Permanently removes this document, all versions, attestations, distribution, print logs and files. This cannot be undone — to retire while keeping history, mark it obsolete instead.</p>
       <button className="danger" onClick={onDelete}>Delete document permanently</button>
     </details>}
     </div>
@@ -2113,7 +2102,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
 
   const subs = ['Records Register', 'Retention Schedule', 'Review Log', 'Destruction Log', 'Backup & Archive'];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>Control of records — identification, collection, indexing, access, storage, review, retention and safe disposal of quality and technical records. Records may be uploaded (scanned or electronic files), generated inside the system, or indexed here when kept physically.</p>
     {tabBar(sub, subs, setSub)}
 
     {sub === 'Records Register' && <>
@@ -2142,7 +2130,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         Search to narrow it down, or export the register for the whole list.
       </p>}
       <h4>Register a controlled record</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Records completed on paper are indexed here; electronic records can be uploaded and stored in the register; records generated inside the system are linked to their source module.</p>
       {can('documents.records', 'create') && <form className="form-grid" onSubmit={submitRecord}>
         <label>Record type / title<TextField value={regForm.title} onValue={nextValue => setRegForm({ ...regForm, title: nextValue })} required /></label>
         <label>Category<select value={regForm.recordCategory} onChange={e => setRegForm({ ...regForm, recordCategory: e.target.value })}>{RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
@@ -2166,7 +2153,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Retention Schedule' && <>
-      <p className="muted">Retention schedule — how long each record type is kept and on what medium, aligned with national and legal requirements. Seeded with the laboratory's standard retention periods.</p>
       <table className="data-table"><thead><tr><th>S/N</th><th>Record type</th><th>Retention period</th><th>Storage medium</th><th>Responsible</th><th>Extended</th></tr></thead><tbody>
         {schedule.map(s => <tr key={s.id}><td>{s.sn ?? '—'}</td><td>{s.record_type}</td><td>{s.retention_period}</td><td>{s.storage_medium || '—'}</td><td>{s.responsible_role || '—'}</td><td>{s.extended_retention ? 'Yes' : '—'}</td></tr>)}
       </tbody></table>
@@ -2182,7 +2168,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Review Log' && <>
-      <p className="muted">Quality &amp; technical records review log — routine documented review of records, with findings and follow-up actions.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Category</th><th>Section</th><th>Findings</th><th>NC</th><th>Action</th><th>Follow-up</th><th>Reviewer</th></tr></thead><tbody>
         {reviewLog.map(r => <tr key={r.id}><td>{r.review_number || '—'}</td><td>{r.review_date}</td><td>{r.record_category}</td><td>{r.section_name || '—'}</td><td>{r.findings || '—'}</td><td>{r.nonconformities_identified || '—'}</td><td>{r.action_required ? 'Yes' : '—'}</td><td>{formatBadge(r.follow_up_status)}</td><td>{r.reviewer_name || '—'}</td></tr>)}
         {reviewLog.length === 0 && <tr><td colSpan={9} className="muted">No reviews logged.</td></tr>}
@@ -2204,7 +2189,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Destruction Log' && <>
-      <p className="muted">Destruction log — authorised, witnessed disposal of records and documents after their retention period, with confidentiality safeguarded.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Type</th><th>Description</th><th>Date destroyed</th><th>Method</th><th>Authorised by</th><th>Witness</th></tr></thead><tbody>
         {destruction.map(d => <tr key={d.id}><td>{d.destruction_number || '—'}</td><td>{d.item_type}</td><td>{d.description}</td><td>{d.date_destroyed}</td><td>{(d.method || '—').replace(/_/g, ' ')}</td><td>{d.authorized_by_name || '—'}</td><td>{d.witness_name || '—'}</td></tr>)}
         {destruction.length === 0 && <tr><td colSpan={7} className="muted">No destructions recorded.</td></tr>}
@@ -2226,7 +2210,6 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
 
     {sub === 'Backup & Archive' && <>
-      <p className="muted">Backup &amp; archive log — electronic record backups, off-site copies, and periodic restoration testing.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Scope</th><th>Location</th><th>Off-site</th><th>Integrity</th><th>Restore test</th></tr></thead><tbody>
         {backups.map(b => <tr key={b.id}><td>{b.backup_number || '—'}</td><td>{b.backup_date}</td><td>{b.backup_type || '—'}</td><td>{b.scope || '—'}</td><td>{b.storage_location || '—'}</td><td>{b.offsite ? 'Yes' : '—'}</td><td>{b.integrity_verified ? 'Verified' : '—'}</td><td>{b.restore_test_status ? formatBadge(b.restore_test_status) : '—'}</td></tr>)}
         {backups.length === 0 && <tr><td colSpan={8} className="muted">No backups logged.</td></tr>}
@@ -2313,9 +2296,6 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
   const selectedDoc = docList.find(d => d.id === selectedDocId);
 
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>
-      Search for a controlled document to see the full attestation list. Every staff member signs their own attestation; no-one can sign for another. Use <strong>Print list</strong> for a hard-copy audit-ready record.
-    </p>
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: 16, alignItems: 'start' }}>
       <div className="card" style={{ padding: 12 }}>
         <h4 style={{ margin: '0 0 8px' }}>1 · Choose a document</h4>
@@ -2376,7 +2356,6 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
           </div>
         </div> : <div className="card" style={{ padding: 20 }}>
           <h4 style={{ margin: '0 0 8px' }}>2 · Attestation list</h4>
-          <p className="muted" style={{ margin: 0 }}>Select a document on the left to see everyone who has attested to it.</p>
         </div>}
 
         {pending.length > 0 && !selectedDocId && <div className="card" style={{ padding: 14, marginTop: 12 }}>
@@ -2523,9 +2502,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
   const subs = ['Register', 'Upload / Add', 'Periodic Patient Results', 'Automation Schedules'];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>
-      A single, ISO-aligned register of every archive created anywhere in the system: documents, records, equipment history, monthly reports, patient results and system backups. New archives created in any module land here automatically, and can also be uploaded manually.
-    </p>
 
     {summary && <KpiStrip items={[
       { label: 'Total archives', value: summary.totalArchives },
@@ -2604,7 +2580,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
     {sub === 'Upload / Add' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Upload an archived document / record</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Register an archive here for records held physically or already prepared as a file. Every archive becomes searchable from this tab and is linked back to its source module.</p>
       {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitUpload}>
         <label>Title<TextField value={uploadForm.title} onValue={nextValue => setUploadForm({ ...uploadForm, title: nextValue })} required /></label>
         <label>Archive type<select value={uploadForm.archiveType} onChange={e => setUploadForm({ ...uploadForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
@@ -2626,7 +2601,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
     {sub === 'Periodic Patient Results' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Archive patient results for a period (Excel / CSV)</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Generates an Excel or CSV file of every processed patient result within the chosen period and registers it as an archive. Requires LHIMS data for the period to be imported.</p>
       {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitPatientArchive}>
         <label>Title (optional)<TextField value={patientForm.title} onValue={nextValue => setPatientForm({ ...patientForm, title: nextValue })} placeholder="e.g. Patient Results — Q3 2026" /></label>
         <label>Period start<input type="date" value={patientForm.periodStart} onChange={e => setPatientForm({ ...patientForm, periodStart: e.target.value })} required /></label>
@@ -2644,7 +2618,6 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
     {sub === 'Automation Schedules' && <>
       <div className="card">
         <h4 style={{ marginTop: 0 }}>Configure a periodic archive schedule</h4>
-        <p className="muted" style={{ marginTop: 0 }}>Define when an archive should be generated (e.g. weekly / monthly patient results). The schedule is stored and displayed on the dashboard; an operator triggers each archive from the &ldquo;Periodic Patient Results&rdquo; tab or an automated job.</p>
         {can('documents.archive', 'edit') && <form className="form-grid" onSubmit={submitSchedule}>
           <label>Key<TextField value={scheduleForm.scheduleKey} onValue={nextValue => setScheduleForm({ ...scheduleForm, scheduleKey: nextValue })} placeholder="e.g. patient_results" required /></label>
           <label>Title<TextField value={scheduleForm.title} onValue={nextValue => setScheduleForm({ ...scheduleForm, title: nextValue })} required /></label>

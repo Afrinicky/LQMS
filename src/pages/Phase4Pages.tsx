@@ -181,7 +181,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="IQC Management" subtitle="Internal quality control materials, results, and review." />}
+    {!embedded && <PageHeader eyebrow="Process Management" title="IQC Management" />}
     {tabBarFor('iqc')(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -265,7 +265,6 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         </tbody></table>
       </>}
       {!lj && ljMaterialId && <p>Loading…</p>}
-      {!ljMaterialId && <p>Select an IQC material to load its recent results.</p>}
     </>}
 
     {tab === 'Lot Changes' && <>
@@ -310,7 +309,6 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         ]} />
         <div className="card" style={{ marginTop: 16 }}>
           <h3>Per-material QC performance</h3>
-          <p className="muted" style={{ marginTop: 0 }}>Westgard rule breaches and in-control rate for each control material. Open the <em>Levey-Jennings</em> tab to see the run chart for any material.</p>
           <table className="data-table"><thead><tr><th>Material</th><th>Test / analyte</th><th>Runs</th><th>Observed mean</th><th>Target mean</th><th>Breaches</th><th>In-control</th><th>Last run</th></tr></thead><tbody>
             {perMaterial.map(x => <tr key={x.m.id}>
               <td>{x.m.material_name}<div className="muted" style={{ fontSize: 11 }}>Lot {x.m.lot_number}</div></td>
@@ -415,7 +413,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const unsatisfactory = events.filter(ev => ['unsatisfactory', 'poor', 'fail', 'failed'].includes((ev.performance_status || '').toLowerCase()));
 
   return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />}
+    {!embedded && <PageHeader eyebrow="Process Management" title="EQA Management" />}
     {tabBarFor('eqa')(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -627,7 +625,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
   const pending = records.filter(r => r.status === 'draft' || r.status === 'in_review');
 
   return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />}
+    {!embedded && <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" />}
     {tabBarFor('measurement_uncertainty')(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -704,7 +702,6 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
         ]} />
         <div className="card" style={{ marginTop: 16 }}>
           <h3>Measurement uncertainty budget by test</h3>
-          <p className="muted" style={{ marginTop: 0 }}>Estimated uncertainty for each measurand. Expanded uncertainty (U) is reported at the stated coverage factor (k, usually 2 ≈ 95%).</p>
           <table className="data-table"><thead><tr><th>Number</th><th>Test / analyte</th><th>Mean</th><th>SD</th><th>CV %</th><th>u</th><th>U (expanded)</th><th>k</th><th>Status</th></tr></thead><tbody>
             {records.slice().sort((a, b) => (b.calculation_date || '').localeCompare(a.calculation_date || '')).map(r => <tr key={r.id}>
               <td>{r.mu_number}</td><td>{r.test_name}{r.analyte ? ` · ${r.analyte}` : ''}{r.equipment_name ? <div className="muted" style={{ fontSize: 11 }}>{r.equipment_name}</div> : null}</td>

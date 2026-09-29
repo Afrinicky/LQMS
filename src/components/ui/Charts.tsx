@@ -67,7 +67,7 @@ export function DonutChart({
     <div className="chart-donut">
       <div className="donut-svg" style={{ width: size, height: size }}>
         <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
-          <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+          <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--track)" strokeWidth={thickness} />
           {total > 0 && (
             <g transform={`rotate(-90 ${cx} ${cx})`}>
               {items.map((d, i) => {
@@ -205,7 +205,7 @@ export function RadialGauge({
       <div className="gauge-svg" style={{ width: size, height: size * 0.82 }}>
         <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
           <g transform={`rotate(135 ${cx} ${cx})`}>
-            <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={thickness} strokeDasharray={trackDash} strokeLinecap="round" />
+            <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--track)" strokeWidth={thickness} strokeDasharray={trackDash} strokeLinecap="round" />
             <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth={thickness} strokeDasharray={dash} strokeLinecap="round" />
           </g>
         </svg>

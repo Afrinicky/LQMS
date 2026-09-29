@@ -52,10 +52,6 @@ export function LinkStaffPrompt() {
       <div className="pp-head">
         <div>
           <h3><Link2 size={16} /> Your account is not linked to a staff record</h3>
-          <p>
-            Until it is linked, the laboratory cannot route your duties, documents or declarations to
-            you — the portal has nobody to fetch them for.
-          </p>
         </div>
       </div>
       {suggestions && suggestions.suggestions.length > 0 ? (
@@ -77,10 +73,7 @@ export function LinkStaffPrompt() {
           </tbody>
         </table>
       ) : (
-        <p className="muted">
-          No staff record matches your name or sign-in address. Ask a System Administrator to create
-          your staff record and link it to your account.
-        </p>
+        <p className="muted">No staff record matches your name or sign-in address.</p>
       )}
     </section>
   );
@@ -111,10 +104,6 @@ function PhotoPanel() {
       </div>
       <div className="pr-photo-side">
         <h4>My photograph</h4>
-        <p className="muted">
-          Passport size. Pick any picture — it is cropped to passport proportions here before it is
-          saved, so a phone photograph is fine. Up to 2&nbsp;MB.
-        </p>
         <input ref={input} type="file" accept="image/*" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void choose(f); }} />
         <div className="pr-btns">
@@ -160,19 +149,12 @@ function JobDescriptionPanel() {
       <div className="pp-head">
         <div>
           <h3><BriefcaseBusiness size={16} /> My job description</h3>
-          <p>
-            What your post is responsible for, as the laboratory has approved it. This is the
-            controlled document itself — when a new version is issued, this is the new version.
-          </p>
         </div>
         {jobDescriptions.length > 0 && <span className="pp-count">{jobDescriptions.length}</span>}
       </div>
 
       {jobDescriptions.length === 0 ? (
-        <p className="muted">
-          No job description has been issued for your post yet. They are uploaded as controlled
-          documents under Documents &amp; Records and appear here as soon as they are approved.
-        </p>
+        <p className="muted">No job description has been issued for your post yet.</p>
       ) : (
         <ul className="pjd-list">
           {jobDescriptions.map(d => (
@@ -278,10 +260,6 @@ export default function PortalRecord() {
         <div className="pp-head">
           <div>
             <h3><IdCard size={16} /> My personnel record</h3>
-            <p>
-              Your own file. The details you are the best source for are yours to keep current; the
-              ones marked with a padlock are Personnel Management&rsquo;s to change.
-            </p>
           </div>
           {staff && !editing && (
             <button type="button" onClick={startEdit}><Pencil size={14} /> Edit my details</button>
@@ -339,10 +317,6 @@ export default function PortalRecord() {
               <label><span>Licence number</span><TextField value={form.professionalLicence} onValue={setText('professionalLicence')} /></label>
               <label><span>Licence expires</span><input type="date" value={form.licenceExpiryDate} onChange={set('licenceExpiryDate')} /></label>
             </div>
-            <p className="pd-hint">
-              Renewed your licence? Update the number and date here, then put the new certificate on
-              <strong> My Documents</strong> so Personnel Management can verify it.
-            </p>
 
             {problem && <p className="pd-error"><AlertTriangle size={14} /> {problem}</p>}
             <div className="pf-form-foot">
@@ -406,7 +380,6 @@ export default function PortalRecord() {
           <div className="pp-head">
             <div>
               <h3><UserRound size={16} /> My positions</h3>
-              <p>Every post you hold on the organogram. Your access profile follows your primary position, so this is management&rsquo;s to set.</p>
             </div>
           </div>
           {positions.length === 0 ? (
@@ -427,7 +400,6 @@ export default function PortalRecord() {
           <div className="pp-head">
             <div>
               <h3><ShieldCheck size={16} /> My technical authorisations</h3>
-              <p>What you are authorised to perform, review, verify or approve at the bench. Granted from a completed competency assessment.</p>
             </div>
           </div>
           {authorizations.length === 0 ? (
@@ -455,7 +427,6 @@ export default function PortalRecord() {
         <div className="pp-head">
           <div>
             <h3><PenLine size={16} /> My signature and sign-in</h3>
-            <p>Your signature is applied wherever you sign a record, so it is worth keeping current.</p>
           </div>
         </div>
         <div className="pr-signature">

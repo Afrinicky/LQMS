@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical, KeyRound, PenLine } from 'lucide-react';
+import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical, KeyRound, PenLine, Sun, Moon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../hooks/useTheme';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { canEnterSettings } from '../constants/settingsAccess';
@@ -27,6 +28,7 @@ function initials(name?: string) {
 
 export default function AppLayout() {
   const { user, logout, refreshUser } = useAuth();
+  const { theme, toggle: toggleTheme } = useTheme();
   const { modules, isEnabled } = useModules();
   const { can, canView } = usePermissions();
   const navigate = useNavigate();
@@ -206,6 +208,10 @@ export default function AppLayout() {
                 <strong>{user?.fullName ?? 'User'}</strong>
                 <span>{user?.roleName ?? 'Member'}</span>
               </span>
+            </button>
+            <button className="icon-btn" type="button" aria-label={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              title={theme === 'dark' ? 'Light theme' : 'Dark theme'} onClick={toggleTheme}>
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button className="icon-btn" type="button" aria-label="My signature" title="My signature" onClick={() => setShowSignature(true)}><PenLine size={18} /></button>
             <button className="icon-btn" type="button" aria-label="Change password" title="Change password" onClick={() => setShowPassword(true)}><KeyRound size={18} /></button>

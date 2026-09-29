@@ -62,7 +62,7 @@ export default function PortalUnitEquipment({ onChanged, sectionId }: { onChange
     return [...rows].sort((a, b) => weight(a) - weight(b) || a.name.localeCompare(b.name));
   }, [data]);
 
-  if (loading) return <p className="muted">Reading your unit&rsquo;s equipment inventory…</p>;
+  if (loading) return ;
   if (!data) return <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>;
   if (data.message) return <p className="muted">{data.message}</p>;
 

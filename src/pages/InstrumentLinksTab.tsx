@@ -243,7 +243,6 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
         <PageHeader
           eyebrow="Settings"
           title="Analyser sync"
-          subtitle="Where the laboratory's analysers connect to SECHLIMS, what they have sent, and what is passed on to LHIMS."
         />
       )}
 
@@ -272,11 +271,6 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
         <div className="pp-head">
           <div>
             <h3><Cable size={16} /> Analyser links</h3>
-            <p>
-              Analysers that send their results to SECHLIMS over the network. Each one gets its own port, so
-              several run at once — and a link recorded as belonging to the LHIMS middleware is never opened,
-              which is how the transmission that carries patient results today stays exactly as it is.
-            </p>
           </div>
           <div className="il-head-actions">
             {/* Fetching exists because everything else here waits to be spoken
@@ -299,24 +293,13 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
           <ShieldCheck size={15} />
           <div>
             <strong>Nothing here touches a transmission that already works.</strong>
-            <p>
-              SECHLIMS never sits in the path of the LHIMS link, never binds its port and never dials an analyser
-              it is connected to — it refuses to, and says so. What it takes are the analysers transmitting
-              nowhere today: the second haematology analyser, and both chemistry analysers.
-              The analyser whose one host port already goes to LHIMS reaches here a different way — by following
-              the middleware&rsquo;s own append log, which reads a file rather than touching the connection.
-              The order to set all of this up in is written down in <code>docs/ANALYSER_TCPIP_SETUP.md</code>.
-            </p>
           </div>
         </div>
 
         {!links ? <p className="muted">Loading…</p> : (
           <>
             {ours.length === 0 && theirs.length === 0 && (
-              <p className="muted">
-                No analyser links yet. Add one for an analyser that is not currently transmitting anywhere —
-                that is the safe place to start, and it costs the existing arrangement nothing.
-              </p>
+              <p className="muted">No analyser links yet.</p>
             )}
 
             {ours.length > 0 && (
@@ -618,10 +601,6 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             <div className="il-tap-steps">
               <strong>To switch the log on, on the PC running the LHIMS client:</strong>
               <ol>{LHIMS_TAP_SETUP_STEPS.map((step, i) => <li key={i}>{step}</li>)}</ol>
-              <p>
-                SECHLIMS only ever reads this file. It never writes to it, never empties it and never holds it
-                open — so the LHIMS transmission carries on exactly as it does now, whether this is running or not.
-              </p>
             </div>
           </>
         )}
@@ -769,7 +748,7 @@ function MessagesDialog({ link, onClose }: { link: Link; onClose: () => void }) 
           exactly what is needed in order to map it.
         </p>
         {!rows ? <p className="muted">Loading…</p> : rows.length === 0 ? (
-          <p className="muted">Nothing yet. Point the analyser at this host and run a sample.</p>
+          <p className="muted">Nothing yet.</p>
         ) : (
           <ul className="il-messages">
             {rows.map(row => (

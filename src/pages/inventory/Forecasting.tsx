@@ -111,11 +111,6 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <h3 style={{ margin: 0 }}>Demand forecast and order proposal</h3>
-          <p className="muted" style={{ margin: '2px 0 0', maxWidth: 780 }}>
-            Each item's own consumption decides its levels. The buffer covers how uneven that use has been over the
-            supplier's lead time at the service level set for the item; the reorder level covers the lead time on top of
-            it; the maximum covers the lead time and the ordering cycle together.
-          </p>
         </div>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           <RegisterSearch onQuery={setQuery} placeholder="Search item, supplier…" />
@@ -259,7 +254,6 @@ function PlanningPanel({ advice, canEdit, onClose, onSaved }: {
         {advice.eoq != null && <li><strong>Economic order quantity</strong> — {advice.eoq}, if ordering cost and holding cost were the only considerations. Pack size and shelf life usually decide instead.</li>}
       </ol>
       {advice.item.consumption.some(v => v > 0) && <div style={{ marginTop: 10 }}>
-        <p className="muted" style={{ margin: '0 0 4px' }}>Completed months, then the next three forecast</p>
         <Sparkline data={[...it.consumption.slice(0, -1), ...advice.forecast.horizon]} height={70} />
       </div>}
     </div>

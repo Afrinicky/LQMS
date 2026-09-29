@@ -50,7 +50,7 @@ function Ring({ segments, total }: { segments: { value: number; color: string }[
   return (
     <div className="donut-svg" style={{ width: size, height: size }}>
       <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
-        <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--track)" strokeWidth={thickness} />
         {total > 0 && (
           <g transform={`rotate(-90 ${cx} ${cx})`}>
             {segments.map((s, i) => {

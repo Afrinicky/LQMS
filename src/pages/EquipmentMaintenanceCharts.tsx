@@ -95,11 +95,6 @@ function Charts({ setError }: { setError: (m: string | null) => void }) {
       <div className="pp-head">
         <div>
           <h3><Wrench size={16} /> Maintenance charts</h3>
-          <p>
-            One chart per instrument, per month: daily tasks across the days, weekly and scheduled servicing
-            across the weeks. The unit supervisor signs it at the end of the month, exactly as the paper
-            schedule is signed.
-          </p>
         </div>
         <div className="rs-month">
           <button type="button" className="pq-link" onClick={() => shiftMonth(-1)}><ChevronLeft size={14} /></button>
@@ -115,11 +110,7 @@ function Charts({ setError }: { setError: (m: string | null) => void }) {
 
       {loading ? <p className="muted">Loading…</p>
         : !index?.sheets.length ? (
-          <p className="muted">
-            No instrument in this unit has maintenance tasks yet, so there is nothing to chart. Open
-            &ldquo;What each instrument needs&rdquo; and add them — a starting list is offered for microscopes,
-            fridges, centrifuges, analysers, autoclaves, incubators and cabinets.
-          </p>
+          <p className="muted">No instrument in this unit has maintenance tasks yet, so there is nothing to chart.</p>
         ) : (
           <div className="rs-split">
             <div className="rs-list"><SheetPicker sheets={index.sheets} activeId={activeId} onPick={setActiveId} /></div>
@@ -186,11 +177,6 @@ function Tasks({ equipment, setError }: {
       <div className="pp-head">
         <div>
           <h3><ClipboardList size={16} /> What each instrument needs</h3>
-          <p>
-            Routine care is done in-house at its own cadence; scheduled servicing is planned ahead and usually
-            done by an external engineer. Both appear on the instrument&rsquo;s monthly chart, and the routine
-            ones appear on the bench&rsquo;s duty list.
-          </p>
         </div>
         <div className="pp-head-actions">
           <label className="inline">

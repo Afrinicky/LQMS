@@ -255,13 +255,12 @@ export function PortalDutyRosters({ myStaffId }: { myStaffId: number | null }) {
       <div className="pp-head">
         <div>
           <h3><CalendarDays size={16} /> The duty roster</h3>
-          <p>Every published roster for the department. Your own line is highlighted and moved to the top.</p>
         </div>
         {list && list.length > 0 && <span className="pp-count">{list.length}</span>}
       </div>
 
       {list === null ? <p className="muted">Loading…</p>
-        : list.length === 0 ? <p className="muted">No roster has been published yet. One appears here the moment it is.</p>
+        : list.length === 0 ? <p className="muted">No roster has been published yet.</p>
         : (
           <ul className="ps-list">
             {list.map(r => (
@@ -449,7 +448,6 @@ export function PortalReassignments({ myStaffId, mySectionName }: { myStaffId: n
       <div className="pp-head">
         <div>
           <h3><Layers size={16} /> Unit reassignments</h3>
-          <p>Who is posted to which unit, and who supervises it, as the published memo has it.</p>
         </div>
         {list && list.length > 0 && <span className="pp-count">{list.length}</span>}
       </div>

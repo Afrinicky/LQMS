@@ -64,10 +64,6 @@ export default function RiskCriteriaSettings() {
 
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Risk criteria</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        The 5×5 matrix below is what every risk assessment in this laboratory is scored on — risk management,
-        nonconformities and incidents alike.
-      </p>
     </div>
 
     <div className="card">
@@ -96,11 +92,6 @@ export default function RiskCriteriaSettings() {
 
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Risk bands</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Set the upper bound of each band; the next band starts where the last one ended and the top band reaches 25.
-        A band set to <strong>close on acceptance</strong> carries no recurring review — a risk in it is closed once
-        it has been accepted, and reopened if anything changes.
-      </p>
       <table className="table">
         <thead><tr><th>Band</th><th style={{ width: 80 }}>From</th><th style={{ width: 110 }}>Up to</th><th style={{ width: 90 }}>Colour</th><th style={{ width: 150 }}>Review cycle</th><th>What this band calls for</th></tr></thead>
         <tbody>{draft.bands.map((band, i) => <tr key={band.level}>
@@ -153,7 +144,6 @@ export default function RiskCriteriaSettings() {
           {role}
         </label>)}
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>At least one role must be able to accept a risk.</p>
     </div>
 
     <div className="card">

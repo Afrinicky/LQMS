@@ -144,10 +144,6 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <h3 style={{ margin: 0 }}>Stock control ledger</h3>
-          <p className="muted" style={{ margin: '2px 0 0' }}>
-            Everything the store holds. <strong>On hand</strong> is what is physically there; <strong>issuable</strong> is
-            what may actually go out today, once quarantined and out-of-date lots are set aside.
-          </p>
         </div>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           <RegisterSearch onQuery={setDeferred} placeholder="Search item, code, category, shelf…" />
@@ -252,7 +248,6 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
       </Notice>}
 
       {p && p.consumption.some((n: number) => n > 0) && <div style={{ marginTop: 16 }}>
-        <p className="muted" style={{ margin: '0 0 4px' }}>Issued per completed month over the last year</p>
         <Sparkline data={p.consumption.slice(0, -1)} height={64} />
       </div>}
 
@@ -408,11 +403,6 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
   return <>
     <div className="card">
       <h3>Issue stock</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Name where it is going, who is collecting it and why. It need not be one of the laboratory's own benches —
-        a hospital department, another facility or anything else can be named. The store allocates the lots —
-        earliest expiry first — and writes a numbered issue voucher.
-      </p>
       {error && <Notice kind="error">{error}</Notice>}
 
       <form onSubmit={submit}>
@@ -716,10 +706,6 @@ function CorrectVoucherPrompt({ voucher, sections, staff, departments, reasons, 
       <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save the correction'}</button>
     </>}>
     {error && <Notice kind="error">{error}</Notice>}
-    <p className="muted" style={{ marginTop: 0 }}>
-      The items and quantities stay as issued — cancel the voucher to put those back. What is corrected here is what
-      the voucher says: when it went out, where, to whom and why.
-    </p>
     <div className="form">
       <label>Date issued<input type="date" value={issueDate} max={today} onChange={e => setIssueDate(e.target.value)} /></label>
       <label>Issued to<select value={destination} onChange={e => { setDestination(e.target.value); setDestinationName(''); }}>
@@ -925,7 +911,6 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
         before the form that would start another one. */}
     {openCounts.length > 0 && <div className="card">
       <h3>Counts in progress</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Pick up where the count was left. A sheet stays open until it is posted or abandoned.</p>
       <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
         <th>Count</th><th>Started</th><th>Scope</th><th>Counted by</th><th>Progress</th><th>Variances</th><th></th>
       </tr></thead><tbody>
@@ -952,10 +937,6 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
 
     <div className="card">
       <h3>Start a stock count</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        A sheet is drawn up per lot on the shelf. Count it, enter what you found, and post it — every difference
-        becomes an adjustment with your reason on it, and lands on the item's bin card.
-      </p>
       {error && <Notice kind="error">{error}</Notice>}
       {notice && <Notice kind="warn">{notice}</Notice>}
       <form className="form" onSubmit={start}>
@@ -1004,19 +985,11 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
           <input type="checkbox" checked={form.includeEmpty} onChange={e => setForm({ ...form, includeEmpty: e.target.checked })} />
           Include items the register says are empty
         </label>
-        <p className="hint" style={{ margin: '-6px 0 4px' }}>
-          Leave this on. Stock the register has lost still sits on the shelf, and a sheet of only non-zero rows can
-          never find it.
-        </p>
 
         <label className="toggle">
           <input type="checkbox" checked={form.blind} onChange={e => setForm({ ...form, blind: e.target.checked })} />
           Count blind — hide what the register believes
         </label>
-        <p className="hint" style={{ margin: '-6px 0 4px' }}>
-          The honest way to count: the book balance is hidden until the sheet is posted, so the count is what was on
-          the shelf rather than what the page suggested.
-        </p>
 
         <button type="submit" disabled={busy || (form.scope === 'items' && pickedItems.length === 0)}>
           <ClipboardList size={15} /> {busy ? 'Drawing up the sheet…' : 'Start the count'}
@@ -1092,10 +1065,7 @@ function AbandonCountPrompt({ count, onClose, onDone }: { count: any; onClose: (
       <button type="button" className="danger" disabled={busy} onClick={() => void go()}>{busy ? 'Abandoning…' : 'Abandon the count'}</button>
     </>}>
     {error && <Notice kind="error">{error}</Notice>}
-    <p className="muted" style={{ marginTop: 0 }}>
-      Nothing is posted and no balance moves. The sheet stays on the register marked abandoned, with what had been
-      counted still on it.
-    </p>
+    <p className="muted" style={{ marginTop: 0 }}>Nothing is posted and no balance moves.</p>
     <label>Reason<TextField as="textarea" value={reason} onValue={nextValue => setReason(nextValue)} rows={3}
       placeholder="Started in the wrong place, superseded by CNT-…, interrupted" autoFocus /></label>
   </DetailModal>;
@@ -1299,9 +1269,6 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
         </button>}
       </div>}
 
-      {hideBook && <p className="hint" style={{ marginTop: 0 }}>
-        This is a blind count — what the register believes is hidden until the sheet is posted.
-      </p>}
       {Boolean(data.blind) && revealed && !posted && <Notice kind="warn">
         The book balance has been revealed on a blind count. That is recorded against nothing — but the point of
         counting blind is lost for any line counted from here on.
@@ -1364,10 +1331,6 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
           <button type="submit" form="add-count-line" disabled={busy === 'add' || !addForm.itemId}>{busy === 'add' ? 'Adding…' : 'Add it to the sheet'}</button>
         </>}>
         {error && <Notice kind="error">{error}</Notice>}
-        <p className="muted" style={{ marginTop: 0 }}>
-          For stock the sheet did not list — a box behind another box, a lot nobody booked in, something moved
-          from a unit's own cupboard. It posts as a variance like any other line.
-        </p>
         <form id="add-count-line" className="form" onSubmit={addLine}>
           <label>Item<select value={addForm.itemId} onChange={e => setAddForm({ ...addForm, itemId: e.target.value, batchId: '' })} required>
             <option value="">Select the item</option>

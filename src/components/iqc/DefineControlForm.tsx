@@ -213,10 +213,6 @@ export default function DefineControlForm({
       {source === 'in_house' && (
         <fieldset className="iqc-step accent">
           <legend><span className="step-n">3b</span> How was it prepared?</legend>
-          <p className="iqc-note">
-            Nobody outside this laboratory can vouch for an in-house control, so its preparation and validation
-            are what make it traceable. ISO 15189:2022 §7.3.7.2 expects this to be documented.
-          </p>
           <div className="form-grid">
             <label>Prepared by<select value={form.preparedByStaffId} onChange={e => set('preparedByStaffId', e.target.value)}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
             <label>Preparation date<input type="date" value={form.preparationDate} onChange={e => set('preparationDate', e.target.value)} /></label>
@@ -243,7 +239,6 @@ export default function DefineControlForm({
             <option value="">Choose…</option>
             {ANALYTE_TEMPLATES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
-          <span className="hint">One vial, many parameters — an FBC control reads eight, a serology control reads one.</span>
         </div>
 
         {isCs && (
@@ -325,13 +320,6 @@ export default function DefineControlForm({
         </table>
         <button type="button" className="secondary" onClick={() => setRows(rs => [...rs, emptyAnalyte()])}><Plus size={13} /> {isCs ? 'Add agent' : 'Add analyte'}</button>
         </>}
-        {isCs && !wantsPanel && <p className="hint">Identification-only — this control has no antimicrobial panel. It passes when the reference strain is identified as the expected organism.</p>}
-        {controlType === 'quantitative' && (
-          <p className="hint">
-            Leave the mean and SD blank if you are establishing them from your own runs — the acceptable range still
-            applies, and the chart becomes available once the targets are set.
-          </p>
-        )}
       </fieldset>
 
       {/* 5 — how it is judged */}

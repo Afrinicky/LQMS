@@ -239,11 +239,6 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
           </table>
         )}
 
-        {rows.length === 0 && (
-          <p className="muted">
-            This sheet has no rows yet. Set the parameters on the asset, or add maintenance tasks to the instrument.
-          </p>
-        )}
       </div>
 
       <Legend />

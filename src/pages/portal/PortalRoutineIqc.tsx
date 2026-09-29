@@ -227,10 +227,6 @@ function ChartsFace({ controls, onOpen }: { controls: IqcBoardControl[]; onOpen:
       <div className="pp-head">
         <div>
           <h3><LineChart size={16} /> Charts and records</h3>
-          <p>
-            The Levey-Jennings chart for any parameter your unit controls, and a printable record of the runs
-            behind it — every result beside the target it was measured against.
-          </p>
         </div>
       </div>
 
@@ -340,10 +336,7 @@ function ChartDialog({ control, onClose }: { control: IqcBoardControl; onClose: 
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       {analytes === null ? <p className="muted">Reading the parameters…</p>
         : analytes.length === 0 ? (
-          <p className="muted">
-            This control has no quantitative parameter, so there is nothing to chart. A qualitative control
-            passes or fails against its expected result; its record is in the runs.
-          </p>
+          <p className="muted">Nothing to chart for this control.</p>
         ) : (
           <>
             <div className="iqc-chart-tabs">
@@ -965,10 +958,6 @@ function ScanPanel({ controlId, onMapped, onProblem }: {
       {image && (
         <div className="iqc-scan-view">
           <img src={image} alt="The control printout, for checking the values against" />
-          <p className="muted">
-            Check every value below against this printout before recording the run. Anything the system read is
-            marked; anything it could not read is blank for you to fill.
-          </p>
         </div>
       )}
     </div>
@@ -1069,7 +1058,6 @@ function MappingReport({ mapping }: { mapping: IqcMapping }) {
           {mapping.unmatchedLabels.join(', ')}. These were left out rather than guessed at.
         </p>
       )}
-      <p className="muted">Check the values below against the source before recording the run.</p>
     </div>
   );
 }

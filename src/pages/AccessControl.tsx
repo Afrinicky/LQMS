@@ -410,12 +410,6 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
           <div className="ac-group-head">
             <h4><BadgeCheck size={15} style={{ verticalAlign: '-2px' }} /> Technical authorizations</h4>
           </div>
-          <p className="muted" style={{ padding: '0 4px 8px' }}>
-            Who is authorised to perform, review, verify or approve technical work. This is a competency
-            record, kept for ISO 15189. It no longer changes anybody’s software access — a competency note
-            quietly widening someone’s rights was one of the contradictions this screen removed. Grant the
-            rights on the profile above, or to the person under Individuals.
-          </p>
           <table className="data-table">
             <thead><tr><th>Who</th><th>Area</th><th>Section</th><th>Level</th><th>Status</th><th>Expires</th></tr></thead>
             <tbody>
@@ -568,11 +562,6 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
         <div className="ac-intro card" style={{ marginTop: 0 }}>
           <span className="ac-intro-ico"><User size={18} /></span>
           <div>
-            <p style={{ margin: 0 }}>
-              What you set here <strong>overrides this person’s access profile</strong>, to grant or to withdraw,
-              and nothing else can overrule it. Areas left on <strong>Follow profile</strong> take whatever the
-              profile says, now and whenever it changes.
-            </p>
           </div>
         </div>
 
@@ -636,16 +625,6 @@ export function AccessControl() {
         <span className="ac-intro-ico"><ShieldCheck size={20} /></span>
         <div>
           <h3>Who can do what</h3>
-          <p>
-            Two things decide access, in this order. An <strong>access profile</strong> is the one cohort
-            decision — every person works under exactly one, and organogram positions are mapped to a profile
-            rather than carrying rights of their own, so nothing can contradict anything.
-            An <strong>individual</strong> decision then overrides that profile for one person, to grant or to
-            withdraw, and always wins. Levels build on each other: <strong>View</strong> reads,
-            <strong> Contribute</strong> adds, <strong>Manage</strong> changes and exports,
-            <strong> Full</strong> also approves and archives. Anything set to <strong>No access</strong> is
-            hidden entirely — not greyed out, and not a refusal after the click.
-          </p>
         </div>
       </div>
 

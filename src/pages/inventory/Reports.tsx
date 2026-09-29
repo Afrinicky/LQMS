@@ -139,7 +139,6 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
       </div>
       <div className="card">
         <h3>Slow-moving stock</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Stock held that nothing has been issued from over the window — capital on a shelf, and a candidate for expiry.</p>
         {data.slowMovers.length === 0 ? <p className="muted">Everything held is moving.</p> :
           <div className="table-scroll"><table className="data-table"><thead><tr><th>Item</th><th>On hand</th><th>Value</th><th>Last issued</th></tr></thead><tbody>
             {data.slowMovers.map(s => <tr key={s.id}>
@@ -154,7 +153,6 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="ABC analysis" subtitle="Where the money sits — class A is the few items carrying most of it">
         <BarMeter data={data.abcMix.map((a, i) => ({ label: `Class ${a.abc} — ${a.items} item${a.items === 1 ? '' : 's'}`, value: a.value, color: CHART_COLORS[i] }))} />
-        <p className="muted" style={{ marginTop: 8 }}>Class A deserves the tightest control and the most frequent counting.</p>
       </ChartCard>
       <ChartCard title="VEN classification" subtitle="Vital items are chased whatever they cost">
         <DonutChart centerLabel="Items" data={data.venMix.map((v, i) => ({ label: v.ven, value: v.items, color: CHART_COLORS[i] }))} />

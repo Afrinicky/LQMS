@@ -205,8 +205,7 @@ export function ProcessManagementPage() {
   ];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="Process Management" subtitle="Pre-examination, examination, post-examination, and blood banking." />
-    <p className="muted">Patient testing and clinical result reporting stay in the primary information system. This module tracks the QMS workflow only — no patient names are required; use request and patient references as identifiers.</p>
+    <PageHeader eyebrow="Process Management" title="Process Management" />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
     {inPreExam && tabBar(tab, PRE_EXAM_TABS, setTab)}
     {inExam && tabBar(tab, EXAM_TABS, setTab)}

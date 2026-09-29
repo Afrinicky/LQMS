@@ -98,7 +98,6 @@ export function LoginPage() {
         <AuthBrand tagline="by Nickland" />
         <div className="auth-head">
           <h2>Welcome back</h2>
-          <p>Sign in to your laboratory quality management workspace.</p>
         </div>
         <Field icon={<User size={16} />} label="Username" name="username" required autoFocus autoComplete="username" placeholder="Enter your username"
           onChange={e => setLastUsername(e.currentTarget.value)} />
@@ -147,7 +146,6 @@ export function SetupPage() {
         <AuthBrand tagline="First-time setup" />
         <div className="auth-head">
           <h2>Create your workspace</h2>
-          <p>Set up the host database, laboratory profile, default roles, positions, modules, and the first administrator.</p>
         </div>
         <Field icon={<Building2 size={16} />} label="Facility name" name="facilityName" defaultValue="St. Elizabeth Catholic Hospital Laboratory" required />
         <Field icon={<Building2 size={16} />} label="Short name" name="shortName" defaultValue="SECH Laboratory" />

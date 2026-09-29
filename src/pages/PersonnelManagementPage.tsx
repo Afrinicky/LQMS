@@ -249,7 +249,7 @@ export function PersonnelManagementPage() {
   const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Files', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
+    <PageHeader eyebrow="Personnel Management" title="Personnel Management" />
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -298,7 +298,6 @@ export function PersonnelManagementPage() {
             <RegisterSearch style={{ maxWidth: 240 }} onQuery={setStaffSearch} placeholder="Search name, ID, position…" />
           </div>
         </div>
-        <p className="muted" style={{ marginTop: 0 }}>The complete register of laboratory personnel. Export or import uses the single approved workbook — rows are matched on Staff ID, so existing staff are updated and new ones created.</p>
         {regResult && <Notice kind="success" style={{ marginTop: 4, marginBottom: 12 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated{typeof regResult.skipped === 'number' ? <>, <strong>{regResult.skipped}</strong> skipped</> : null}.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</Notice>}
         <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Designation</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
           {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit].some(v => v?.toLowerCase().includes(q)); }).map(s => {
@@ -323,7 +322,6 @@ export function PersonnelManagementPage() {
       <div className="card">
         <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'Add staff'}</h3>
           {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
-        <p className="muted" style={{ marginTop: 0 }}>Adds a member of staff to the Master Personnel Register: identity, professional registration, qualifications, appointment and emergency contact.</p>
         {can('personnel.self', 'view') && can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaff}>
           <label>Staff ID<TextField value={staffForm.employeeNo} onValue={nextValue => setStaffForm({ ...staffForm, employeeNo: nextValue })} placeholder="e.g. SNO-001" /></label>
           <label>Surname<TextField value={staffForm.surname} onValue={nextValue => setStaffForm({ ...staffForm, surname: nextValue })} /></label>
@@ -369,7 +367,7 @@ export function PersonnelManagementPage() {
     {tab === 'Staff Files' && <StaffFiles staff={staff} onError={setError} />}
 
     {tab === 'Declarations' && <>
-      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct.</p>
+      <div className="card">
       {can('personnel.declarations', 'create') && <form className="form-grid" onSubmit={submitDeclaration}>
         <label>Type<select value={declForm.declarationType} onChange={e => setDeclForm({ ...declForm, declarationType: e.target.value })} required>{DECLARATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Title<TextField value={declForm.title} onValue={nextValue => setDeclForm({ ...declForm, title: nextValue })} required placeholder="e.g. Annual ethics & confidentiality declaration" /></label>
@@ -408,7 +406,6 @@ export function PersonnelManagementPage() {
     {tab === 'Performance Appraisals' &&
       <AppraisalWorkspace staff={staff} sections={sections} departments={departments} positions={positions} />}
 
-    {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's own record in <em>My Portal</em>.</p>}
 
     {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
     {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} sections={sections} canEdit={canEditRosters} onNavigate={setTab} />}
@@ -418,7 +415,6 @@ export function PersonnelManagementPage() {
 
     {tab === 'Reports' && <div className="card">
       <h3>Personnel reports</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Printable summaries are produced from the register that holds the data:</p>
       <ul>
         <li><strong>Competency coverage matrix</strong> — who is covered for what, by unit. <em>Competency Assessments → Coverage matrix → Print matrix.</em></li>
         <li><strong>Competency assessment record</strong> — the full scored record with its evidence and signatures. <em>Open any assessment → Print record.</em></li>
@@ -427,7 +423,6 @@ export function PersonnelManagementPage() {
         <li><strong>Appraisal cycle summary</strong> — who is outstanding in a round. <em>Performance Appraisals → Setup → open a cycle → Print cycle summary.</em></li>
         <li><strong>Master Personnel Register</strong> — export to Excel from the register tab.</li>
       </ul>
-      <p className="muted">Training-hours-per-member-of-staff and authorisation expiry trend reports follow in a later phase.</p>
     </div>}
   </div>;
 }

@@ -54,7 +54,6 @@ export default function PortalIqcCoverage({ onChanged, sectionId }: { onChanged?
       <div className="pp-head">
         <div>
           <h3>Controls</h3>
-          <p>Which of this unit&rsquo;s tests have a control defined.</p>
         </div>
         {canDefine && (
           <button type="button" className="pp-action" onClick={() => setSetup({ test: null })}>

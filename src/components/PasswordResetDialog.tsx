@@ -103,7 +103,6 @@ export default function PasswordResetDialog({ onClose, initialUsername = '' }: {
           <form onSubmit={request}>
             <span className="pwr-ico"><KeyRound size={22} /></span>
             <h3>Forgotten your password?</h3>
-            <p>An administrator will confirm it is you and approve the reset. Stay on this screen — it opens by itself once they do.</p>
             <label className="auth-field">
               <span>Your username</span>
               <span className="auth-input">
@@ -128,10 +127,6 @@ export default function PasswordResetDialog({ onClose, initialUsername = '' }: {
           <div className="pwr-wait">
             <span className="pwr-pulse"><Clock size={22} /></span>
             <h3>Waiting for approval</h3>
-            <p>
-              An administrator has been notified. They will confirm who you are before approving —
-              if they are nearby, it is worth going to see them.
-            </p>
             <div className="pwr-dots"><i /><i /><i /></div>
             <p className="pwr-meta">
               Checking every few seconds{waited > 15 ? ' · still waiting, this stays open as long as you need' : ''}
@@ -144,7 +139,6 @@ export default function PasswordResetDialog({ onClose, initialUsername = '' }: {
           <form onSubmit={complete}>
             <span className="pwr-ico ok"><CheckCircle2 size={22} /></span>
             <h3>Approved{fullName ? `, ${fullName.split(/\s+/)[0]}` : ''}</h3>
-            <p>Choose a new password. You will be signed out everywhere else.</p>
             <label className="auth-field">
               <span>New password</span>
               <span className="auth-input">
@@ -179,7 +173,6 @@ export default function PasswordResetDialog({ onClose, initialUsername = '' }: {
           <div className="pwr-wait">
             <span className="pwr-ico bad"><Clock size={22} /></span>
             <h3>The request lapsed</h3>
-            <p>Nobody got to it in time, so it has been closed. You can ask again.</p>
             <button type="button" onClick={() => { setPhase('ask'); setError(''); }}>Ask again</button>
           </div>
         )}

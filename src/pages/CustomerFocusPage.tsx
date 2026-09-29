@@ -240,7 +240,7 @@ export function CustomerFocusPage() {
   const tabs = ['Dashboard', ...(isEnabled('complaints') ? ['Complaints'] : []), 'Advisory Services', 'Laboratory Handbook', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Customer Focus" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
+    <PageHeader eyebrow="Customer Focus" title="Customer Focus" />
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
 
@@ -467,7 +467,6 @@ export function CustomerFocusPage() {
 
     {tab === 'Survey Responses' && <>
       {!selectedSurvey && <>
-        <p>All survey responses across all surveys. Open a survey from the Satisfaction Surveys tab to record new responses.</p>
         <table className="data-table"><thead><tr><th>Survey</th><th>Type</th><th>Date</th><th>Respondent</th><th>Source</th><th>Stakeholder</th><th>Comment</th></tr></thead><tbody>
           {allResponses.map(r => <tr key={r.id}><td>{(r as any).survey_number ? `${(r as any).survey_number} — ` : ''}{r.survey_title || `Survey #${r.survey_id}`}</td><td>{((r as any).survey_type || '').replace(/_/g, ' ')}</td><td>{r.response_date}</td><td>{r.respondent_name || '—'}</td><td>{r.source_channel || '—'}</td><td>{r.stakeholder_name || '—'}</td><td>{r.overall_comment || '—'}</td></tr>)}
         </tbody></table>
@@ -526,7 +525,6 @@ export function CustomerFocusPage() {
     </>}
 
     {tab === 'Imports' && <>
-      <p><small>Supported import types: feedback, survey_responses, stakeholders, other. CSV / XLSX. Stakeholder import expects columns like stakeholderName, stakeholderType, organisation, email. Feedback import expects feedbackDate, feedbackType, title, description.</small></p>
       {/* Reading the batch register is one right; putting a file into it is
           another. A "View" user sees the history and not the upload form. */}
       {can('customer_focus.imports', 'import') && <form className="form-grid" onSubmit={submitImport}>
@@ -544,6 +542,5 @@ export function CustomerFocusPage() {
       </tbody></table>
     </>}
 
-    {tab === 'Reports' && <p>Customer focus reports (sentiment trend, NPS-style breakdown, response heatmaps) will be added in a later phase. Use Print on each feedback row to output the printable record for any selected feedback.</p>}
   </div>;
 }

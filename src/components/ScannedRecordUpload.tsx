@@ -114,7 +114,7 @@ export default function ScannedRecordUpload({
 
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>{heading || 'Scanned records & evidence'}</h3>
-    <p className="muted" style={{ marginTop: 0 }}>{blurb || 'Upload scanned copies of paper records so they are preserved, and attach charts/logs as evidence that the activity was performed. State the period the scan covers, and flag any out-of-range reading — the system will raise a nonconformity so the corrective-action steps follow.'}</p>
+    <p className="muted" style={{ marginTop: 0 }}>{blurb || 'Attach a scanned copy of the paper record.'}</p>
     {error && <Notice kind="error">{error}</Notice>}
     {msg && <Notice kind="success">{msg}</Notice>}
     {/* Uploading a scan creates a record. Somebody who may only read the

@@ -52,7 +52,6 @@ export default function DocumentScanner({ onCapture, buttonLabel = '📷 Scan do
         <button type="button" className="secondary" onClick={stop}>Cancel</button>
       </div>
       <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { onCapture(f); stop(); } }} />
-      <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Point the camera at the document and press Capture, or select a file from a desktop/flatbed scanner.</p>
     </div>}
   </span>;
 }

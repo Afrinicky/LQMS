@@ -106,7 +106,6 @@ export default function StaffRecordViewer({ title, subtitle, open, onClose, laye
             : isImage ? <div style={{ flex: 1, minHeight: 0, overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={fileName || title} style={{ maxWidth: '100%' }} /></div>
               : <div className="srv-note">
                   <p style={{ marginTop: 0 }}>{fileName}</p>
-                  <p className="muted" style={{ marginBottom: 16 }}>This file type cannot be shown in the window.</p>
                   <button type="button" className="secondary" onClick={download}>Download file</button>
                 </div>)}
     </div>

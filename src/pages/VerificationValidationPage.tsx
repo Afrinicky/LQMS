@@ -159,7 +159,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
   const tabs = ['Dashboard', 'Register', 'New study', 'Equipment verification', 'Reports'].filter(n => !embedded || n !== 'Dashboard');
 
   return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="Method Verification &amp; Validation" subtitle="ISO 15189 verification and validation of examination methods, with structured performance characteristics and authorisation for use." />}
+    {!embedded && <PageHeader eyebrow="Process Management" title="Method Verification &amp; Validation" />}
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
     {msg && <Notice kind="success">{msg}</Notice>}
@@ -223,7 +223,6 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
 
     {tab === 'New study' && <div className="card">
       <h3>New verification / validation study</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Choose the study type and whether the measurand is quantitative or qualitative — the standard ISO/CLSI performance characteristics are added automatically, ready for you to enter results. <strong>Verification</strong> confirms a validated (e.g. manufacturer's) method performs as claimed here; <strong>validation</strong> fully characterises a lab-developed or modified method.</p>
       {can('verification_validation', 'create') && <form className="form-grid" onSubmit={createStudy}>
         <label>Study type<select value={nf.studyType} onChange={e => setNf({ ...nf, studyType: e.target.value })}>{STUDY_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
         <label>Measurand<select value={nf.measurandType} onChange={e => setNf({ ...nf, measurandType: e.target.value })}>{MEASURANDS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
@@ -248,7 +247,6 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
     {tab === 'Equipment verification' && <>
       <div className="card">
         <h3>Equipment verification (instrument performance)</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Verify an instrument performs to specification (calibration verification, performance checks). Method/assay studies are on the <em>Register</em>.</p>
         {can('verification_validation', 'create') && <form className="form-grid" onSubmit={submitEquip}>
           <label>Equipment<select value={equipForm.equipmentId} onChange={e => setEquipForm({ ...equipForm, equipmentId: e.target.value })} required><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
           <label>Verification type<TextField value={equipForm.verificationType} onValue={nextValue => setEquipForm({ ...equipForm, verificationType: nextValue })} required placeholder="e.g. calibration verification" /></label>
@@ -337,7 +335,6 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
     </div>}
 
     <h4 style={{ marginBottom: 4 }}>Performance characteristics assessed</h4>
-    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Enter the acceptance criterion, the observed result and mark each characteristic pass/fail. The overall verdict follows the outcomes.</p>
     <div style={{ overflowX: 'auto' }}>
       <table className="data-table" style={{ minWidth: 900 }}><thead><tr>
         <th style={{ minWidth: 190 }}>Characteristic</th><th>Acceptance criterion</th><th>Claimed</th><th>Observed / statistic</th><th>n</th><th>Outcome</th><th>Notes</th>{canManage && <th></th>}
@@ -378,7 +375,6 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
             <input ref={reportRef} type="file" accept="image/*,application/pdf,.doc,.docx,.xlsx" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUploadReport(f); }} />
             <button type="button" className="secondary" onClick={() => reportRef.current?.click()}>{study.report_file_id ? 'Replace report' : 'Insert verification/validation report'}</button>
           </>}
-          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Attach the full written verification/validation report (PDF/Word/scan). The one-page summary prints from <em>Print report</em>.</p>
         </div>
         <div style={{ marginTop: 10 }}>
           <p style={{ margin: '2px 0' }}>Performed by: <strong>{study.performed_by_name || '—'}</strong></p>

@@ -137,7 +137,6 @@ export function RegisterStaff() {
   return <div className="reg-staff">
     <div className="card">
       <h3>Register New Staff</h3>
-      <p>Onboard a staff member in one step. This record feeds <strong>Personnel Management</strong>, and the choices below link the person to <strong>Positions &amp; Organogram</strong>, <strong>Users &amp; Access</strong> (optional login), and <strong>Access Control</strong> (the access profile they work under).</p>
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
 
@@ -159,14 +158,13 @@ export function RegisterStaff() {
 
         <fieldset className="reg-section">
           <legend>Positions &amp; organogram</legend>
-          <p className="hint">Select one or more organogram positions. The primary position drives reporting lines and position-based permissions.</p>
           <div className="chip-select">
             {positions.filter(p => !!p.isActive).map(p => (
               <label key={p.id} className={`pick ${positionIds.includes(p.id) ? 'on' : ''}`}>
                 <input type="checkbox" checked={positionIds.includes(p.id)} onChange={() => togglePosition(p.id)} />{p.title}
               </label>
             ))}
-            {positions.length === 0 && <span className="hint">No positions yet — create them under Positions &amp; Organogram.</span>}
+            {positions.length === 0 && <span className="hint">No positions yet.</span>}
           </div>
           {positionIds.length > 1 && <label className="primary-pick">Primary position<select value={form.primaryPositionId} onChange={e => setForm({ ...form, primaryPositionId: e.target.value })}>{positionIds.map(id => <option key={id} value={id}>{positions.find(p => p.id === id)?.title ?? `#${id}`}</option>)}</select></label>}
         </fieldset>
@@ -183,14 +181,6 @@ export function RegisterStaff() {
 
         <fieldset className="reg-section">
           <legend>Access</legend>
-          <p className="hint">
-            The access profile chosen above is what this person will be able to do. Registration used to
-            carry its own grid of raw permission flags, which meant access could be decided in three places
-            that disagreed with each other. It is decided in one place now:
-            <strong> People &amp; Access → Access Control</strong>. Set the profile there, and anything this
-            person needs personally under its <strong>Individuals</strong> tab, where it overrides the
-            profile and can be seen and undone.
-          </p>
           {createUser && account.roleId && (
             <p className="hint">
               This account will work under the <strong>{roles.find(r => r.id === Number(account.roleId))?.name ?? 'selected'}</strong> access profile.
@@ -205,7 +195,6 @@ export function RegisterStaff() {
 
     <div className="card">
       <h3>Staff directory &amp; linkages</h3>
-      <p>Every registered staff member and how they are connected across the system.</p>
       <table className="data-table"><thead><tr><th>Name</th><th>Employee no</th><th>Section</th><th>Primary position</th><th>Login account</th><th>Status</th><th></th></tr></thead><tbody>
         {staff.map(s => <tr key={s.id}>
           <td>{s.fullName}</td>
@@ -304,7 +293,6 @@ export function UsersAccess(){
   const unlinkedStaff = staff.filter(s => !s.userId);
   return <><PasswordResetApprovals />
   <div className="card"><h3>Users &amp; Access</h3>
-    <p>Create login accounts, link them to staff records, and change what role somebody holds. To onboard a whole new person (staff + account + positions) use the <strong>Register New Staff</strong> tab. Click a row to link its staff record, or <strong>Manage account</strong> to change the role, hand over a password, or deactivate it.</p>
     {error && <Notice kind="error">{error}</Notice>}
     {success && <Notice kind="success">{success}</Notice>}
     {can('settings', 'create') && <form className="form" onSubmit={submit}>
@@ -416,7 +404,7 @@ export function Positions(){
     {error && <Notice kind="error">{error}</Notice>}
 
     {view==='list' && <div className="grid cols-2">
-      <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Not every laboratory has every position — deactivate the ones you don't use. Staff are mapped here and during <Link to="/settings/people">Register New Staff</Link>.</p>
+      <div className="card"><h3>Positions &amp; Organogram</h3>
         {can('settings', 'create') && <form className="form" onSubmit={addPosition}>
           <label>Position title<input name="title" required/></label>
           <label>Description<textarea name="description"/></label>
@@ -503,7 +491,6 @@ function RankConfig() {
   }
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Professional rank order</h3>
-    <p className="hint">The automatic hierarchy under each Unit Supervisor orders staff of the same cadre by these ranks (top = highest). Staff with no explicit rank are matched against their designation.</p>
     {error && <Notice kind="error">{error}</Notice>}
     <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>#</th><th>Rank</th><th>Active</th><th></th></tr></thead><tbody>
       {[...ranks].sort((a, b) => a.sortOrder - b.sortOrder).map((r, i, arr) => <tr key={r.id} style={{ opacity: r.isActive ? 1 : 0.5 }}>
@@ -564,7 +551,6 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
         <button type="button" onClick={applyStandard}>Apply standard structure</button>
       </div>
     </div>
-    <p className="hint">The appointed posts — the manager, his deputy, the officers and the unit supervisors — are set by hand. Under each unit supervisor the unit’s staff are grouped by grade from the staff register. Click a post to assign its holder and deputy.</p>
     <form className="org-add-root" onSubmit={addRoot}>
       <TextField placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onValue={nextValue => setNewRoot(nextValue)} />
       <button type="submit">Add top role</button>
@@ -709,7 +695,6 @@ export function ConfigListsPage() {
   return <div className="section-config">
     <div className="card">
       <div className="panel-head"><h3>Dropdown Lists</h3></div>
-      <p>The words the laboratory chooses from in its forms. Rename or retire the ones you don't use, and add your own — these feed Equipment and the rest of the system straight away.</p>
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
 
@@ -728,7 +713,6 @@ export function ConfigListsPage() {
               {list.archetypeOf.map(a => <option key={a} value={a}>{archetypeLabel(a)}</option>)}
             </select></label>}
           </div>
-          {list.archetypeOf && <p className="hint" style={{ marginTop: -4 }}>The behaviour decides what the category owes — only a diagnostic analyser or point-of-care device carries IQC and EQA.</p>}
           <button type="submit"><Plus size={14} style={{ verticalAlign: -2 }} /> Add option</button>
         </form>
 
@@ -817,7 +801,6 @@ export function SectionConfig() {
         <h3>Section / Unit Configuration</h3>
         <button onClick={() => setShowNew(v => !v)}>{showNew ? 'Cancel' : '+ New unit'}</button>
       </div>
-      <p>Configure every laboratory unit in one place. Not all laboratories run every unit — create only the units you operate, define what each one does (and does not) do, and set up its test menu, equipment and stock. These feed Process Management, Equipment, Supplier &amp; Inventory and Personnel automatically.</p>
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
 
@@ -849,7 +832,7 @@ export function SectionConfig() {
             <span title="Active staff">👤 {s.staffCount}</span>
           </div>
         </button>)}
-        {sections.length === 0 && <p className="hint">No units configured yet. Use “+ New unit” to create your first one.</p>}
+        {sections.length === 0 && <p className="hint">No units configured yet.</p>}
       </div>
     </div>
 
@@ -908,7 +891,6 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </form>}
 
     {subtab === 'Services' && <>
-      <p className="hint">Define what this unit does and explicitly does not do. This makes the lab's true scope clear and drives section-specific configuration.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/services`, { method: 'POST', body: JSON.stringify({ ...svc, isOffered: svc.isOffered === 'yes' }) }, 'Service saved.').then(ok => { if (ok) setSvc({ name: '', category: '', isOffered: 'yes', notes: '' }); }); }}>
         <div className="form-grid">
           <label>Service / activity<TextField value={svc.name} onValue={nextValue => setSvc({ ...svc, name: nextValue })} required placeholder="e.g. Full Blood Count, Blood Culture" /></label>
@@ -935,7 +917,6 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     {subtab === 'Test Menu' && <SectionTestMenu detail={detail} sectionId={sectionId} call={call} />}
 
     {subtab === 'Equipment' && <>
-      <p className="hint">Equipment registered here is scoped to this unit and appears in the <Link to="/equipment">Equipment Management</Link> module for scheduling and maintenance.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/equipment`, { method: 'POST', body: JSON.stringify(equip) }, 'Equipment registered.').then(ok => { if (ok) setEquip({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' }); }); }}>
         <div className="form-grid">
           <label>Equipment name<TextField value={equip.name} onValue={nextValue => setEquip({ ...equip, name: nextValue })} required /></label>
@@ -957,7 +938,6 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </>}
 
     {subtab === 'Stock & Inventory' && <>
-      <p className="hint">Stock and reagents set here are scoped to this unit and managed in the <Link to="/supplier-inventory">Supplier &amp; Inventory</Link> module.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/inventory`, { method: 'POST', body: JSON.stringify(item) }, 'Stock item added.').then(ok => { if (ok) setItem({ name: '', category: '', quantity: '', unit: '', reorderLevel: '', expiryDate: '' }); }); }}>
         <div className="form-grid">
           <label>Item name<TextField value={item.name} onValue={nextValue => setItem({ ...item, name: nextValue })} required /></label>
@@ -980,7 +960,6 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </>}
 
     {subtab === 'Staff' && <>
-      <p className="hint">Staff assigned to this unit. Assign people to a unit during <Link to="/settings/people">Register New Staff</Link> or in <Link to="/personnel">Personnel Management</Link>.</p>
       <table className="data-table"><thead><tr><th>Name</th><th>Employee no</th><th>Status</th></tr></thead><tbody>
         {detail.staff.map(p => <tr key={p.id}><td>{p.full_name}</td><td>{p.employee_no || '—'}</td><td>{p.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td></tr>)}
         {detail.staff.length === 0 && <tr><td colSpan={3} className="hint">No staff assigned to this unit yet.</td></tr>}
@@ -1137,7 +1116,6 @@ function SectionTestMenu({ detail, sectionId, call }: {
   };
 
   return <>
-    <p className="hint">Add a <strong>single test</strong>, or a <strong>panel/profile</strong> (e.g. Renal Function → Urea, Creatinine) whose components are ordered and worked with together. Link an analyser only where one is used. These appear in <Link to="/process-management">Process Management</Link> for this unit.</p>
 
     <XlsxToolbar
       module="settings"
@@ -1177,7 +1155,6 @@ function SectionTestMenu({ detail, sectionId, call }: {
         <label>Panel / profile name<TextField value={panel.testName} onValue={nextValue => setPanel({ testName: nextValue })} required placeholder="e.g. Renal Function Test" /></label>
       </div>
 
-      <p className="hint" style={{ margin: '2px 0 6px' }}>List the component tests. Each keeps its own specimen, method and analyser — tick the ones a shared value should apply to, set it below, and press <em>Apply to ticked</em>.</p>
 
       <div className="apply-bar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2, rgba(127,127,127,.08))', padding: '8px 10px', borderRadius: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>Apply to ticked:</span>
@@ -1254,7 +1231,6 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
   async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); load(); return true; } catch (e) { setError(errorText(e)); return false; } }
   async function add(e: FormEvent) { e.preventDefault(); if (!form.name.trim()) return; const ok = await call(`/scheduling/sections/${sectionId}/benches`, { method: 'POST', body: JSON.stringify(form) }); if (ok) setForm({ name: '', code: '', description: '' }); }
   return <>
-    <p className="hint">Benches / workspaces in this unit. Staff on the unit's monthly <Link to="/personnel">Bench Schedule</Link> are assigned to these each day. The short code is what appears in the schedule grid cells.</p>
     {error && <Notice kind="error">{error}</Notice>}
     <table className="data-table"><thead><tr><th>Order</th><th>Name</th><th>Code</th><th>Description</th><th>Active</th><th></th></tr></thead><tbody>
       {rows.map(b => <tr key={b.id}>
@@ -1299,15 +1275,13 @@ export function ModuleToggles(){
     await api(`/system-modules/${m.key}`,{method:'PUT',body:JSON.stringify({enabled:!m.enabled})});
     load();
   }
-  return <div className="card"><h3>System Modules Toggle</h3><p>Disabled modules are hidden from the main sidebar, alerts are paused, data is preserved, and direct routes show a disabled module page. Settings remains accessible.</p>
+  return <div className="card"><h3>System Modules Toggle</h3>
     <table className="table"><tbody>{modules.map(m=><tr key={m.key}><td>{m.label}</td><td>{m.enabled?'Enabled':'Disabled'}</td><td>{can('settings', 'edit') && <button disabled={m.key==='settings'} onClick={()=>toggle(m)}>{m.enabled?'Disable':'Enable'}</button>}</td></tr>)}</tbody></table>
   </div>;
 }
 
 export function DocumentImport(){
   return <div className="card"><h3>Document Master List Import</h3>
-    <p>Bulk import of SOPs, policies, forms, registers, logs and trackers now lives in the Documents module, where each uploaded file becomes a controlled document with its first version.</p>
-    <p className="muted">Open <strong>Documents &amp; Records → Bulk Import</strong> to upload multiple files at once, set a shared section, owner and review frequency, and auto-number their document codes.</p>
     <Link to="/documents"><button>Go to Documents</button></Link>
   </div>;
 }
@@ -1544,11 +1518,6 @@ export function BackupRestore(){
     {mayRestore && (
       <div className="card bk-restore">
         <div className="section-head"><h3><Upload size={15} /> Restore from a file</h3></div>
-        <p className="hint">
-          For a backup kept off this host — one you downloaded earlier, or fetched back from the hospital server, a USB
-          drive, or wherever else copies are sent. The current data is snapshotted first, so a restore from the wrong
-          file can itself be undone.
-        </p>
         <div className="bk-restore-row">
           <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
           {can('settings', 'approve') && <button onClick={restoreFromUpload} disabled={!!busy || !restoreFile}>
@@ -1564,7 +1533,6 @@ export function BackupRestore(){
           <div className="bk-reset-collapsed">
             <div>
               <strong>Factory reset</strong>
-              <p className="hint">Erase everything and return to first-time setup. Kept out of the way on purpose.</p>
             </div>
             <button type="button" className="secondary" onClick={() => setShowReset(true)}>Show</button>
           </div>
@@ -1573,10 +1541,6 @@ export function BackupRestore(){
             <div className="section-head"><h3 style={{ color: 'var(--danger)' }}><AlertTriangle size={15} /> Factory reset</h3>
               <button type="button" className="secondary tiny" onClick={() => { setShowReset(false); setResetConfirm(''); }}>Hide</button>
             </div>
-            <p className="hint">
-              Permanently erases <strong>all data</strong> — database, uploads, evidence and configuration — and returns the system
-              to first-time setup. A full backup is taken first and existing backups are kept, so this can be undone.
-            </p>
             <div className="bk-restore-row">
               <TextField type="text" value={resetConfirm} onValue={nextValue => setResetConfirm(nextValue)} placeholder="Type RESET to confirm" style={{ maxWidth: 220 }} />
               {can('settings', 'approve') && <button className="danger" onClick={factoryReset} disabled={!!busy || resetConfirm !== 'RESET'}>
@@ -1769,12 +1733,6 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
         </button>
       </div>
 
-      {!schedule.enabled && (
-        <p className="hint">
-          Manual backups are still a real safety net — but most laboratories that lose data lose it because nobody
-          remembered. Retention below still applies to the backups you take by hand.
-        </p>
-      )}
 
       {schedule.enabled && <>
         <div className="bk-presets">
@@ -1915,10 +1873,7 @@ function DestinationsCard({ status, kinds, readOnly, canSync, onChanged, onError
       </div>
 
       {destinations.length === 0 ? (
-        <p className="hint">
-          Every backup is on this computer only. If it is stolen, flooded or simply fails, so is the quality record.
-          Add somewhere else for copies to go — the hospital server needs nothing bought or installed.
-        </p>
+        <p className="hint">No destination yet — copies stay on this computer.</p>
       ) : (
         <ul className="bk-dest-list">
           {destinations.map(d => {
@@ -1992,7 +1947,6 @@ function DestinationsCard({ status, kinds, readOnly, canSync, onChanged, onError
           </div>
         </div>
       )}
-      {readOnly && destinations.length > 0 && <p className="hint">Only someone with approval rights on Settings can change these.</p>}
     </div>
   );
 }
@@ -2123,10 +2077,6 @@ function FolderCard({ status, readOnly, onChanged, onError }: {
           <label className="stack">Folder path
             <TextField value={value} onValue={nextValue => setValue(nextValue)}
               placeholder="D:\LIMS-Backups   or   /var/backups/lims   (blank for the default)" />
-            <span className="hint">
-              A folder on this computer or a drive attached to it. To copy backups onto the hospital server, leave this
-              alone and add it as a destination below instead — that way a copy exists in both places.
-            </span>
           </label>
           <div className="form-actions">
             {can('settings', 'approve') && <button disabled={!!busy} onClick={() => run('save', async () => {
@@ -2169,7 +2119,6 @@ function BackupList({ backups, location, busy, driveConnected, canRestore, canPr
         <div className="empty-state">
           <span className="es-ico"><Archive size={24} /></span>
           <h3>Nothing saved yet</h3>
-          <p>Take the first backup above, then turn the schedule on so it keeps happening.</p>
         </div>
       ) : (
         <table className="data-table bk-table">
@@ -2224,7 +2173,7 @@ export function Devices(){
     load();
   }
 
-  return <div className="card"><h3>Device Access / Pairing</h3><p>Foundation for future desktop LAN clients and mobile LAN clients. Only the host directly accesses SQLite.</p>
+  return <div className="card"><h3>Device Access / Pairing</h3>
     {can('settings', 'create') && <form className="form" onSubmit={submit}>
       <label>Device name<input name="name" required/></label>
       <label>Type<select name="type"><option>desktop</option><option>mobile</option></select></label>
@@ -2251,7 +2200,6 @@ export function PeopleAccess() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>People &amp; Access</h2>
-      <p>One place for everyone who works in the laboratory: register staff, maintain the Master Personnel Register (including its Excel import and export), manage login accounts and roles, the positions &amp; organogram, and who can do what.</p>
     </div>
     <div className="tabs">{PEOPLE_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
@@ -2335,7 +2283,6 @@ function EquipmentNumbering() {
 
   return <div className="card">
     <h3>Equipment identifier</h3>
-    <p>Define how each equipment's unique identifier is built. Add segments in order, choose a separator, and place the year wherever you like. The <strong>Sequence</strong> counter restarts at 1 each calendar year. Every new equipment gets the next identifier automatically; it can still be overridden on an individual equipment profile.</p>
     {error && <Notice kind="error">{error}</Notice>}
     {success && <Notice kind="success">{success}</Notice>}
 
@@ -2526,11 +2473,6 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
       <div className="reg-head">
         <div className="reg-head-text">
           <h3>Core laboratory documents</h3>
-          <p className="muted">
-            The documents an assessor asks for first. Each one points at a controlled document already in
-            Documents &amp; Records, so it keeps its owner, review schedule, versions and attestations —
-            and opening it here opens the document itself.
-          </p>
         </div>
         <div className="reg-head-actions">
           <button type="button" className="secondary" onClick={() => { setAdding(true); setNewSlot({ label: '', description: '' }); }}>
@@ -2584,7 +2526,6 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
 
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Quality manual summary</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Scope, structure and references of the quality manual — shown on the laboratory profile.</p>
       <label className="form"><TextField as="textarea" value={qualityManualSummary} onValue={nextValue => onSummaryChange(nextValue)} rows={3} /></label>
       <div style={{ marginTop: 8 }}><button type="button" onClick={onSaveSummary}>Save summary</button></div>
     </div>
@@ -2636,10 +2577,6 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
         </button>}
       </>}
     >
-      <p className="dialog-lead muted">
-        A place for a document this laboratory treats as foundational — an ethics policy, a biobank manual,
-        a service-level agreement. You then point it at a document in the register.
-      </p>
       <div className="form-grid">
         <label className="wide">Name<TextField value={newSlot.label} onValue={nextValue => setNewSlot({ ...newSlot, label: nextValue })} placeholder="e.g. Ethics Policy" /></label>
         <label className="wide">What it is <span className="muted">(optional)</span><TextField value={newSlot.description} onValue={nextValue => setNewSlot({ ...newSlot, description: nextValue })} /></label>
@@ -2754,7 +2691,6 @@ function LabLogo() {
 
   return <div className="card">
     <h3>Laboratory logo</h3>
-    <p>Upload your laboratory / hospital logo. It appears on the masthead of printed <strong>duty rosters</strong>, <strong>bench schedules</strong> and other documents so they match your official forms. Use a square or landscape PNG/JPG with a transparent or white background.</p>
     {error && <Notice kind="error">{error}</Notice>}
     <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
       <div style={{ width: 120, height: 120, border: '1px dashed #bbb', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa', overflow: 'hidden' }}>
@@ -2854,7 +2790,6 @@ export function MyLaboratory() {
   return <div>
     <div className="card" style={{ marginBottom: 16 }}>
       <h3>My Laboratory</h3>
-      <p>Register and configure your laboratory here. Everything on this page is the single source of truth for the laboratory's legal identity, quality manual, quality policy and objectives — these are shown read-only elsewhere in the system and can only be changed here.</p>
       <div className="tabs">{LAB_TABS.map(t => <button key={t} type="button" className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
@@ -2864,7 +2799,6 @@ export function MyLaboratory() {
     {tab === 'Identity & Legal' && <div className="grid cols-2">
       <div className="card">
         <h3>Identity &amp; legal status</h3>
-        <p>Your laboratory's legal identity and accreditation details, so the software can be used by any facility.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
           <fieldset className="reg-section"><legend>Identity</legend>
             <div className="form-grid">
@@ -2900,7 +2834,6 @@ export function MyLaboratory() {
         <LabLogo />
         <div className="card">
           <h3>Legal identity documents</h3>
-          <p>Upload documentation that establishes the laboratory's legal identity — certificates, licences, registrations.</p>
           <LabDocuments category="legal_identity" docTypes={['Operating licence', 'Certificate of incorporation', 'Business registration', 'Tax registration', 'Ownership / governance', 'Other']} />
         </div>
       </div>
@@ -2908,7 +2841,6 @@ export function MyLaboratory() {
 
     {tab === 'Mission & Vision' && <div className="card">
       <h3>Mission &amp; vision</h3>
-      <p>The laboratory's mission and vision statements. These appear on the Laboratory Profile in Organisation &amp; Leadership.</p>
       {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
         <label>Mission<TextField as="textarea" rows={3} value={form.mission} onValue={nextValue => setForm({ ...form, mission: nextValue })} placeholder="Why the laboratory exists and who it serves." /></label>
         <label>Vision<TextField as="textarea" rows={3} value={form.vision} onValue={nextValue => setForm({ ...form, vision: nextValue })} placeholder="What the laboratory aspires to become." /></label>
@@ -2922,17 +2854,15 @@ export function MyLaboratory() {
     {tab === 'Quality Policy & Objectives' && <div className="grid cols-2">
       <div className="card">
         <h3>Quality policy</h3>
-        <p>The laboratory's overarching quality policy statement, established to fulfil the requirements of ISO 15189:2022.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
           <label>Quality policy statement<TextField as="textarea" rows={6} value={form.qualityPolicy} onValue={nextValue => setForm({ ...form, qualityPolicy: nextValue })} placeholder="Management's commitment to quality, good professional practice, and continual improvement…" /></label>
           <button type="submit">Save quality policy</button>
         </form>}
         <h4 style={{ marginTop: 18 }}>Supporting policies</h4>
-        <p className="hint">Add specific policies that support the quality policy.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={addPolicy}>
           <label>Title<TextField value={policyForm.title} onValue={nextValue => setPolicyForm({ ...policyForm, title: nextValue })} required /></label>
           <label>Policy statement<TextField as="textarea" value={policyForm.policyStatement} onValue={nextValue => setPolicyForm({ ...policyForm, policyStatement: nextValue })} required /></label>
-          <label>ISO 15189:2022 relationship (optional)<TextField value={policyForm.referenceNote} onValue={nextValue => setPolicyForm({ ...policyForm, referenceNote: nextValue })} placeholder="How this policy relates to the standard" /></label>
+          <label>Reference note (optional)<TextField value={policyForm.referenceNote} onValue={nextValue => setPolicyForm({ ...policyForm, referenceNote: nextValue })} /></label>
           <button>Add policy</button>
         </form>}
         <table className="data-table"><thead><tr><th>Title</th><th>Statement</th><th></th></tr></thead><tbody>
@@ -2942,7 +2872,6 @@ export function MyLaboratory() {
       </div>
       <div className="card">
         <h3>Standing quality objectives</h3>
-        <p>Continuous quality objectives, in relation to ISO 15189:2022. Year-specific targets are set under <strong>Annual Objectives</strong>.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={addObjective}>
           <label>Objective<TextField as="textarea" value={objForm.objective} onValue={nextValue => setObjForm({ ...objForm, objective: nextValue })} required /></label>
           <div className="form-grid">
@@ -2950,7 +2879,7 @@ export function MyLaboratory() {
             <label>Measure / indicator<TextField value={objForm.measure} onValue={nextValue => setObjForm({ ...objForm, measure: nextValue })} /></label>
             <label>Responsible<select value={objForm.responsibleStaffId} onChange={e => setObjForm({ ...objForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           </div>
-          <label>ISO 15189:2022 relationship (optional)<TextField value={objForm.referenceNote} onValue={nextValue => setObjForm({ ...objForm, referenceNote: nextValue })} /></label>
+          <label>Reference note (optional)<TextField value={objForm.referenceNote} onValue={nextValue => setObjForm({ ...objForm, referenceNote: nextValue })} /></label>
           <button>Add objective</button>
         </form>}
         <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th></th></tr></thead><tbody>
@@ -2962,7 +2891,6 @@ export function MyLaboratory() {
 
     {tab === 'Annual Objectives' && <div className="card">
       <h3>Annual quality objectives</h3>
-      <p>Set measurable objectives for each year. The laboratory is expected to establish objectives every year.</p>
       {can('settings', 'edit') && <form className="form" onSubmit={addAnnual}>
         <div className="form-grid">
           <label>Year<input type="number" min={2000} max={2100} value={annualForm.year} onChange={e => setAnnualForm({ ...annualForm, year: e.target.value })} required /></label>
@@ -2985,7 +2913,6 @@ export function MyLaboratory() {
 
     {tab === 'Departments' && <div className="card">
       <h3>Departments</h3>
-      <p>Top-level departments. Sections/units (configured under Section/Unit Configuration) belong to a department.</p>
       {can('settings', 'create') && <form className="form" onSubmit={addDepartment}>
         <label>New department<input name="name" required placeholder="e.g. Laboratory, Pathology" /></label>
         <button>Add department</button>
@@ -3067,13 +2994,11 @@ export function RemoteStaffAccess() {
 
   if (configured === null) return <div className="card"><h3>Remote Staff Access</h3><p className="muted">Loading…</p></div>;
   if (!configured) return <div className="card"><h3>Remote Staff Access</h3>
-    <p className="hint">The cloud is not configured on this Host. Set <code>SECH_LIMS_CLOUD_URL</code> (and enable Hybrid mode / sync) to provision remote staff portal accounts. See <code>docs/CLOUD_SYNC.md</code>.</p>
   </div>;
 
   return <div>
     <div className="card">
       <h3>Provision remote access</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Create a cloud portal account for a staff member. They sign in at the portal with this email and the temporary password, then set their own. Remote permissions are always a subset of their Host permissions.</p>
       {can('settings', 'edit') && <form className="form" onSubmit={provision}>
         <label>Staff member
           <select value={form.staffId} onChange={e => pickStaff(e.target.value)} required>
@@ -3081,7 +3006,6 @@ export function RemoteStaffAccess() {
             {staff.filter(s => s.isActive).map(s => <option key={s.id} value={s.id}>{s.fullName}{s.username ? '' : ' — no login (limited)'}</option>)}
           </select>
         </label>
-        {selectedStaff && !selectedStaff.username && <p className="hint">This staff member has no Host login, so they can sign in but will have no module permissions until a login/role is assigned.</p>}
         <label>Portal email<TextField type="email" value={form.email} onValue={nextValue => setForm(f => ({ ...f, email: nextValue }))} required /></label>
         <label>Role label (optional)<TextField value={form.role} onValue={nextValue => setForm(f => ({ ...f, role: nextValue }))} /></label>
         <label>Temporary password
@@ -3130,7 +3054,6 @@ export function SystemSettings() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>System</h2>
-      <p>System-level configuration for this laboratory's deployment: enabled modules, backups, and LAN device access.</p>
     </div>
     <div className="tabs">{SYSTEM_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
@@ -3151,13 +3074,11 @@ function SystemOverview() {
   useEffect(() => { api<SystemModule[]>('/system-modules').then(setModules).catch(() => setModules([])); }, []);
   const enabled = modules.filter(m => m.enabled).length;
   return <div>
-    <p>This is a multi-laboratory quality management system — each facility configures its own <Link to="/settings/laboratory">My Laboratory</Link> profile, <Link to="/settings/people">People &amp; Access</Link>, and <Link to="/settings/sections">units</Link>.</p>
     <div className="cards">
       <div className="card mini"><h4>Modules enabled</h4><p className="metric">{enabled}/{modules.length}</p></div>
       <div className="card mini"><h4>Product</h4><p>SECH_LIMS by Nickland</p></div>
       <div className="card mini"><h4>Data</h4><p>Local SQLite host</p></div>
     </div>
-    <p className="hint">Use the tabs above to enable/disable modules, run backups, and manage LAN device pairing.</p>
   </div>;
 }
 
@@ -3192,7 +3113,6 @@ function QualityWorkflowSettings() {
   return <div>
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Nonconformity &amp; incident workflow</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Nonconformities and incidents follow the same staged lifecycle: <strong>Log → Risk assessment → (root cause, where the risk warrants it) → CAPA → Closure</strong>. Everyone can log an event; risk assessment and follow-up are done by staff with reviewer permissions.</p>
       {error && <Notice kind="error">{error}</Notice>}
       {msg && <Notice kind="success">{msg}</Notice>}
       {!cfg ? <p className="muted">Loading…</p> : <>
@@ -3200,13 +3120,11 @@ function QualityWorkflowSettings() {
           <input type="checkbox" checked={cfg.remedialActionEnabled} disabled={busy} onChange={e => save({ remedialActionEnabled: e.target.checked })} />
           Capture a separate “remedial action” (short-term correction) field when logging events
         </label>
-        <p className="hint" style={{ marginTop: 6 }}>Turn this off if your standard only requires the immediate action and the corrective action. When off, the remedial-action field is hidden from the log form and record view.</p>
       </>}
     </div>
 
     {cfg && <div className="card">
       <h3 style={{ marginTop: 0 }}>Automatic escalation</h3>
-      <p className="muted" style={{ marginTop: 0 }}>ISO 22367 asks that the depth of investigation be proportionate to risk, and ISO 15189 §7.5/§8.7 that events affecting patients are acted on however unlikely they are. These rules apply the moment a risk assessment is saved.</p>
       <div className="form-grid">
         <label>Escalate automatically at
           <select value={cfg.autoEscalateRiskLevel} disabled={busy} onChange={e => save({ autoEscalateRiskLevel: e.target.value as QualityWorkflowCfg['autoEscalateRiskLevel'] })}>
@@ -3217,7 +3135,6 @@ function QualityWorkflowSettings() {
           </select>
         </label>
       </div>
-      <p className="hint" style={{ marginTop: 6 }}>An escalated event is sent to root-cause analysis and corrective action automatically; the assessor cannot skip the investigation.</p>
 
       <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
         <input type="checkbox" checked={cfg.autoEscalatePatientSafety} disabled={busy} onChange={e => save({ autoEscalatePatientSafety: e.target.checked })} />
@@ -3227,7 +3144,6 @@ function QualityWorkflowSettings() {
         <input type="checkbox" checked={cfg.autoCreateCapaOnEscalation} disabled={busy} onChange={e => save({ autoCreateCapaOnEscalation: e.target.checked })} />
         Raise the CAPA record automatically when an event escalates
       </label>
-      <p className="hint" style={{ marginTop: 6 }}>With this on, an escalated event never sits unattended between assessment and CAPA planning — the CAPA appears in the register straight away, waiting for its action plan.</p>
     </div>}
 
     {cfg && <div className="card">
@@ -3302,12 +3218,6 @@ function RemoteAccessCard({ info }: { info: SystemConnectivity }) {
               </button>
             </div>
           )}
-          {ts?.installed && ts.running && (
-            <p className="hint">
-              Run it once, in a Command Prompt on this computer. Tailscale remembers it, so the laboratory comes
-              back reachable after a restart without anybody doing anything.
-            </p>
-          )}
         </>
       )}
 
@@ -3379,7 +3289,6 @@ export function ConnectivityMode() {
   return <div>
     <div className="card">
       <h3>Deployment mode</h3>
-      <p>Choose how this host operates. Both modes run the full laboratory offline — instruments, environmental monitoring, printers and workflows are never affected by connectivity.</p>
       <div className="tabs" style={{ marginTop: 8 }}>
         <button disabled={!canEdit || busy} className={info.mode === 'local' ? 'active' : ''} onClick={() => setMode('local')}>Local Mode</button>
         <button disabled={!canEdit || busy} className={info.mode === 'hybrid' ? 'active' : ''} onClick={() => setMode('hybrid')}>Hybrid Mode</button>
@@ -3389,7 +3298,6 @@ export function ConnectivityMode() {
         ({info.modeSource === 'override' ? 'set here' : `default from environment (${info.envDefaultMode})`}).
         {' '}<em>Local</em> = single-PC offline. <em>Hybrid</em> = LAN clients now, secure remote access later.
       </p>
-      {!canEdit && <p className="muted">Only a System Administrator or Laboratory Manager can change the mode.</p>}
       {message && <Notice kind="success">{message}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
     </div>
@@ -3413,12 +3321,6 @@ export function ConnectivityMode() {
         <button className="primary" disabled={!canEdit || busy} onClick={() => void forceResync()}>
           {busy ? 'Re-syncing…' : 'Force full re-sync to cloud'}
         </button>
-        <p className="hint" style={{ marginTop: 6, maxWidth: 640 }}>
-          Re-uploads every existing record (staff, documents, equipment, monitoring, inventory and more)
-          to the configured cloud database. Safe to run repeatedly. Use this after connecting the host to a
-          new cloud database so the remote portal shows your full registers, not just recent changes.
-        </p>
-        {!canEdit && <p className="muted">Only a System Administrator or Laboratory Manager can run a re-sync.</p>}
       </div>}
     </div>
   </div>;
@@ -3456,7 +3358,6 @@ export function RosterSettings() {
   return <div>
     <div className="card">
       <h3>Roster &amp; Scheduling — Shift Types</h3>
-      <p>These shift codes drive the department <strong>Duty Roster</strong> grid and its legend. Not every laboratory practises every shift — deactivate the ones you do not use, and add your own. Colours are used to fill the roster cells and print exactly as shown here. (Leave types such as Annual/Part/Study Leave and Leave Without Pay merge into a labelled bar on the printed roster.)</p>
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
       <table className="data-table"><thead><tr><th>Order</th><th>Code</th><th>Label</th><th>Category</th><th>Preview</th><th>Colours</th><th>Active</th><th></th></tr></thead><tbody>

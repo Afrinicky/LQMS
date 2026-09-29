@@ -170,7 +170,6 @@ function DeclarationTask({ declaration, onClose }: { declaration: MyDeclaration;
           ? <div className="pd-doc">{d.body_content}</div>
           : (
             <div className="pd-fileonly">
-              <p>This declaration was issued as a form. Download it, sign it, then attach the signed copy below.</p>
               {d.file_id && (
                 <button type="button" className="secondary" onClick={() => downloadFileById(d.file_id!, d.file_name || `${d.form_number || 'declaration'}.pdf`).catch(e => setProblem((e as Error).message))}>
                   <Download size={14} /> Download the form
@@ -310,9 +309,6 @@ function ActionTask({ target, onClose }: {
             <TextField as="textarea" value={notes} onValue={nextValue => setNotes(nextValue)} rows={4}
               placeholder="What you did, what you found, anything the person who raised it needs to know." />
           </label>
-          <p className="pd-hint">
-            Verifying and closing an action belong to whoever raised it — your update tells them it is ready.
-          </p>
         </div>
 
         {problem && <p className="pd-error"><AlertTriangle size={14} /> {problem}</p>}
