@@ -82,7 +82,7 @@ export type PermissionMap = Record<string, string[]>;
  */
 export type LedUnit = { id: number; name: string; acting: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
-export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null };
+export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; isCore?: number; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null };
 
 /**
  * ACCESS CONTROL — one model, two layers.
@@ -151,6 +151,24 @@ export type OrgTreeNode = {
   unitHead?: boolean; roleType: string; isActive: number; children: OrgTreeNode[];
 };
 export type OrgTree = { roots: OrgTreeNode[] };
+/** One person holding a post, as the chart names them. */
+export type OrgHolder = { staffId: number; name: string; availability?: string | null; rank?: string | null };
+export type OrgChartRole = {
+  positionId: number; title: string; holders: OrgHolder[]; deputies: OrgHolder[];
+  roleType: 'management' | 'quality' | 'technical' | 'support';
+};
+export type OrgChartUnit = OrgChartRole & {
+  sectionId: number | null; sectionName: string | null;
+  cadres: Array<{ label: string; staff: OrgHolder[] }>;
+};
+/** The laboratory's chart: manager, deputy, appointed officers, units. */
+export type OrgChartModel = {
+  facility: string;
+  manager: OrgChartRole | null;
+  deputy: OrgChartRole | null;
+  officers: OrgChartRole[];
+  units: OrgChartUnit[];
+};
 export type StaffOrientation = {
   id: number; staff_id: number; staff_name?: string; employee_no?: string | null; section_name?: string | null;
   hire_date?: string; orientation_start?: string;

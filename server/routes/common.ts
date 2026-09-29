@@ -13,6 +13,7 @@ import { requirePermission, viewableModulesOf } from '../middleware/permissions.
 import { resolvePermission, explainUserAccess } from '../services/permissionResolver.js';
 import { trainingFileFor } from '../services/trainingRecord.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
+import { isCorePositionTitle } from '../../shared/constants/modules.js';
 import { isTimeLimited } from '../../shared/constants/personnel.js';
 import { runPlacementTick } from '../services/placementLifecycle.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
@@ -968,12 +969,14 @@ export function commonRoutes() {
     next();
   };
 
-  router.get('/positions', canReadOrganogram, (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
+  router.get('/positions', canReadOrganogram, (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, is_core isCore, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
   router.post('/positions', requirePermission('settings', 'create'), (req, res) => {
     const { title, description, reportsToPositionId } = req.body;
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'A position title is required.' });
     try {
-      const result = getDb().prepare('INSERT INTO positions (title, description, reports_to_position_id, is_active) VALUES (?, ?, ?, 1)').run(String(title).trim(), description ?? null, idOrNull(reportsToPositionId));
+      // A new post is classified from its title unless the form says otherwise.
+      const core = req.body.isCore === undefined ? (isCorePositionTitle(String(title)) ? 1 : 0) : (req.body.isCore ? 1 : 0);
+      const result = getDb().prepare('INSERT INTO positions (title, description, reports_to_position_id, is_active, is_core) VALUES (?, ?, ?, 1, ?)').run(String(title).trim(), description ?? null, idOrNull(reportsToPositionId), core);
       audit(req, { action: 'create', entity: 'positions', entityId: result.lastInsertRowid, newValue: req.body });
       res.status(201).json({ id: result.lastInsertRowid });
     } catch (err) {
@@ -991,10 +994,11 @@ export function commonRoutes() {
     const description = req.body.description !== undefined ? (req.body.description || null) : oldValue.description;
     const reportsTo = req.body.reportsToPositionId !== undefined ? idOrNull(req.body.reportsToPositionId) : oldValue.reports_to_position_id;
     const isActive = req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : oldValue.is_active;
+    const isCore = req.body.isCore !== undefined ? (req.body.isCore ? 1 : 0) : oldValue.is_core;
     if (idOrNull(reportsTo) === Number(req.params.id)) return res.status(400).json({ error: 'A position cannot report to itself.' });
     try {
-      db.prepare('UPDATE positions SET title = ?, description = ?, reports_to_position_id = ?, is_active = ?, archived_at = CASE WHEN ? = 0 THEN COALESCE(archived_at, CURRENT_TIMESTAMP) ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(title, description, reportsTo, isActive, isActive, req.params.id);
+      db.prepare('UPDATE positions SET title = ?, description = ?, reports_to_position_id = ?, is_active = ?, is_core = ?, archived_at = CASE WHEN ? = 0 THEN COALESCE(archived_at, CURRENT_TIMESTAMP) ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(title, description, reportsTo, isActive, isCore, isActive, req.params.id);
       audit(req, { action: 'edit', entity: 'positions', entityId: req.params.id, oldValue, newValue: req.body });
       res.json({ ok: true });
     } catch (err) {
@@ -1145,12 +1149,103 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
+  // ---------------------------------------------------------------------
+  // The laboratory's organisational chart, as the laboratory draws it.
+  // ---------------------------------------------------------------------
+  // The chart is not a free-form graph: it is the manager, his deputy, the
+  // appointed officers beside them, the unit supervisors across the width of
+  // the sheet, and each unit's staff grouped by cadre beneath its supervisor.
+  // Returning that shape here keeps one reading of the structure — the printed
+  // sheet, the screen and the widescreen view all draw the same model.
+  router.get('/organogram/chart', canReadOrganogram, (_req, res) => {
+    const db = getDb();
+    const positions = db.prepare('SELECT id, title, is_active AS isActive, is_core AS isCore FROM positions WHERE is_active = 1').all() as any[];
+    const occ = db.prepare(`SELECT spa.position_id AS pid, spa.staff_id AS sid, s.full_name AS name, spa.assignment_type AS type,
+      s.availability_status AS availability
+      FROM staff_position_assignments spa JOIN staff s ON s.id = spa.staff_id
+      WHERE spa.is_active = 1 AND s.is_active = 1`).all() as any[];
+    const sections = db.prepare('SELECT id, name FROM sections WHERE is_active = 1 OR is_active IS NULL').all() as Array<{ id: number; name: string }>;
+    const ranks = db.prepare('SELECT name, sort_order FROM professional_ranks WHERE is_active = 1 ORDER BY sort_order').all() as Array<{ name: string; sort_order: number }>;
+    const staff = db.prepare(`SELECT id, full_name AS name, section_id AS sectionId, designation, job_title AS jobTitle,
+      cadre, professional_rank, availability_status AS availability FROM staff WHERE is_active = 1`).all() as any[];
+    const profile = db.prepare('SELECT facility_name FROM laboratory_profile WHERE id = 1').get() as { facility_name?: string } | undefined;
+
+    // A person may hold several posts, so a post carries every holder it has.
+    const holdersOf = (pid: number) => occ.filter(o => o.pid === pid && o.type !== 'deputy')
+      .map(o => ({ staffId: o.sid, name: o.name, availability: o.availability || 'available' }));
+    const deputiesOf = (pid: number) => occ.filter(o => o.pid === pid && o.type === 'deputy')
+      .map(o => ({ staffId: o.sid, name: o.name, availability: o.availability || 'available' }));
+
+    const isUnitHead = (t: string) => /unit supervisor|unit head|head of|head,|hod\b|section supervisor/i.test(t);
+    const isManager = (t: string) => /^(the\s*)?(laboratory|lab)\s*(manager|director)$/i.test(t.trim());
+    const isDeputyManager = (t: string) => /^(deputy|dep(t|uty)?\.?)\s*(laboratory|lab)\s*(manager|director)$/i.test(t.trim());
+
+    const roleOf = (p: any) => ({
+      positionId: p.id, title: p.title, holders: holdersOf(p.id), deputies: deputiesOf(p.id),
+      roleType: /quality/i.test(p.title) ? 'quality'
+        : isManager(p.title) || isDeputyManager(p.title) ? 'management'
+        : isUnitHead(p.title) ? 'technical' : 'support',
+    });
+
+    // The administrator account is a software role, not a post the laboratory
+    // appoints, so it is not drawn on the chart.
+    const core = positions.filter(p => p.isCore && !/^system\s*admin/i.test(p.title));
+    const manager = core.find(p => isManager(p.title));
+    const deputy = core.find(p => isDeputyManager(p.title));
+    const unitHeads = core.filter(p => isUnitHead(p.title)).sort((a, b) => a.title.localeCompare(b.title));
+    // The officers read in the order the laboratory names them: quality first,
+    // then safety, customer service and data, then anything else it appoints.
+    const OFFICER_ORDER = [/quality/i, /safety/i, /customer/i, /data/i];
+    const officerRank = (t: string) => {
+      const i = OFFICER_ORDER.findIndex(rx => rx.test(t));
+      return i === -1 ? OFFICER_ORDER.length : i;
+    };
+    const officers = core.filter(p => p !== manager && p !== deputy && !isUnitHead(p.title))
+      .sort((a, b) => officerRank(a.title) - officerRank(b.title) || a.title.localeCompare(b.title));
+
+    // Each unit's staff, grouped into the three cadres the chart carries.
+    const CADRE_ROWS: Array<{ key: string; label: string }> = [
+      { key: 'Scientist', label: 'Biomedical Scientist' },
+      { key: 'Technician', label: 'Technical Officer' },
+      { key: 'Assistant', label: 'Laboratory Assistant' },
+    ];
+    const units = unitHeads.map(p => {
+      const sectionId = sectionForUnitHead(p.title, sections);
+      const headIds = new Set([...holdersOf(p.id), ...deputiesOf(p.id)].map(h => h.staffId));
+      const members = staff.filter(s => s.sectionId === sectionId && !headIds.has(s.id))
+        .map(s => ({ ...s, cadreKey: deriveCadre(s.cadre, s.designation, s.jobTitle), _rank: rankOrderFor(s, ranks) }))
+        .sort((a, b) => a._rank - b._rank || String(a.name).localeCompare(b.name));
+      return {
+        ...roleOf(p),
+        sectionId, sectionName: sections.find(s => s.id === sectionId)?.name ?? null,
+        cadres: CADRE_ROWS.map(row => ({
+          label: row.label,
+          staff: members.filter(m => m.cadreKey === row.key)
+            .map(m => ({ staffId: m.id, name: m.name, rank: cleanVal(m.professional_rank) || null, availability: m.availability || 'available' })),
+        })).concat([{
+          label: 'Other staff',
+          staff: members.filter(m => !CADRE_ROWS.some(r => r.key === m.cadreKey))
+            .map(m => ({ staffId: m.id, name: m.name, rank: cleanVal(m.professional_rank) || null, availability: m.availability || 'available' })),
+        }]).filter(r => r.staff.length > 0),
+      };
+    });
+
+    res.json({
+      facility: profile?.facility_name || 'Laboratory',
+      manager: manager ? roleOf(manager) : null,
+      deputy: deputy ? roleOf(deputy) : null,
+      officers: officers.map(roleOf),
+      units,
+    });
+  });
+
   // Apply a standard medical-laboratory reporting structure to existing positions by
   // recognised title, without overwriting reporting lines that are already set. This
   // gives an instant, sensible organogram that the user can then fine-tune.
   router.post('/organogram/apply-standard', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
     const structure: Record<string, string> = {
+      'Deputy Laboratory Manager': 'Laboratory Manager',
       'Quality Manager': 'Laboratory Manager',
       'Safety Manager': 'Laboratory Manager',
       'Customer Service Officer': 'Laboratory Manager',

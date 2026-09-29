@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
+import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS, isCorePositionTitle } from '../../shared/constants/modules.js';
 import { FEATURES, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
 import { getDb } from './database.js';
 import { config } from '../config/index.js';
@@ -14,6 +14,7 @@ export function seedDefaults() {
     const rolesToSeed = [
       { name: 'System Administrator', description: 'Full foundation administration role.' },
       { name: 'Laboratory Manager', description: 'Lab leadership role for oversight of quality and operations.' },
+      { name: 'Deputy Laboratory Manager', description: 'Acts for the Laboratory Manager and shares the running of the laboratory.' },
       { name: 'Quality Manager', description: 'Lead quality assurance, corrective action, and review workflows.' },
       { name: 'Quality Team Member', description: 'Operational QMS user for investigations, CAPA, and action follow-up.' },
       { name: 'Unit Supervisor', description: 'Runs a unit of the laboratory: its people, its equipment, its technical quality.' },
@@ -55,7 +56,11 @@ export function seedDefaults() {
       }
     }
     for (const title of DEFAULT_POSITIONS) {
-      db.prepare('INSERT OR IGNORE INTO positions (title, description, is_active) VALUES (?, ?, 1)').run(title, 'Default organogram position. Assign staff during setup or later.');
+      const core = isCorePositionTitle(title) ? 1 : 0;
+      db.prepare('INSERT OR IGNORE INTO positions (title, description, is_active, is_core) VALUES (?, ?, 1, ?)').run(title, 'Default organogram position. Assign staff during setup or later.', core);
+      // A default position the laboratory has never edited follows the default
+      // classification; one it has edited keeps whatever it chose.
+      if (core) db.prepare('UPDATE positions SET is_core = 1 WHERE title = ? AND is_core = 0 AND updated_at IS NULL').run(title);
     }
     db.prepare('INSERT OR IGNORE INTO departments (name) VALUES (?)').run('Laboratory');
     const labDept = db.prepare('SELECT id FROM departments WHERE name = ?').get('Laboratory') as { id: number };
@@ -414,6 +419,55 @@ export function seedDefaults() {
         ],
       },
 
+      // ---- Deputy Laboratory Manager ---------------------------------------
+      // Acts for the manager, so the day-to-day running of the laboratory is
+      // the same. The two things that stay with the manager himself are the
+      // budget and the correction of the stock ledger, which he reads here.
+      'Deputy Laboratory Manager': {
+        full: [
+          'personnel.register', 'personnel.orientation', 'personnel.declarations',
+          'personnel.training', 'personnel.appraisals', 'personnel.authorizations',
+          'personnel.rosters', 'personnel.activities', 'personnel.reports',
+          'nc_capa', 'complaints', 'risks', 'actions', 'assessments',
+          'quality_indicators', 'continual_improvement', 'management_review',
+          'meetings', 'monthly_reports', 'iqc', 'eqa', 'verification_validation',
+          'measurement_uncertainty', 'poct', 'blood_bank_handover',
+          'documents.library', 'documents.authoring', 'documents.workflow',
+          'documents.records', 'documents.masterlist', 'documents.archive',
+          'organisation.structure', 'organisation.quality_config',
+          'organisation.records_review', 'organisation.licences',
+          'customer_focus.feedback', 'customer_focus.surveys', 'customer_focus.communication',
+          'customer_focus.advisory', 'customer_focus.stakeholders', 'customer_focus.imports',
+          'customer_focus.reports',
+          'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
+          'records_reports.audit', 'records_reports.retention',
+          'notifications.calendar', 'notifications.rules',
+          'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
+        ],
+        manage: [
+          'equipment.register', 'equipment.maintenance', 'equipment.verification',
+          'equipment.training', 'equipment.files', 'equipment.adverse', 'equipment.reports',
+          'supplier_inventory.stock', 'supplier_inventory.suppliers',
+          'supplier_inventory.storage', 'supplier_inventory.labels', 'supplier_inventory.reports',
+          'process_management.receipt', 'process_management.directory',
+          'process_management.rejections', 'process_management.intervals',
+          'process_management.critical', 'process_management.referrals',
+          'process_management.amendments', 'process_management.reviews',
+          'information_management.assets', 'information_management.data',
+          'information_management.downtime', 'information_management.reports',
+          'monitoring.readings', 'monitoring.assets', 'monitoring.reports',
+          'facilities_safety.incidents', 'facilities_safety.equipment',
+          'facilities_safety.inspections', 'facilities_safety.waste',
+          'facilities_safety.environment',
+        ],
+        view: [
+          'organisation.budget',
+          'information_management.access', 'information_management.security',
+          'information_management.change', 'information_management.reviews',
+          'facilities_safety.health', 'monitoring.settings',
+        ],
+      },
+
       // Owns safety and occupational health outright. The laboratory's
       // equipment register is not a safety record — safety equipment has its
       // own feature — so it is not granted here.
@@ -561,16 +615,18 @@ export function seedDefaults() {
     const ROUTINE_TECHNICAL_ROLES = [
       'Biomedical Scientist', 'Unit Supervisor', 'Blood Bank Unit Supervisor', 'POCT Officer',
       'Safety Manager', 'Quality Team Member', 'Quality Manager', 'Laboratory Manager',
+      'Deputy Laboratory Manager',
     ];
     const ROUTINE_SUPERVISORY_ROLES = [
       'Unit Supervisor', 'Blood Bank Unit Supervisor', 'Safety Manager', 'Quality Manager', 'Laboratory Manager',
+      'Deputy Laboratory Manager',
     ];
     // Reading what the whole unit was due to do, and what was actually done.
     // Auditing the programme is not performing it, so the Internal Auditor is
     // here and in neither list above.
     const ROUTINE_OVERSIGHT_ROLES = [
       'Unit Supervisor', 'Blood Bank Unit Supervisor', 'Safety Manager', 'Quality Team Member',
-      'Quality Manager', 'Laboratory Manager', 'Internal Auditor',
+      'Quality Manager', 'Laboratory Manager', 'Deputy Laboratory Manager', 'Internal Auditor',
     ];
     const addRoutine = (roleNames: string[], key: string, level: AccessLevel) => {
       for (const roleName of roleNames) {
@@ -593,7 +649,7 @@ export function seedDefaults() {
     // blocks, so "who can see the laboratory's overview" stays a single visible
     // decision. The System Administrator holds everything and is not listed.
     const MAIN_DASHBOARD_ROLES = [
-      'Laboratory Manager', 'Quality Manager', 'Unit Supervisor', 'Blood Bank Unit Supervisor',
+      'Laboratory Manager', 'Deputy Laboratory Manager', 'Quality Manager', 'Unit Supervisor', 'Blood Bank Unit Supervisor',
     ];
     for (const roleName of MAIN_DASHBOARD_ROLES) {
       const role = ROLE_ACCESS[roleName];
@@ -703,6 +759,7 @@ export function seedDefaults() {
     const POSITION_PROFILE_DEFAULTS: Array<{ match: RegExp; profile: string }> = [
       { match: /^system\s*admin/, profile: 'System Administrator' },
       { match: /^(laboratory|lab)\s*manager$/, profile: 'Laboratory Manager' },
+      { match: /^(deputy|dep(t|uty)?\.?)\s*(laboratory|lab)\s*manager$/, profile: 'Deputy Laboratory Manager' },
       { match: /^quality\s*manager$/, profile: 'Quality Manager' },
       { match: /^quality\s*(team\s*member|officer)$/, profile: 'Quality Team Member' },
       { match: /^safety\s*manager$/, profile: 'Safety Manager' },

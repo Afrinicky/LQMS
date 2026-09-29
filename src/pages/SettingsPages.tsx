@@ -20,7 +20,7 @@ import type { ConfigOption } from '../../shared/constants/configLists';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { DetailModal, NumberField } from '../components/ui';
-import { OrgCard, OrgChartBoard } from '../components/ui/OrgChart';
+import { OrgChartBoard } from '../components/ui/OrgChart';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
@@ -33,7 +33,7 @@ import type {
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
   SectionConfigRow, SectionConfigDetail, SectionTestRow,
-  LaboratoryDocument, QualityPolicy, QualityObjective, LaboratoryConfig,
+  LaboratoryDocument, QualityPolicy, QualityObjective, OrgChartModel,
   EquipmentPattern, EquipmentSegment,
   SystemConnectivity, AppMode, SyncStatus, SyncResult, RemoteCloudUser,
 } from '../../shared/types/api';
@@ -370,7 +370,7 @@ export function Positions(){
   const [sections,setSections]=useState<Section[]>([]);
   const [error,setError]=useState<string|null>(null);
   const [editing,setEditing]=useState<Position | null>(null);
-  const [editForm,setEditForm]=useState({ title:'', reportsToPositionId:'', isActive:true });
+  const [editForm,setEditForm]=useState({ title:'', reportsToPositionId:'', isActive:true, isCore:false });
   const load=()=>{api<Position[]>('/positions').then(setPositions); api<Staff[]>('/staff').then(setStaff).catch(()=>setStaff([])); api<Section[]>('/sections').then(setSections).catch(()=>setSections([]))};
   useEffect(()=>{void load()},[]);
 
@@ -378,7 +378,7 @@ export function Positions(){
     e.preventDefault(); setError(null);
     const fd=new FormData(e.currentTarget);
     try {
-      await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null})});
+      await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null,isCore:fd.get('isCore')==='on'})});
       e.currentTarget.reset(); load();
     } catch (err) { setError(errorText(err)); }
   }
@@ -390,12 +390,12 @@ export function Positions(){
       e.currentTarget.reset(); load();
     } catch (err) { setError(errorText(err)); }
   }
-  function startEdit(p:Position){ setEditing(p); setEditForm({ title:p.title, reportsToPositionId:p.reportsToPositionId?String(p.reportsToPositionId):'', isActive:p.isActive!==false }); }
+  function startEdit(p:Position){ setEditing(p); setEditForm({ title:p.title, reportsToPositionId:p.reportsToPositionId?String(p.reportsToPositionId):'', isActive:p.isActive!==false, isCore:!!p.isCore }); }
   async function saveEdit(e:FormEvent<HTMLFormElement>){
     e.preventDefault(); setError(null);
     if(!editing) return;
     try {
-      await api(`/positions/${editing.id}`,{method:'PUT',body:JSON.stringify({ title:editForm.title, reportsToPositionId:editForm.reportsToPositionId||null, isActive:editForm.isActive })});
+      await api(`/positions/${editing.id}`,{method:'PUT',body:JSON.stringify({ title:editForm.title, reportsToPositionId:editForm.reportsToPositionId||null, isActive:editForm.isActive, isCore:editForm.isCore })});
       setEditing(null); load();
     } catch (err) { setError(errorText(err)); }
   }
@@ -421,20 +421,22 @@ export function Positions(){
           <label>Position title<input name="title" required/></label>
           <label>Description<textarea name="description"/></label>
           <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
+          <label className="toggle"><input type="checkbox" name="isCore" defaultChecked /> Core post — appears on the organogram and in leadership, and carries a deputy and a continuity plan</label>
           <button>Create position</button>
         </form>}
-        <table className="data-table"><thead><tr><th>Title</th><th>Reports to</th><th>Status</th><th></th></tr></thead><tbody>
+        <table className="data-table"><thead><tr><th>Title</th><th>Reports to</th><th>Kind</th><th>Status</th><th></th></tr></thead><tbody>
           {positions.map(p => editing?.id===p.id
-            ? <tr key={p.id}><td colSpan={4}>
+            ? <tr key={p.id}><td colSpan={5}>
                 {can('settings', 'edit') && <form className="form inline-edit" onSubmit={saveEdit}>
                   <label>Title<TextField value={editForm.title} onValue={nextValue => setEditForm({...editForm,title:nextValue})} required/></label>
                   <label>Reports to<select value={editForm.reportsToPositionId} onChange={e=>setEditForm({...editForm,reportsToPositionId:e.target.value})}><option value="">None</option>{positions.filter(x=>x.id!==p.id).map(x=><option value={x.id} key={x.id}>{x.title}</option>)}</select></label>
                   <label className="toggle"><input type="checkbox" checked={editForm.isActive} onChange={e=>setEditForm({...editForm,isActive:e.target.checked})}/> Active</label>
+                  <label className="toggle"><input type="checkbox" checked={editForm.isCore} onChange={e=>setEditForm({...editForm,isCore:e.target.checked})}/> Core post</label>
                   <button type="submit">Save</button>
                   <button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancel</button>
                 </form>}
               </td></tr>
-            : <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
+            : <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isCore ? <span className="badge">Core post</span> : <span className="muted">Bench grade</span>}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
                 <td><button onClick={()=>startEdit(p)}>Edit</button> {can('settings', 'edit') && <button className="secondary" onClick={()=>toggleStatus(p)}>{p.isActive?'Deactivate':'Activate'}</button>} <button className="secondary" onClick={()=>removePosition(p)}>Remove</button></td>
               </tr>)}
         </tbody></table>
@@ -524,18 +526,16 @@ function RankConfig() {
 
 function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => void }) {
   const [nodes,setNodes]=useState<OrgNodeData[]>([]);   // flat positions (for editor + reporting-line options)
-  const [tree,setTree]=useState<OrgTreeNode[]>([]);     // computed render tree
+  const [chart,setChart]=useState<OrgChartModel|null>(null);
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const [newRoot,setNewRoot]=useState('');
-  const [facility,setFacility]=useState<string>('');
   const load=()=>{
     api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError(errorText(e)));
-    api<OrgTree>('/organogram/tree').then(t=>setTree(t.roots)).catch(e=>setError(errorText(e)));
+    api<OrgChartModel>('/organogram/chart').then(setChart).catch(e=>setError(errorText(e)));
   };
   useEffect(()=>{void load()},[]);
-  useEffect(()=>{ api<LaboratoryConfig>('/laboratory-config').then(c=>setFacility(c.profile?.facility_name || '')).catch(()=>undefined); },[]);
 
   function refresh(){ load(); onChanged(); }
   async function call(path:string, options:RequestInit, okMsg?:string){
@@ -555,13 +555,7 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
   async function applyStandard(){ await call('/organogram/apply-standard',{method:'POST',body:JSON.stringify({})},'Standard laboratory structure applied.'); }
   async function addRoot(e:FormEvent){ e.preventDefault(); if(!newRoot.trim()) return; const ok=await call('/positions',{method:'POST',body:JSON.stringify({ title:newRoot.trim(), reportsToPositionId:null })},'Top-level role added.'); if(ok) setNewRoot(''); }
 
-  // A selected role becomes an editor in place of its card; everything else
-  // draws as the shared read-only card.
-  const renderCard = (node: OrgTreeNode) => {
-    const flat = nodes.find(n => n.id === node.positionId);
-    if (selectedId === node.positionId && flat) return <OrgNodeEditor node={flat} ctx={ctx} />;
-    return <OrgCard node={node} onClick={() => node.positionId && setSelectedId(node.positionId)} />;
-  };
+  const selected = nodes.find(n => n.id === selectedId) || null;
 
   return <div className="card organogram-card">
     <div className="panel-head">
@@ -570,7 +564,7 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
         <button type="button" onClick={applyStandard}>Apply standard structure</button>
       </div>
     </div>
-    <p className="hint">The appointed roles below the Laboratory Manager are set by hand. Under each <strong>Unit Supervisor</strong>, the unit’s technical staff are arranged automatically by cadre (Scientist → Technician → Assistant) then professional rank — the highest-ranked becomes the next-in-command, and succession flows downward. Click any appointed role to edit it.</p>
+    <p className="hint">The appointed posts — the manager, his deputy, the officers and the unit supervisors — are set by hand. Under each unit supervisor the unit’s staff are grouped by grade from the staff register. Click a post to assign its holder and deputy.</p>
     <form className="org-add-root" onSubmit={addRoot}>
       <TextField placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onValue={nextValue => setNewRoot(nextValue)} />
       <button type="submit">Add top role</button>
@@ -578,8 +572,9 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
     {error && <Notice kind="error">{error}</Notice>}
     {success && <Notice kind="success">{success}</Notice>}
 
-    <OrgChartBoard roots={tree} facility={facility} renderCard={renderCard} onPrintError={setError}
-      emptyText="No positions yet. Use “Add top role” or “Apply standard structure”." />
+    <OrgChartBoard model={chart} selectedId={selectedId} onSelectRole={setSelectedId} onPrintError={setError}
+      emptyText="No positions yet. Use “Add top role” or “Apply standard structure”."
+      aside={selected ? <div className="oc-aside"><OrgNodeEditor node={selected} ctx={ctx} /></div> : undefined} />
   </div>;
 }
 

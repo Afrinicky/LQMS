@@ -1,88 +1,210 @@
-import { useRef, useState, type ReactNode } from 'react';
-import { Printer, Minus, Plus, Maximize2 } from 'lucide-react';
-import type { OrgTreeNode } from '../../../shared/types/api';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Printer, Minus, Plus, Maximize2, X } from 'lucide-react';
+import type { OrgChartModel, OrgChartRole, OrgChartUnit, OrgHolder } from '../../../shared/types/api';
 
 // ==========================================================================
-// OrgChart — the laboratory's organisational chart.
+// The laboratory's organisational chart.
 //
-// The tree the server returns chains a unit's staff one below the other, so a
-// unit of twenty people used to draw twenty nested levels of connectors: tall,
-// wide and unreadable on screen, and unusable on paper. The chart here draws
-// the appointed positions as a proper top-down hierarchy and collapses each
-// unit's staff chain into one compact succession panel under its supervisor.
-// The same shape is written out for printing, scaled to the sheet.
+// The chart follows the laboratory's own drawn structure: the Laboratory
+// Manager at the head, the Deputy Laboratory Manager directly beneath him, the
+// appointed officers on either side of that spine, the unit supervisors across
+// the width of the sheet, and each unit's staff grouped by grade below its
+// supervisor. One sheet, one page, the same shape on screen and on paper.
 // ==========================================================================
 
 const ROLE_COLOR: Record<string, string> = {
   management: '#2F6BFF', quality: '#C98A12', technical: '#0E9F8E', support: '#7C5CCB',
 };
 
-const isAvailable = (a?: string | null) => !a || a.toLowerCase() === 'available';
+const away = (a?: string | null) => !!a && a.toLowerCase() !== 'available';
+const namesOf = (holders: OrgHolder[]) => holders.map(h => h.name);
 
-/** A unit's staff chain, flattened from the nested succession the server sends. */
-export function staffChainOf(node: OrgTreeNode): OrgTreeNode[] {
-  const out: OrgTreeNode[] = [];
-  let cur = node.children.find(c => c.kind === 'staff');
-  while (cur) { out.push(cur); cur = cur.children.find(c => c.kind === 'staff'); }
-  return out;
+function Names({ holders, onOpenStaff }: { holders: OrgHolder[]; onOpenStaff?: (id: number) => void }) {
+  if (holders.length === 0) return <span className="oc-vacant">Vacant</span>;
+  return <span className="oc-names">
+    {holders.map((h, i) => (
+      <span key={h.staffId} className={away(h.availability) ? 'is-away' : ''}>
+        {onOpenStaff
+          ? <button type="button" className="oc-name-btn" onClick={e => { e.stopPropagation(); onOpenStaff(h.staffId); }}>{h.name}</button>
+          : h.name}
+        {i < holders.length - 1 ? ', ' : ''}
+      </span>
+    ))}
+  </span>;
 }
 
-export function OrgCard({ node, onClick }: { node: OrgTreeNode; onClick?: () => void }) {
-  const cls = `oc-card rt-${node.roleType}${node.isActive ? '' : ' is-inactive'}${node.unitHead ? ' is-unit' : ''}`;
-  const body = <>
-    <span className="oc-role">{node.title}</span>
-    <span className={`oc-holder${node.vacant ? ' vacant' : ''}`}>{node.vacant ? 'Vacant' : node.holderName}</span>
-    <span className="oc-line">
-      {node.unitHead ? 'Next in command' : 'Deputy'}: {node.deputyName || '—'}
-      {node.actingName && node.actingName !== node.deputyName ? ` · Acting: ${node.actingName}` : ''}
-    </span>
-  </>;
-  return onClick
-    ? <button type="button" className={`${cls} is-clickable`} onClick={onClick}>{body}</button>
-    : <div className={cls}>{body}</div>;
-}
-
-function StaffPanel({ staff }: { staff: OrgTreeNode[] }) {
-  const [all, setAll] = useState(false);
-  const shown = all ? staff : staff.slice(0, 6);
-  return <div className="oc-staff">
-    <div className="oc-staff-head">Unit staff — succession order</div>
-    <ol className="oc-staff-list">
-      {shown.map((s, i) => (
-        <li key={s.key} className={isAvailable(s.availability) ? '' : 'is-away'}>
-          <span className="n">{i + 1}</span>
-          <span className="who">
-            <b>{s.staffName}</b>
-            <em>{[s.title, s.rank].filter(Boolean).join(' · ')}</em>
-          </span>
-          {!isAvailable(s.availability) && <span className="flag">{s.availability}</span>}
-        </li>
-      ))}
-    </ol>
-    {staff.length > 6 && (
-      <button type="button" className="oc-more" onClick={() => setAll(a => !a)}>
-        {all ? 'Show fewer' : `+${staff.length - 6} more`}
-      </button>
-    )}
-  </div>;
-}
-
-function OrgBranch({ node, renderCard }: { node: OrgTreeNode; renderCard?: (n: OrgTreeNode) => ReactNode }) {
-  const positions = node.children.filter(c => c.kind === 'position');
-  const staff = staffChainOf(node);
-  return <li>
-    <div className="oc-item">
-      {renderCard ? renderCard(node) : <OrgCard node={node} />}
-      {staff.length > 0 && <StaffPanel staff={staff} />}
+function RoleBox({ role, level, onSelect, onOpenStaff, selected }: {
+  role: OrgChartRole; level: 'lead' | 'deputy' | 'officer' | 'unit';
+  onSelect?: (positionId: number) => void; onOpenStaff?: (id: number) => void; selected?: boolean;
+}) {
+  const cls = `oc-box lvl-${level} rt-${role.roleType}${selected ? ' is-selected' : ''}${onSelect ? ' is-clickable' : ''}`;
+  return (
+    <div className={cls} onClick={onSelect ? () => onSelect(role.positionId) : undefined} role={onSelect ? 'button' : undefined}>
+      <span className="oc-title">{role.title}</span>
+      <Names holders={role.holders} onOpenStaff={onOpenStaff} />
+      {role.deputies.length > 0 && <span className="oc-sub">Deputy: {namesOf(role.deputies).join(', ')}</span>}
     </div>
-    {positions.length > 0 && <ul>{positions.map(c => <OrgBranch key={c.key} node={c} renderCard={renderCard} />)}</ul>}
+  );
+}
+
+function UnitColumn({ unit, onSelect, onOpenStaff, selected }: {
+  unit: OrgChartUnit; onSelect?: (positionId: number) => void; onOpenStaff?: (id: number) => void; selected?: boolean;
+}) {
+  return <li className="oc-unit">
+    <RoleBox role={unit} level="unit" onSelect={onSelect} onOpenStaff={onOpenStaff} selected={selected} />
+    {unit.cadres.map(row => <div key={row.label} className="oc-cadre">
+      <span className="oc-cadre-label">{row.label}</span>
+      <span className="oc-cadre-names"><Names holders={row.staff} onOpenStaff={onOpenStaff} /></span>
+    </div>)}
   </li>;
 }
 
-export function OrgChart({ roots, renderCard }: { roots: OrgTreeNode[]; renderCard?: (n: OrgTreeNode) => ReactNode }) {
-  return <div className="oc-chart">
-    <ul className="oc-tree">{roots.map(r => <OrgBranch key={r.key} node={r} renderCard={renderCard} />)}</ul>
+export function OrgChartSheet({ model, onSelectRole, onOpenStaff, selectedId, withHeading = false }: {
+  model: OrgChartModel;
+  onSelectRole?: (positionId: number) => void;
+  onOpenStaff?: (id: number) => void;
+  selectedId?: number | null;
+  withHeading?: boolean;
+}) {
+  // The officers hang either side of the spine, balanced, in the order the
+  // laboratory names them.
+  const right = model.officers.filter((_, i) => i % 2 === 0);
+  const left = model.officers.filter((_, i) => i % 2 === 1);
+
+  return <div className="oc-sheet">
+    {withHeading && <div className="oc-sheet-head">
+      <strong>{model.facility}</strong>
+      <span>Laboratory Organisational Structure</span>
+    </div>}
+
+    <div className="oc-lead">
+      {model.manager
+        ? <RoleBox role={model.manager} level="lead" onSelect={onSelectRole} onOpenStaff={onOpenStaff} selected={selectedId === model.manager.positionId} />
+        : <div className="oc-box lvl-lead rt-management is-empty"><span className="oc-title">Laboratory Manager</span><span className="oc-vacant">Not created</span></div>}
+      <span className="oc-vline" />
+      {model.deputy
+        ? <RoleBox role={model.deputy} level="deputy" onSelect={onSelectRole} onOpenStaff={onOpenStaff} selected={selectedId === model.deputy.positionId} />
+        : <div className="oc-box lvl-deputy rt-management is-empty"><span className="oc-title">Deputy Laboratory Manager</span><span className="oc-vacant">Not created</span></div>}
+    </div>
+
+    <div className="oc-band">
+      <div className="oc-side oc-side-left">
+        {left.map(o => <div key={o.positionId} className="oc-slot">
+          <RoleBox role={o} level="officer" onSelect={onSelectRole} onOpenStaff={onOpenStaff} selected={selectedId === o.positionId} />
+          <span className="oc-arm" />
+        </div>)}
+      </div>
+      <div className="oc-band-center"><span className="oc-stem" /></div>
+      <div className="oc-side oc-side-right">
+        {right.map(o => <div key={o.positionId} className="oc-slot">
+          <span className="oc-arm" />
+          <RoleBox role={o} level="officer" onSelect={onSelectRole} onOpenStaff={onOpenStaff} selected={selectedId === o.positionId} />
+        </div>)}
+      </div>
+    </div>
+
+    {model.units.length > 0 && <ul className="oc-units">
+      {model.units.map(u => <UnitColumn key={u.positionId} unit={u} onSelect={onSelectRole} onOpenStaff={onOpenStaff} selected={selectedId === u.positionId} />)}
+    </ul>}
   </div>;
+}
+
+// -------------------------------------------------------------------------
+// The printed sheet — its own document, scaled to one A4 page.
+// -------------------------------------------------------------------------
+const esc = (v: unknown) => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+const printNames = (holders: OrgHolder[]) =>
+  holders.length ? `<span class="names">${esc(namesOf(holders).join(', '))}</span>` : '<span class="vacant">Vacant</span>';
+
+function printBox(role: OrgChartRole, level: string): string {
+  return `<div class="box ${level} rt-${esc(role.roleType)}">
+    <span class="title">${esc(role.title)}</span>
+    ${printNames(role.holders)}
+    ${role.deputies.length ? `<span class="sub">Deputy: ${esc(namesOf(role.deputies).join(', '))}</span>` : ''}
+  </div>`;
+}
+
+export function organogramPrintHtml(model: OrgChartModel): string {
+  const printedAt = new Date().toLocaleDateString();
+  const right = model.officers.filter((_, i) => i % 2 === 0);
+  const left = model.officers.filter((_, i) => i % 2 === 1);
+  const units = model.units.map(u => `<li class="unit">
+      ${printBox(u, 'unit')}
+      ${u.cadres.map(r => `<div class="cadre"><span class="cl">${esc(r.label)}</span><span class="cn">${esc(namesOf(r.staff).join(', '))}</span></div>`).join('')}
+    </li>`).join('');
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Organisational Chart</title><style>
+  @page { size: A4 landscape; margin: 8mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; padding: 6px 10px; font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #111; }
+  .head { text-align: center; margin-bottom: 8px; }
+  .head h1 { font-size: 13px; margin: 0; letter-spacing: .06em; text-transform: uppercase; }
+  .head h2 { font-size: 10.5px; margin: 2px 0 0; font-weight: 600; color: #444; letter-spacing: .05em; text-transform: uppercase; }
+  .head .when { font-size: 7.5px; color: #777; margin-top: 3px; }
+  .scale { transform-origin: top center; width: 1046px; margin: 0 auto; }
+  .box { border: 1px solid #99a1ae; border-top: 2.5px solid #666; border-radius: 4px; background: #fff; padding: 4px 7px; text-align: center; display: flex; flex-direction: column; gap: 1px; }
+  .box .title { font-size: 7.6px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; line-height: 1.25; }
+  .box .names { font-size: 8.4px; font-weight: 600; line-height: 1.3; }
+  .box .vacant { font-size: 8px; font-style: italic; color: #96700d; }
+  .box .sub { font-size: 6.8px; color: #667; }
+  .rt-management { border-top-color: ${ROLE_COLOR.management}; }
+  .rt-quality { border-top-color: ${ROLE_COLOR.quality}; }
+  .rt-technical { border-top-color: ${ROLE_COLOR.technical}; }
+  .rt-support { border-top-color: ${ROLE_COLOR.support}; }
+  .lead { width: 206px; } .lead .title { font-size: 8.6px; } .lead .names { font-size: 9.4px; }
+  .deputy { width: 206px; }
+  .lead-col { display: flex; flex-direction: column; align-items: center; }
+  .lead-col .vline { width: 1px; height: 16px; background: #8b93a3; }
+  .band { display: grid; grid-template-columns: 1fr 1px 1fr; align-items: stretch; }
+  .band-center { display: flex; justify-content: center; }
+  .band-center .stem { width: 1px; height: 100%; background: #8b93a3; }
+  .side { display: flex; flex-direction: column; justify-content: center; gap: 9px; padding: 12px 0; }
+  .slot { display: flex; align-items: center; }
+  .slot .arm { flex: 1; height: 1px; background: #8b93a3; }
+  .side-left .slot { justify-content: flex-start; } .side-left .box { width: 162px; }
+  .side-right .slot { justify-content: flex-end; } .side-right .box { width: 162px; }
+  ul.units { list-style: none; margin: 0; padding: 16px 0 0; display: flex; justify-content: center; position: relative; }
+  ul.units::before { content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 8px; background: #8b93a3; }
+  li.unit { position: relative; padding: 14px 5px 0; display: flex; flex-direction: column; width: 162px; }
+  li.unit > .box { min-height: 40px; justify-content: center; }
+  li.unit::before { content: ''; position: absolute; top: 6px; left: 50%; width: 1px; height: 8px; background: #8b93a3; }
+  li.unit::after { content: ''; position: absolute; top: 6px; left: 0; right: 0; height: 1px; background: #8b93a3; }
+  li.unit:first-child::after { left: 50%; } li.unit:last-child::after { right: 50%; }
+  li.unit:only-child::after { display: none; }
+  .cadre { border: 1px solid #c3c9d4; border-top: 0; background: #fafbfd; padding: 3px 6px; text-align: center; }
+  .cadre:last-child { border-radius: 0 0 4px 4px; }
+  .cadre .cl { display: block; font-size: 6.6px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
+  .cadre .cn { display: block; font-size: 7.6px; line-height: 1.35; }
+  </style></head><body>
+  <div class="head">
+    <h1>${esc(model.facility)}</h1>
+    <h2>Laboratory Organisational Structure</h2>
+    <div class="when">Printed ${esc(printedAt)}</div>
+  </div>
+  <div class="scale" id="scale">
+    <div class="lead-col">
+      ${model.manager ? printBox(model.manager, 'lead') : ''}
+      <span class="vline"></span>
+      ${model.deputy ? printBox(model.deputy, 'deputy') : ''}
+    </div>
+    <div class="band">
+      <div class="side side-left">${left.map(o => `<div class="slot">${printBox(o, 'officer')}<span class="arm"></span></div>`).join('')}</div>
+      <div class="band-center"><span class="stem"></span></div>
+      <div class="side side-right">${right.map(o => `<div class="slot"><span class="arm"></span>${printBox(o, 'officer')}</div>`).join('')}</div>
+    </div>
+    ${units ? `<ul class="units">${units}</ul>` : ''}
+  </div>
+  <script>window.onload = function () {
+    /* One A4 landscape page at 8mm margins, less the heading: the sheet is
+       scaled to that box so it prints the same from any screen. */
+    var el = document.getElementById('scale');
+    var availW = 1046, availH = 650;
+    var s = Math.max(0.4, Math.min(1.7, availW / Math.max(1, el.scrollWidth), availH / Math.max(1, el.scrollHeight)));
+    el.style.transform = 'scale(' + s + ')';
+    el.style.height = (el.scrollHeight * s) + 'px';
+    setTimeout(function () { window.print(); }, 150);
+  };</script>
+  </body></html>`;
 }
 
 export function OrgLegend() {
@@ -95,108 +217,54 @@ export function OrgLegend() {
 }
 
 // -------------------------------------------------------------------------
-// Printing — a self-contained sheet, scaled to the page, so what comes out of
-// the printer is the same chart rather than whatever survived the app's theme.
+// Widescreen view — the chart on its own, in a window the reader can resize.
 // -------------------------------------------------------------------------
-const esc = (v: unknown) => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
-
-function printBranch(node: OrgTreeNode): string {
-  const positions = node.children.filter(c => c.kind === 'position');
-  const staff = staffChainOf(node);
-  const deputy = `${node.unitHead ? 'Next in command' : 'Deputy'}: ${esc(node.deputyName || '—')}`
-    + (node.actingName && node.actingName !== node.deputyName ? ` · Acting: ${esc(node.actingName)}` : '');
-  const staffHtml = staff.length ? `<div class="staff">
-      <div class="staff-head">Unit staff — succession order</div>
-      <ol>${staff.map(s => `<li><span class="n"></span><span class="who"><b>${esc(s.staffName)}</b><em>${esc([s.title, s.rank].filter(Boolean).join(' · '))}</em></span>${isAvailable(s.availability) ? '' : `<span class="flag">${esc(s.availability)}</span>`}</li>`).join('')}</ol>
-    </div>` : '';
-  return `<li><div class="item">
-      <div class="card rt-${esc(node.roleType)}">
-        <span class="role">${esc(node.title)}</span>
-        <span class="holder${node.vacant ? ' vacant' : ''}">${node.vacant ? 'Vacant' : esc(node.holderName)}</span>
-        <span class="line">${deputy}</span>
+function Widescreen({ model, onClose, onOpenStaff }: { model: OrgChartModel; onClose: () => void; onOpenStaff?: (id: number) => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+  const [zoom, setZoom] = useState(1);
+  return <div className="oc-wide-overlay" onClick={onClose}>
+    <div className="oc-wide" onClick={e => e.stopPropagation()}>
+      <div className="oc-wide-head">
+        <strong>{model.facility} — Laboratory Organisational Structure</strong>
+        <div className="oc-tools">
+          <div className="oc-zoom">
+            <button type="button" title="Zoom out" onClick={() => setZoom(z => Math.max(0.4, Math.round((z - 0.1) * 10) / 10))}><Minus size={13} /></button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button type="button" title="Zoom in" onClick={() => setZoom(z => Math.min(2, Math.round((z + 0.1) * 10) / 10))}><Plus size={13} /></button>
+          </div>
+          <button type="button" className="oc-wide-close" onClick={onClose} title="Close"><X size={16} /></button>
+        </div>
       </div>
-      ${staffHtml}
-    </div>${positions.length ? `<ul>${positions.map(printBranch).join('')}</ul>` : ''}</li>`;
-}
-
-export function organogramPrintHtml(roots: OrgTreeNode[], meta: { facility?: string; subtitle?: string }): string {
-  const printedAt = new Date().toLocaleString();
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Organisational Chart</title><style>
-  @page { size: A4 landscape; margin: 10mm; }
-  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { margin: 0; padding: 12px; font-family: Arial, Helvetica, sans-serif; color: #111; }
-  .head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1.5px solid #222; padding-bottom: 6px; margin-bottom: 4px; }
-  .head h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
-  .head span { font-size: 10.5px; color: #555; }
-  .sub { font-size: 11px; color: #555; margin: 0 0 10px; }
-  .legend { display: flex; gap: 14px; font-size: 10px; color: #444; margin: 0 0 12px; }
-  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-  .scale { transform-origin: top center; }
-  ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; position: relative; padding-top: 22px; }
-  li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 22px 8px 0; break-inside: avoid; }
-  li::before { content: ''; position: absolute; top: 11px; left: 50%; width: 1px; height: 11px; background: #9aa3b2; }
-  li::after { content: ''; position: absolute; top: 11px; left: 0; right: 0; height: 1px; background: #9aa3b2; }
-  li:first-child::after { left: 50%; } li:last-child::after { right: 50%; } li:only-child::after { display: none; }
-  li > ul::before { content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 11px; background: #9aa3b2; }
-  .oc-root { padding-top: 0; } .oc-root::before, .oc-root::after { display: none; }
-  .item { display: flex; flex-direction: column; align-items: stretch; width: 176px; }
-  .card { border: 1px solid #c3c9d4; border-top: 2.5px solid #666; border-radius: 5px; padding: 7px 9px 6px; background: #fff; display: flex; flex-direction: column; gap: 1px; }
-  .card .role { font-size: 8.2px; font-weight: 700; line-height: 1.35; text-transform: uppercase; letter-spacing: .07em; color: #667; }
-  .card .holder { font-size: 11px; font-weight: 700; line-height: 1.3; }
-  .card .holder.vacant { font-style: italic; font-weight: 400; color: #8a6d00; }
-  .card .line { font-size: 8.4px; color: #667; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #d6dbe4; }
-  .oc-root > .item { width: 200px; }
-  .oc-root > .item .card { background: #f7f9fc; padding: 9px 11px 8px; }
-  .oc-root > .item .holder { font-size: 12px; }
-  .rt-management { border-top-color: ${ROLE_COLOR.management}; } .rt-management .role { color: ${ROLE_COLOR.management}; }
-  .rt-quality { border-top-color: ${ROLE_COLOR.quality}; } .rt-quality .role { color: ${ROLE_COLOR.quality}; }
-  .rt-technical { border-top-color: ${ROLE_COLOR.technical}; } .rt-technical .role { color: ${ROLE_COLOR.technical}; }
-  .rt-support { border-top-color: ${ROLE_COLOR.support}; } .rt-support .role { color: ${ROLE_COLOR.support}; }
-  .staff { border: 1px solid #ccd2dc; border-top: 0; border-radius: 0 0 5px 5px; margin-top: -1px; background: #fafbfd; }
-  .staff-head { font-size: 8.5px; text-transform: uppercase; letter-spacing: .04em; color: #667; padding: 4px 8px; border-bottom: 1px solid #e3e7ee; }
-  .staff ol { list-style: none; margin: 0; padding: 4px 8px 6px; counter-reset: s; display: block; }
-  .staff ol li { display: flex; flex-direction: row; align-items: baseline; gap: 6px; padding: 2px 0; counter-increment: s; text-align: left; }
-  .staff li .n::before { content: counter(s); }
-  .staff li::before, .staff li::after { display: none; }
-  .staff .n { font-size: 9px; color: #889; min-width: 10px; }
-  .staff .who { display: flex; flex-direction: column; align-items: flex-start; flex: 1; min-width: 0; }
-  .staff .who b { font-size: 9.8px; font-weight: 600; }
-  .staff .who em { font-size: 8.6px; color: #667; font-style: normal; }
-  .staff .flag { font-size: 7.6px; color: #9a3412; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
-  </style></head><body>
-  <div class="head"><h1>${esc(meta.facility || 'Laboratory')} — Organisational Chart</h1><span>Printed ${esc(printedAt)}</span></div>
-  ${meta.subtitle ? `<p class="sub">${esc(meta.subtitle)}</p>` : ''}
-  <div class="legend">
-    <span><i style="background:${ROLE_COLOR.management}"></i>Management</span>
-    <span><i style="background:${ROLE_COLOR.quality}"></i>Quality</span>
-    <span><i style="background:${ROLE_COLOR.technical}"></i>Technical / unit</span>
-    <span><i style="background:${ROLE_COLOR.support}"></i>Support / administration</span>
-  </div>
-  <div class="scale" id="scale"><ul>${roots.map(r => printBranch(r).replace('<li>', '<li class="oc-root">')).join('')}</ul></div>
-  <script>window.onload = function () {
-    var el = document.getElementById('scale');
-    var avail = document.body.clientWidth - 24;
-    var s = Math.max(0.4, Math.min(1, avail / Math.max(1, el.scrollWidth)));
-    el.style.transform = 'scale(' + s + ')';
-    el.style.height = (el.scrollHeight * s) + 'px';
-    setTimeout(function () { window.print(); }, 120);
-  };</script>
-  </body></html>`;
+      <div className="oc-wide-body">
+        <div className="oc-scale" style={{ zoom } as React.CSSProperties}>
+          <OrgChartSheet model={model} onOpenStaff={onOpenStaff} />
+        </div>
+      </div>
+    </div>
+  </div>;
 }
 
 // -------------------------------------------------------------------------
-// The framed chart: zoom, fit and print around the chart itself.
+// The framed chart: zoom, fit, widescreen and print around the sheet.
 // -------------------------------------------------------------------------
-export function OrgChartBoard({ roots, facility, subtitle, renderCard, actions, emptyText = 'No positions on the organogram yet.', onPrintError }: {
-  roots: OrgTreeNode[];
-  facility?: string;
-  subtitle?: string;
-  renderCard?: (n: OrgTreeNode) => ReactNode;
+export function OrgChartBoard({ model, onSelectRole, onOpenStaff, selectedId, actions, aside, onPrintError, emptyText = 'No positions on the organogram yet.' }: {
+  model: OrgChartModel | null;
+  onSelectRole?: (positionId: number) => void;
+  onOpenStaff?: (id: number) => void;
+  selectedId?: number | null;
   actions?: ReactNode;
-  emptyText?: string;
+  aside?: ReactNode;
   onPrintError?: (m: string) => void;
+  emptyText?: string;
 }) {
   const [zoom, setZoom] = useState(1);
+  const [wide, setWide] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -209,11 +277,14 @@ export function OrgChartBoard({ roots, facility, subtitle, renderCard, actions, 
   }
 
   function print() {
-    const w = window.open('', '_blank', 'width=1100,height=800');
+    if (!model) return;
+    const w = window.open('', '_blank', 'width=1180,height=840');
     if (!w) { onPrintError?.('Allow pop-ups to print the organogram.'); return; }
-    w.document.write(organogramPrintHtml(roots, { facility, subtitle }));
+    w.document.write(organogramPrintHtml(model));
     w.document.close();
   }
+
+  const empty = !model || (!model.manager && !model.deputy && model.officers.length === 0 && model.units.length === 0);
 
   return <div className="oc-board">
     <div className="oc-toolbar no-print">
@@ -226,13 +297,19 @@ export function OrgChartBoard({ roots, facility, subtitle, renderCard, actions, 
           <button type="button" title="Fit to screen" onClick={fitToScreen}><Maximize2 size={13} /></button>
         </div>
         {actions}
-        <button type="button" className="secondary" onClick={print}><Printer size={14} /> Print</button>
+        <button type="button" className="secondary" disabled={empty} onClick={() => setWide(true)}><Maximize2 size={14} /> Widescreen</button>
+        <button type="button" className="secondary" disabled={empty} onClick={print}><Printer size={14} /> Print</button>
       </div>
     </div>
-    <div className="oc-viewport" ref={viewportRef}>
-      <div className="oc-scale" ref={chartRef} style={{ zoom } as React.CSSProperties}>
-        {roots.length === 0 ? <p className="hint" style={{ padding: 24 }}>{emptyText}</p> : <OrgChart roots={roots} renderCard={renderCard} />}
+    <div className="oc-frame">
+      <div className="oc-viewport" ref={viewportRef}>
+        <div className="oc-scale" ref={chartRef} style={{ zoom } as React.CSSProperties}>
+          {empty ? <p className="hint" style={{ padding: 24 }}>{emptyText}</p>
+            : <OrgChartSheet model={model!} onSelectRole={onSelectRole} onOpenStaff={onOpenStaff} selectedId={selectedId} />}
+        </div>
       </div>
+      {aside}
     </div>
+    {wide && model && <Widescreen model={model} onClose={() => setWide(false)} onOpenStaff={onOpenStaff} />}
   </div>;
 }

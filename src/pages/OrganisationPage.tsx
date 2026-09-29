@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal, OrgChartBoard } from '../components/ui';
-import { FileText } from 'lucide-react';
+import { FileText, Printer } from 'lucide-react';
 import { openStoredFile } from '../services/files';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken, errorText, apiRead, ApiError } from '../services/api';
@@ -13,7 +13,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import type {
   Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig,
   EthicalDeclarationForm, EthicalDeclarationSignature, ContinuityPlan, QtReviewConfig, QtReview, Position, OrgTree,
-  DeclarationTemplate, StaffProfile, DocumentRecord, Section,
+  DeclarationTemplate, StaffProfile, DocumentRecord, Section, OrgChartModel, OrgChartRole,
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
@@ -140,16 +140,127 @@ function StaffProfileModal({ staffId, onClose }: { staffId: number; onClose: () 
   </DetailModal>;
 }
 
+/** The laboratory profile as a printed document. */
+function laboratoryProfilePrintHtml(args: {
+  config: LaboratoryConfig; leadership: OrgChartRole[]; registrations: RegulatoryRegistration[];
+  sections: Section[]; staffCount: (sectionId: number) => number; coreDocs: Array<{ label: string; detail: string }>;
+}): string {
+  const { config, leadership, registrations, sections } = args;
+  const p = config.profile;
+  const e = (v: unknown) => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+  const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
+  const annual = config.objectives.filter(o => o.year != null);
+  const legal = config.documents.filter(d => d.category === 'legal_identity');
+  const fact = (k: string, v?: string | null) => `<div><span>${e(k)}</span><b>${e(v || '—')}</b></div>`;
+  const rows = (head: string[], body: string[][]) => body.length
+    ? `<table><thead><tr>${head.map(h => `<th>${e(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${e(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+    : '<p class="none">None recorded.</p>';
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Laboratory Profile</title><style>
+  @page { size: A4 portrait; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #111; font-size: 11px; line-height: 1.45; }
+  h1 { font-size: 17px; margin: 0; }
+  .motto { font-style: italic; color: #555; font-size: 11px; margin: 2px 0 0; }
+  .head { border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; }
+  .head .when { font-size: 9px; color: #777; white-space: nowrap; }
+  h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: #333; margin: 16px 0 6px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px 16px; }
+  .facts span { display: block; font-size: 8.5px; text-transform: uppercase; letter-spacing: .05em; color: #777; }
+  .facts b { font-size: 11px; font-weight: 600; }
+  p.text { white-space: pre-wrap; margin: 0 0 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f1f3f7; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+  .none { color: #777; font-style: italic; margin: 2px 0 0; }
+  .posts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; }
+  .post { border: 1px solid #ccd; border-left: 3px solid #2F6BFF; border-radius: 3px; padding: 5px 8px; }
+  .post .t { display: block; font-size: 8.5px; text-transform: uppercase; letter-spacing: .05em; color: #666; }
+  .post .d { display: block; font-size: 8.8px; color: #555; }
+  .post .n { font-size: 11px; font-weight: 600; }
+  .post .v { font-size: 10px; font-style: italic; color: #96700d; }
+  section { break-inside: avoid; }
+  </style></head><body>
+  <div class="head">
+    <div>
+      <h1>${e(p?.facility_name || 'Laboratory')}</h1>
+      ${p?.motto ? `<p class="motto">${e(p.motto)}</p>` : ''}
+    </div>
+    <div class="when">Laboratory Profile · ${e(new Date().toLocaleDateString())}</div>
+  </div>
+
+  <section><h2>Identity &amp; contact</h2>
+    <div class="facts">
+      ${fact('Legal status', titleCase(p?.legal_status))}
+      ${fact('Registration no', p?.registration_number)}
+      ${fact('Accreditation', [titleCase(p?.accreditation_status), p?.accreditation_number].filter(Boolean).join(' · '))}
+      ${fact('Accreditation body', p?.accreditation_body)}
+      ${fact('Address', [p?.address, p?.city, p?.country].filter(Boolean).join(', '))}
+      ${fact('Telephone', p?.phone)}
+      ${fact('Email', p?.email)}
+      ${fact('Website', p?.website)}
+      ${fact('Units', String(sections.length))}
+    </div>
+  </section>
+
+  ${(p?.mission || p?.vision) ? `<section><h2>Mission &amp; vision</h2>
+    ${p?.mission ? `<p class="text"><b>Mission.</b> ${e(p.mission)}</p>` : ''}
+    ${p?.vision ? `<p class="text"><b>Vision.</b> ${e(p.vision)}</p>` : ''}
+  </section>` : ''}
+
+  <section><h2>Quality policy</h2>
+    ${p?.quality_policy ? `<p class="text">${e(p.quality_policy)}</p>` : '<p class="none">No quality policy recorded.</p>'}
+    ${config.policies.length ? rows(['Policy', 'Statement'], config.policies.map(pol => [pol.title, pol.policy_statement])) : ''}
+  </section>
+
+  <section><h2>Core documents</h2>
+    ${rows(['Document', 'Reference'], args.coreDocs.map(d => [d.label, d.detail]))}
+  </section>
+
+  <section><h2>Quality objectives</h2>
+    ${standing.length ? `<p class="text"><b>Standing</b></p>${rows(['Objective', 'Target', 'Measure', 'Owner'], standing.map(o => [o.objective, o.target || '—', o.measure || '—', o.responsible_name || '—']))}` : ''}
+    ${annual.length ? `<p class="text"><b>Annual</b></p>${rows(['Year', 'Objective', 'Target', 'Measure', 'Status'], annual.map(o => [String(o.year), o.objective, o.target || '—', o.measure || '—', titleCase(o.status)]))}` : ''}
+    ${(!standing.length && !annual.length) ? '<p class="none">No quality objectives recorded.</p>' : ''}
+  </section>
+
+  <section><h2>Leadership &amp; key positions</h2>
+    ${leadership.length ? `<div class="posts">${leadership.map(r => `<div class="post">
+      <span class="t">${e(r.title)}</span>
+      ${r.holders.length ? `<span class="n">${e(r.holders.map(h => h.name).join(', '))}</span>` : '<span class="v">Vacant</span>'}
+      ${r.deputies.length ? `<span class="d">Deputy: ${e(r.deputies.map(d => d.name).join(', '))}</span>` : ''}
+    </div>`).join('')}</div>` : '<p class="none">No appointed posts recorded.</p>'}
+  </section>
+
+  <section><h2>Units &amp; sections</h2>
+    ${rows(['Unit', 'Staff'], sections.map(sec => [sec.name, String(args.staffCount(sec.id))]))}
+  </section>
+
+  <section><h2>Registrations &amp; licences</h2>
+    ${rows(['Type', 'Title', 'Issuing body', 'Reference', 'Expiry', 'Status'],
+      registrations.map(r => [titleCase(r.credential_type), r.title, r.issuing_body || '—', r.reference || '—', r.expiry_date || '—', titleCase(r.status)]))}
+  </section>
+
+  <section><h2>Registration &amp; legal documents</h2>
+    ${rows(['Type', 'Title', 'Reference', 'Issuer', 'Expiry'],
+      legal.map(d => [titleCase(d.doc_type), d.title, d.reference_number || '—', d.issuing_authority || '—', d.expiry_date || '—']))}
+  </section>
+
+  <script>window.onload = function () { setTimeout(function () { window.print(); }, 120); };</script>
+  </body></html>`;
+}
+
 export function LaboratoryProfileView({ config, staff, registrations }: { config: LaboratoryConfig | null; staff: Staff[]; registrations: RegulatoryRegistration[] }) {
   const navigate = useNavigate();
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [logo, setLogo] = useState<string | null>(null);
   const [openStaffId, setOpenStaffId] = useState<number | null>(null);
+  const [chart, setChart] = useState<OrgChartModel | null>(null);
 
   useEffect(() => {
     api<DocumentRecord[]>('/documents').then(setDocuments).catch(() => setDocuments([]));
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
+    api<OrgChartModel>('/organogram/chart').then(setChart).catch(() => setChart(null));
     let revoke: string | null = null;
     fetchBlobUrl('/laboratory-logo').then(u => { revoke = u; setLogo(u); }).catch(() => undefined);
     return () => { if (revoke) URL.revokeObjectURL(revoke); };
@@ -167,10 +278,25 @@ export function LaboratoryProfileView({ config, staff, registrations }: { config
   const annual = config.objectives.filter(o => o.year != null);
   const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a, b) => b - a);
   const activeStaff = staff.filter(s => !!s.isActive);
-  const leaders = activeStaff.filter(s => !!s.primaryPosition);
+  // Leadership is the laboratory's appointed posts — the manager, his deputy,
+  // the officers and the unit supervisors — not everyone who holds a grade.
+  const leadership: OrgChartRole[] = chart
+    ? [chart.manager, chart.deputy, ...chart.officers, ...chart.units].filter(Boolean) as OrgChartRole[]
+    : [];
   const expiring = registrations.filter(r => r.expiry_date && r.expiry_date >= today && r.expiry_date <= soon).length;
   const expired = registrations.filter(r => r.expiry_date && r.expiry_date < today).length;
   const staffBySection = (id: number) => activeStaff.filter(s => s.sectionId === id).length;
+
+  function printProfile() {
+    const coreDocs = CORE_DOCS.map(c => {
+      const d = coreOf(c.type);
+      return { label: c.label, detail: d ? [d.document_code, d.title, d.current_version_number ? `v${d.current_version_number}` : null].filter(Boolean).join(' · ') : 'Not registered' };
+    }).concat(manuals.map(d => ({ label: d.title, detail: [titleCase(d.doc_type), d.version].filter(Boolean).join(' · ') || '—' })));
+    const w = window.open('', '_blank', 'width=980,height=760');
+    if (!w) return;
+    w.document.write(laboratoryProfilePrintHtml({ config: config!, leadership, registrations, sections, staffCount: staffBySection, coreDocs }));
+    w.document.close();
+  }
 
   return <div className="lab-profile">
     <div className="card lp-hero">
@@ -184,7 +310,10 @@ export function LaboratoryProfileView({ config, staff, registrations }: { config
           {p?.registration_number && <span className="badge">Reg. {p.registration_number}</span>}
         </div>
       </div>
-      <Link className="hint lp-edit" to="/settings/laboratory">Maintained in Settings → My Laboratory</Link>
+      <div className="lp-hero-side">
+        <button type="button" className="secondary lp-print" onClick={printProfile}><Printer size={14} /> Print profile</button>
+        <Link className="hint lp-edit" to="/settings/laboratory">Maintained in Settings → My Laboratory</Link>
+      </div>
     </div>
 
     <KpiStrip items={[
@@ -262,16 +391,20 @@ export function LaboratoryProfileView({ config, staff, registrations }: { config
 
     <div className="card">
       <h3>Leadership &amp; key positions</h3>
-      {leaders.length === 0 ? <p className="hint">No positions assigned yet.</p> :
+      {leadership.length === 0 ? <p className="hint">No appointed posts yet.</p> :
         <div className="lp-people">
-          {leaders.map(s => <button key={s.id} type="button" className="lp-person" onClick={() => setOpenStaffId(s.id)} title="Open staff profile">
-            <span className="lp-person-avatar">{(s.initials || s.fullName.split(' ').map(x => x[0]).join('')).slice(0, 2).toUpperCase()}</span>
-            <span className="lp-person-main">
-              <strong>{s.fullName}</strong>
-              <em>{s.primaryPosition}</em>
-              <span className="hint">{s.sectionName || s.unit || '—'}</span>
-            </span>
-          </button>)}
+          {leadership.map(role => <div key={role.positionId} className={`lp-post rt-${role.roleType}`}>
+            <span className="lp-post-title">{role.title}</span>
+            {role.holders.length === 0
+              ? <span className="lp-post-vacant">Vacant</span>
+              : <span className="lp-post-holders">
+                  {role.holders.map(h => <button key={h.staffId} type="button" className="lp-post-name" onClick={() => setOpenStaffId(h.staffId)} title="Open staff profile">
+                    <span className="lp-person-avatar">{h.name.split(' ').map(x => x[0]).join('').slice(0, 2).toUpperCase()}</span>
+                    {h.name}
+                  </button>)}
+                </span>}
+            {role.deputies.length > 0 && <span className="lp-post-deputy">Deputy: {role.deputies.map(d => d.name).join(', ')}</span>}
+          </div>)}
         </div>}
     </div>
 
@@ -915,29 +1048,27 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
 // ============================================================================
 function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
   const { can } = usePermissions();
-  const [tree, setTree] = useState<OrgTree | null>(null);
+  const [chart, setChart] = useState<OrgChartModel | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [plans, setPlans] = useState<ContinuityPlan[]>([]);
   const [editingId, setEditingId] = useState<number | 'new' | null>(null);
   const [sub, setSub] = useState<'Organogram' | 'Deputisation'>('Organogram');
-  const [facility, setFacility] = useState('');
+  const [openStaffId, setOpenStaffId] = useState<number | null>(null);
   const emptyPlan = { positionId: '', keyRole: '', deputyPositionId: '', deputyStaffId: '', actingArrangement: '', authorityScope: '', handoverProcedure: '', activationTrigger: '', trainingStatus: 'in_progress', lastTestedDate: '', nextReviewDate: '', status: 'active', notes: '' };
   const [form, setForm] = useState(emptyPlan);
 
   async function load() {
     try {
-      const [t, p, pl] = await Promise.all([
-        api<OrgTree>('/organogram/tree').catch(() => ({ roots: [] })),
+      const [c, p, pl] = await Promise.all([
+        api<OrgChartModel>('/organogram/chart').catch(() => null),
         api<Position[]>('/positions').catch(() => []),
         api<ContinuityPlan[]>('/organisation/continuity-plans').catch(() => []),
       ]);
-      setTree(t); setPositions(p); setPlans(pl);
+      setChart(c); setPositions(p); setPlans(pl);
     } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, []);
-  useEffect(() => { api<LaboratoryConfig>('/laboratory-config').then(c => setFacility(c.profile?.facility_name || '')).catch(() => undefined); }, []);
 
-  function startNew() { setForm(emptyPlan); setEditingId('new'); }
   function startEdit(plan: ContinuityPlan) {
     setForm({
       positionId: plan.position_id ? String(plan.position_id) : '',
@@ -970,14 +1101,27 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
   const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
   const positionTitle = (id?: number | null) => positions.find(p => p.id === id)?.title || '—';
 
-  // Flatten the org tree into a simple list of position rows with deputies.
-  const flatten = (nodes: any[]): Array<{ id: number; title: string; holderName?: string; deputyName?: string | null; actingName?: string | null; roleType?: string }> => {
-    const out: any[] = [];
-    const walk = (list: any[]) => { for (const n of list) { if (n.kind === 'position') out.push(n); if (n.children) walk(n.children); } };
-    walk(nodes || []);
-    return out;
-  };
-  const positionsList = tree ? flatten(tree.roots) : [];
+  // Only an appointed post carries a deputy and a continuity plan; the bench
+  // grades are covered by the unit they work in.
+  const corePosts: OrgChartRole[] = chart
+    ? [chart.manager, chart.deputy, ...chart.officers, ...chart.units].filter(Boolean) as OrgChartRole[]
+    : [];
+  const corePositions = positions.filter(p => p.isCore && p.isActive !== false);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const planFor = (positionId: number) => plans.find(pl => pl.position_id === positionId);
+  const covered = corePosts.filter(p => p.deputies.length > 0).length;
+  const documented = corePosts.filter(p => !!planFor(p.positionId)).length;
+  const reviewDue = plans.filter(p => p.next_review_date && p.next_review_date < today).length;
+  const untested = plans.filter(p => !p.last_tested_date).length;
+
+  function documentFor(role: OrgChartRole) {
+    setForm({
+      ...emptyPlan, positionId: String(role.positionId), keyRole: role.title,
+      deputyStaffId: role.deputies[0] ? String(role.deputies[0].staffId) : '',
+    });
+    setEditingId('new');
+  }
 
   return <div>
     <div className="org-subtabs">
@@ -991,53 +1135,71 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
         <h3 style={{ margin: 0 }}>Laboratory organogram</h3>
         {can('organisation.structure', 'edit') && <Link to="/settings/people" className="hint">Edit in Settings → People &amp; Access</Link>}
       </div>
-      <OrgChartBoard roots={tree?.roots || []} facility={facility} onPrintError={onError}
+      <OrgChartBoard model={chart} onOpenStaff={setOpenStaffId} onPrintError={onError}
         emptyText="No positions on the organogram yet. Add positions in Settings → People & Access." />
     </div>}
 
     {sub === 'Deputisation' && <>
-    <div className="card">
+    <KpiStrip items={[
+      { label: 'Core posts', value: corePosts.length },
+      { label: 'Deputy named', value: covered, tone: covered < corePosts.length ? 'warning' : undefined },
+      { label: 'Plans documented', value: documented, tone: documented < corePosts.length ? 'warning' : undefined },
+      { label: 'Never tested', value: untested, tone: untested ? 'warning' : undefined },
+      { label: 'Review overdue', value: reviewDue, tone: reviewDue ? 'danger' : undefined },
+    ]} />
+
+    <div className="card" style={{ marginTop: 16 }}>
       <div className="panel-head">
-        <h3 style={{ margin: 0 }}>Current organogram &amp; deputies</h3>
-        {can('organisation.structure', 'edit') && <Link to="/settings/people" className="hint">Edit in Settings → People &amp; Access</Link>}
+        <h3 style={{ margin: 0 }}>Deputisation of core posts</h3>
+        {can('organisation.structure', 'edit') && <Link to="/settings/people" className="hint">Assign deputies in Settings → People &amp; Access</Link>}
       </div>
-      {positionsList.length === 0 ? <p className="muted">No positions on the organogram yet. Add positions in Settings → People &amp; Access.</p> :
+      <p className="muted" style={{ marginTop: 0, fontSize: 12.5 }}>Every appointed post has a named deputy and a documented arrangement for covering it. Bench grades are covered by their unit and are not listed here.</p>
+      {corePosts.length === 0 ? <p className="muted">No core positions yet. Mark a position as a core post in Settings → People &amp; Access.</p> :
         <table className="data-table">
-          <thead><tr><th>Position</th><th>Holder</th><th>Deputy</th><th>Acting (next in command)</th><th>Continuity plan</th></tr></thead>
+          <thead><tr><th>Post</th><th>Holder</th><th>Deputy</th><th>Continuity plan</th><th>Training</th><th>Last tested</th><th>Next review</th><th></th></tr></thead>
           <tbody>
-            {positionsList.map(p => {
-              const plan = plans.find(pl => pl.position_id === p.id);
-              return <tr key={p.id}>
-                <td>{p.title}</td>
-                <td>{p.holderName || <span className="muted">Vacant</span>}</td>
-                <td>{p.deputyName || <span className="muted">—</span>}</td>
-                <td>{p.actingName || p.deputyName || <span className="muted">—</span>}</td>
-                <td>{plan ? <span className="badge success">Documented</span> : <button className="secondary" onClick={() => { setForm({ ...emptyPlan, positionId: String(p.id), keyRole: p.title }); setEditingId('new'); }}>Document</button>}</td>
+            {corePosts.map(role => {
+              const plan = planFor(role.positionId);
+              return <tr key={role.positionId}>
+                <td>{role.title}</td>
+                <td>{role.holders.length === 0 ? <span className="muted">Vacant</span>
+                  : role.holders.map((h, i) => <span key={h.staffId}>{i > 0 ? ', ' : ''}<button type="button" className="link-btn" onClick={() => setOpenStaffId(h.staffId)}>{h.name}</button></span>)}</td>
+                <td>{role.deputies.length === 0 ? <span className="badge warning">Not named</span>
+                  : role.deputies.map((h, i) => <span key={h.staffId}>{i > 0 ? ', ' : ''}<button type="button" className="link-btn" onClick={() => setOpenStaffId(h.staffId)}>{h.name}</button></span>)}</td>
+                <td>{plan ? <span className="badge success">{plan.plan_number}</span> : <span className="muted">—</span>}</td>
+                <td>{plan ? formatBadge(plan.training_status) : '—'}</td>
+                <td>{plan?.last_tested_date || '—'}</td>
+                <td>{plan?.next_review_date
+                  ? <>{plan.next_review_date}{plan.next_review_date < today && <span className="badge danger">overdue</span>}</>
+                  : '—'}</td>
+                <td>{plan
+                  ? <button className="link-btn" onClick={() => startEdit(plan)}>Open</button>
+                  : can('organisation.structure', 'create') && <button className="secondary" onClick={() => documentFor(role)}>Document</button>}</td>
               </tr>;
             })}
           </tbody>
         </table>}
     </div>
 
-    <div className="card" style={{ marginTop: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <h4 style={{ margin: 0 }}>Continuity plans</h4>
-        <button onClick={startNew}>＋ Add continuity plan</button>
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="panel-head">
+        <h3 style={{ margin: 0 }}>Continuity plans</h3>
+        {can('organisation.structure', 'create') && <button onClick={() => { setForm(emptyPlan); setEditingId('new'); }}>＋ Add continuity plan</button>}
       </div>
-      <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>Document how the laboratory continues to operate if a key member of staff is absent. Each plan identifies the deputy, their authority, and the handover procedure.</p>
+      <p className="muted" style={{ marginTop: 0, fontSize: 12.5 }}>Each plan names the deputy, what triggers the cover, the authority the deputy carries, and how the handover is done.</p>
       {plans.length === 0 ? <p className="muted">No continuity plans documented yet.</p> :
         <table className="data-table">
-          <thead><tr><th>Plan #</th><th>Key role</th><th>Position</th><th>Deputy position</th><th>Deputy staff</th><th>Training</th><th>Last tested</th><th>Next review</th><th></th></tr></thead>
+          <thead><tr><th>Plan #</th><th>Post</th><th>Deputy post</th><th>Deputy</th><th>Training</th><th>Last tested</th><th>Next review</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {plans.map(p => <tr key={p.id}>
               <td>{p.plan_number}</td>
-              <td>{p.key_role}</td>
-              <td>{p.position_title || positionTitle(p.position_id)}</td>
+              <td>{p.position_title || positionTitle(p.position_id) || p.key_role}</td>
               <td>{p.deputy_position_title || positionTitle(p.deputy_position_id)}</td>
               <td>{p.deputy_name || staffName(p.deputy_staff_id)}</td>
               <td>{formatBadge(p.training_status)}</td>
               <td>{p.last_tested_date || '—'}</td>
               <td>{p.next_review_date || '—'}</td>
+              <td>{formatBadge(p.status)}</td>
               <td>
                 <button className="link-btn" onClick={() => startEdit(p)}>Edit</button>{' '}
                 {can('organisation.structure', 'edit') && <button className="link-btn" style={{ color: '#dc2626' }} onClick={() => removePlan(p.id)}>Delete</button>}
@@ -1052,27 +1214,25 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
       <div className="doc-drawer" onClick={e => e.stopPropagation()}>
         <div className="doc-drawer-panel">
           <div className="doc-drawer-head">
-            <h3 style={{ margin: 0 }}>{editingId === 'new' ? 'New continuity plan' : `Edit continuity plan`}</h3>
+            <h3 style={{ margin: 0 }}>{editingId === 'new' ? 'New continuity plan' : 'Continuity plan'}</h3>
             <button className="drawer-close" onClick={() => setEditingId(null)}>×</button>
           </div>
           <div className="doc-drawer-body">
-            {/* Continuity plans are part of the organisation's structure, and
-                that is what the server asks for. The budget right governs
-                something else entirely, so this form was shown to the wrong
-                people and hidden from the right ones. The action follows what
-                the form will actually do. */}
             {can('organisation.structure', editingId === 'new' ? 'create' : 'edit') && <form className="form-grid" onSubmit={submit}>
+              <label>Post<select value={form.positionId} onChange={e => {
+                const pos = corePositions.find(p => String(p.id) === e.target.value);
+                setForm({ ...form, positionId: e.target.value, keyRole: pos?.title || form.keyRole });
+              }} required><option value="">—</option>{corePositions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
               <label>Key role<TextField value={form.keyRole} onValue={nextValue => setForm({ ...form, keyRole: nextValue })} required placeholder="e.g. Laboratory Manager" /></label>
-              <label>Position<select value={form.positionId} onChange={e => setForm({ ...form, positionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
-              <label>Deputy position<select value={form.deputyPositionId} onChange={e => setForm({ ...form, deputyPositionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
-              <label>Deputy staff (specific person)<select value={form.deputyStaffId} onChange={e => setForm({ ...form, deputyStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-              <label>Activation trigger<TextField as="textarea" value={form.activationTrigger} onValue={nextValue => setForm({ ...form, activationTrigger: nextValue })} placeholder="Circumstances that trigger the plan (planned leave, illness, emergency)" /></label>
-              <label>Acting arrangement<TextField as="textarea" value={form.actingArrangement} onValue={nextValue => setForm({ ...form, actingArrangement: nextValue })} placeholder="Who acts, how they are informed, expected duration…" /></label>
-              <label>Authority scope<TextField as="textarea" value={form.authorityScope} onValue={nextValue => setForm({ ...form, authorityScope: nextValue })} placeholder="Which decisions the acting person may make, and which must escalate" /></label>
-              <label>Handover procedure<TextField as="textarea" value={form.handoverProcedure} onValue={nextValue => setForm({ ...form, handoverProcedure: nextValue })} placeholder="Briefing steps, key documents, ongoing NCs / risks, active reviews" /></label>
-              <label>Training status<select value={form.trainingStatus} onChange={e => setForm({ ...form, trainingStatus: e.target.value })}><option value="ready">Ready</option><option value="in_progress">In progress</option><option value="not_ready">Not ready</option></select></label>
-              <label>Last tested date<input type="date" value={form.lastTestedDate} onChange={e => setForm({ ...form, lastTestedDate: e.target.value })} /></label>
-              <label>Next review date<input type="date" value={form.nextReviewDate} onChange={e => setForm({ ...form, nextReviewDate: e.target.value })} /></label>
+              <label>Deputy post<select value={form.deputyPositionId} onChange={e => setForm({ ...form, deputyPositionId: e.target.value })}><option value="">—</option>{corePositions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
+              <label>Deputy (person)<select value={form.deputyStaffId} onChange={e => setForm({ ...form, deputyStaffId: e.target.value })}><option value="">—</option>{staff.filter(s => !!s.isActive).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+              <label>Activation trigger<TextField as="textarea" value={form.activationTrigger} onValue={nextValue => setForm({ ...form, activationTrigger: nextValue })} placeholder="What brings the plan into use — planned leave, illness, emergency" /></label>
+              <label>Acting arrangement<TextField as="textarea" value={form.actingArrangement} onValue={nextValue => setForm({ ...form, actingArrangement: nextValue })} placeholder="Who acts, how they are informed, expected duration" /></label>
+              <label>Authority scope<TextField as="textarea" value={form.authorityScope} onValue={nextValue => setForm({ ...form, authorityScope: nextValue })} placeholder="Which decisions the deputy may take, and which must escalate" /></label>
+              <label>Handover procedure<TextField as="textarea" value={form.handoverProcedure} onValue={nextValue => setForm({ ...form, handoverProcedure: nextValue })} placeholder="Briefing steps, key documents, open work to carry" /></label>
+              <label>Deputy training<select value={form.trainingStatus} onChange={e => setForm({ ...form, trainingStatus: e.target.value })}><option value="ready">Ready</option><option value="in_progress">In progress</option><option value="not_ready">Not ready</option></select></label>
+              <label>Last tested<input type="date" value={form.lastTestedDate} onChange={e => setForm({ ...form, lastTestedDate: e.target.value })} /></label>
+              <label>Next review<input type="date" value={form.nextReviewDate} onChange={e => setForm({ ...form, nextReviewDate: e.target.value })} /></label>
               <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="retired">Retired</option></select></label>
               <label>Notes<TextField as="textarea" value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
               <button type="submit">Save plan</button>
@@ -1081,6 +1241,8 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
         </div>
       </div>
     </div>}
+
+    {openStaffId !== null && <StaffProfileModal staffId={openStaffId} onClose={() => setOpenStaffId(null)} />}
   </div>;
 }
 

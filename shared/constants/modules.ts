@@ -69,8 +69,21 @@ export const PERMISSION_ACTIONS = ['view', 'create', 'edit', 'void_archive', 'ex
 export const PERMISSION_SOURCES = ['Role default', 'Position default', 'Section scope', 'Technical authorization', 'Manual override', 'Denied override'] as const;
 export const TECHNICAL_AUTHORIZATION_LEVELS = ['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'] as const;
 
+/**
+ * An appointed post — the manager, his deputy, the officers, the supervisors —
+ * as opposed to a bench grade people are graded into. Appointed posts are the
+ * ones the organogram draws at the top, the leadership list names, and the
+ * deputisation register covers. A laboratory can change any position's kind in
+ * Settings; this is only what a title suggests when one is first created.
+ */
+export function isCorePositionTitle(title: string): boolean {
+  const t = title.toLowerCase();
+  if (/scientist|technician|technologist|assistant|intern|student|trainee|phlebotom|attendant|orderly|aide/.test(t)) return false;
+  return /manager|supervisor|officer|head|director|auditor|coordinator|administrator/.test(t);
+}
+
 export const DEFAULT_POSITIONS = [
-  'Laboratory Manager', 'Quality Manager', 'Quality Team Member', 'Secretary', 'Safety Manager',
+  'Laboratory Manager', 'Deputy Laboratory Manager', 'Quality Manager', 'Quality Team Member', 'Secretary', 'Safety Manager',
   'Blood Bank Unit Supervisor', 'Microbiology Unit Supervisor', 'Biochemistry Unit Supervisor', 'Haematology Unit Supervisor',
   'Stores Officer', 'Customer Service Officer', 'POCT Officer', 'Biomedical Scientist', 'Technician',
   'System Administrator', 'Data Officer'
