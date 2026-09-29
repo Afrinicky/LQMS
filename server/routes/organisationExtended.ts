@@ -258,9 +258,21 @@ export function organisationExtendedRoutes() {
       ORDER BY cp.key_role`).all());
   });
 
+  // A continuity plan belongs to an appointed post. Bench grades are covered by
+  // the unit they work in, not by a plan of their own, so a plan may only be
+  // raised against a position the laboratory has marked as a core position.
+  const coreOrFail = (db: ReturnType<typeof getDb>, positionId: number | null, res: any): boolean => {
+    if (positionId == null) return true;
+    const row = db.prepare('SELECT is_core AS isCore, title FROM positions WHERE id = ?').get(positionId) as { isCore: number; title: string } | undefined;
+    if (!row) { res.status(400).json({ error: 'Select a valid position.' }); return false; }
+    if (!row.isCore) { res.status(400).json({ error: `${row.title} is not a core position, so it does not carry a continuity plan.` }); return false; }
+    return true;
+  };
+
   router.post('/continuity-plans', requirePermission('organisation.structure', 'create'), (req, res) => {
     if (!req.body.keyRole) return res.status(400).json({ error: 'keyRole is required' });
     const db = getDb();
+    if (!coreOrFail(db, parseIntNullable(req.body.positionId), res)) return;
     const num = generateRecordNumber(db, 'continuity_plans', 'CONT', new Date().toISOString());
     const r = db.prepare(`INSERT INTO continuity_plans (plan_number, position_id, key_role, deputy_position_id, deputy_staff_id, acting_arrangement, authority_scope, handover_procedure, activation_trigger, training_status, last_tested_date, next_review_date, status, notes, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
@@ -278,6 +290,7 @@ export function organisationExtendedRoutes() {
     const db = getDb();
     const old = db.prepare('SELECT * FROM continuity_plans WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Plan not found' });
+    if (!coreOrFail(db, parseIntNullable(req.body.positionId), res)) return;
     db.prepare(`UPDATE continuity_plans SET position_id = ?, key_role = ?, deputy_position_id = ?, deputy_staff_id = ?, acting_arrangement = ?, authority_scope = ?, handover_procedure = ?, activation_trigger = ?, training_status = ?, last_tested_date = ?, next_review_date = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
       parseIntNullable(req.body.positionId) ?? old.position_id, req.body.keyRole ?? old.key_role,
       parseIntNullable(req.body.deputyPositionId) ?? old.deputy_position_id,

@@ -261,6 +261,26 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
       database.exec('ALTER TABLE positions ADD COLUMN access_profile_role_id INTEGER REFERENCES roles(id)');
     }
 
+    // A position is either an APPOINTED (core) role — the manager, his deputy,
+    // the quality, safety, data and customer-service officers, the unit
+    // supervisors and anything else the laboratory appoints — or a bench role
+    // people are graded into. Only an appointed role carries a deputy, a
+    // continuity plan and a place in the leadership list, so the distinction is
+    // stored rather than guessed at on each screen. Existing rows are
+    // classified once, from their title; after that it is the laboratory's own.
+    if (positionColumns.length > 0 && !positionColumns.some(c => c.name === 'is_core')) {
+      database.exec('ALTER TABLE positions ADD COLUMN is_core INTEGER NOT NULL DEFAULT 0');
+      database.exec(`UPDATE positions SET is_core = 1 WHERE
+        title LIKE '%manager%' OR title LIKE '%supervisor%' OR title LIKE '%officer%'
+        OR title LIKE '%head%' OR title LIKE '%director%' OR title LIKE '%auditor%'
+        OR title LIKE '%coordinator%' OR title LIKE '%administrator%'`);
+      database.exec(`UPDATE positions SET is_core = 0 WHERE
+        title LIKE '%scientist%' OR title LIKE '%technician%' OR title LIKE '%technologist%'
+        OR title LIKE '%assistant%' OR title LIKE '%intern%' OR title LIKE '%student%'
+        OR title LIKE '%trainee%' OR title LIKE '%phlebotom%' OR title LIKE '%attendant%'
+        OR title LIKE '%orderly%' OR title LIKE '%aide%'`);
+    }
+
     // Fold whatever a laboratory had configured under the old "Position" tab
     // into a profile of its own, so the configuration is not lost — but leave
     // the position UNMAPPED. Mapping it would change, silently, which profile
