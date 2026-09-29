@@ -1,12 +1,14 @@
 <!doctype html>
-<html lang="en">
+<!-- data-theme is set here, not only by the script below, so the first paint
+     is the default theme even if the script is delayed or blocked. -->
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SECH_LIMS by Nickland</title>
   <!-- Progressive Web App: installable on desktop and mobile, served over the LAN. -->
   <link rel="manifest" href="/manifest.webmanifest" />
-  <meta name="theme-color" content="#FFFFFF" />
+  <meta name="theme-color" content="#0A1322" />
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -18,28 +20,20 @@
     (function () {
       try {
         var t = localStorage.getItem('sechlims.theme');
-        if (t !== 'light' && t !== 'dark') t = 'light';
+        if (t !== 'light' && t !== 'dark') t = 'dark';
         document.documentElement.setAttribute('data-theme', t);
         var m = document.querySelector('meta[name="theme-color"]');
         if (m) m.setAttribute('content', t === 'dark' ? '#0A1322' : '#FFFFFF');
       } catch (e) {
-        document.documentElement.setAttribute('data-theme', 'light');
+        document.documentElement.setAttribute('data-theme', 'dark');
       }
     })();
   </script>
   <style>
+    /* Dark is the default, so it is the base here too: an installation that has
+       never chosen a theme boots on the same colour the Electron window and the
+       web manifest already paint, with no white flash between them. */
     :root {
-      /* Matches the application's light workspace, so the splash and the first
-         painted screen are the same colour rather than two shades of white. */
-      --boot-bg: radial-gradient(900px 560px at 50% -14%, rgba(47,107,255,0.10), transparent 62%),
-                 linear-gradient(170deg, #EEF1F8 0%, #DCE3F0 100%);
-      --boot-text: #0B1524;
-      --boot-muted: #495872;
-      --boot-faint: #6C7B94;
-      --boot-panel: #E4EAF3;
-      --boot-track: rgba(47,107,255,0.22);
-    }
-    :root[data-theme="dark"] {
       --boot-bg: radial-gradient(1000px 640px at 50% -12%, rgba(47,107,255,0.18), transparent 60%),
                  linear-gradient(160deg, #0A1322 0%, #060A14 100%);
       --boot-text: #F5F8FF;
@@ -47,6 +41,17 @@
       --boot-faint: #5A6680;
       --boot-panel: #122038;
       --boot-track: rgba(78,141,255,0.18);
+    }
+    /* Matches the application's light workspace, so for someone who has chosen
+       light the splash and the first painted screen are the same colour. */
+    :root[data-theme="light"] {
+      --boot-bg: radial-gradient(900px 560px at 50% -14%, rgba(47,107,255,0.10), transparent 62%),
+                 linear-gradient(170deg, #EEF1F8 0%, #DCE3F0 100%);
+      --boot-text: #0B1524;
+      --boot-muted: #495872;
+      --boot-faint: #6C7B94;
+      --boot-panel: #E4EAF3;
+      --boot-track: rgba(47,107,255,0.22);
     }
     html, body, #root { min-height: 100vh; margin: 0; }
     body {

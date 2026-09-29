@@ -13,8 +13,18 @@ function readStored(): Theme | null {
   } catch { return null; }
 }
 
+/**
+ * Dark is the default: it is the interface the laboratory works in, it matches
+ * the Electron window's own background and the web manifest, and a bench that
+ * runs through the night is not served by a white screen. A stored choice
+ * always wins, so this only decides what someone sees before they have ever
+ * touched the toggle.
+ *
+ * The same fallback is written into index.html, which sets data-theme before
+ * the first paint; if one changes, the other has to change with it.
+ */
 export function resolveInitialTheme(): Theme {
-  return readStored() ?? 'light';
+  return readStored() ?? 'dark';
 }
 
 export function applyTheme(theme: Theme) {
@@ -27,7 +37,7 @@ export function applyTheme(theme: Theme) {
 
 type ThemeValue = { theme: Theme; setTheme: (t: Theme) => void; toggleTheme: () => void };
 
-const ThemeContext = createContext<ThemeValue>({ theme: 'light', setTheme: () => {}, toggleTheme: () => {} });
+const ThemeContext = createContext<ThemeValue>({ theme: 'dark', setTheme: () => {}, toggleTheme: () => {} });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(resolveInitialTheme);
