@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard, ActingSupervisorsBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import PermissionTabs from '../components/PermissionTabs';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
 import StaffFiles from './personnel/StaffFiles';
@@ -246,6 +247,10 @@ export function PersonnelManagementPage() {
     catch (e) { setError(errorText(e)); }
   }
 
+  // Search results and alerts carry ?focus=staff:<id>; flash the row once the
+  // register has loaded it.
+  useFocusTarget(staff);
+
   const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Files', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
 
   return <div className="module-page">
@@ -304,7 +309,7 @@ export function PersonnelManagementPage() {
             const today = new Date().toISOString().slice(0, 10);
             const licExpiringSoon = s.licenceExpiryDate && s.licenceExpiryDate <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && s.licenceExpiryDate >= today;
             const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
-            return <tr key={s.id}>
+            return <tr key={s.id} {...focusAttr('staff', s.id)}>
               <td>{s.employeeNo || '—'}</td><td>{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</td>
               <td>{s.designation || '—'}</td><td>{s.jobTitle || '—'}</td><td>{s.unit || (s.sectionId ? sections.find(x => x.id === s.sectionId)?.name : '') || '—'}</td>
               <td>{s.personnelCategory ? <span className="badge">{s.personnelCategory}</span> : '—'}</td>

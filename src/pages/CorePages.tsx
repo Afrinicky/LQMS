@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, Search, FlaskConical, ArrowRight, IdCard, PackageSearch } from 'lucide-react';
+import { Bell, FlaskConical, ArrowRight, IdCard, PackageSearch } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import DisabledModule from '../components/DisabledModule';
@@ -11,7 +11,7 @@ import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
-import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
+import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule, GlobalSearch } from '../components/ui';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -93,11 +93,10 @@ export function Home() {
             <span>by Nickland</span>
           </span>
         </div>
-        <div className="search" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--faint)', maxWidth: 480, marginLeft: 18 }}>
-          <Search size={16} />
-          <input placeholder="Search documents, samples, equipment, personnel…"
-            style={{ border: 0, background: 'transparent', padding: 0, boxShadow: 'none', flex: 1 }} />
-        </div>
+        <GlobalSearch
+          placeholder="Search documents, staff, equipment, actions, evidence…"
+          style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--faint)', maxWidth: 480 }}
+        />
         <div className="topbar-actions">
           <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
           {/* The bell is personal, so it opens the personal inbox — which is in
