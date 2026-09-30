@@ -470,6 +470,12 @@ function RunControlDialog({ control, onClose, onSaved }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<any>(null);
+  // The control material itself, or a sample this laboratory already tested —
+  // the same choice the module offers, because a lot running out on a Sunday
+  // does not wait for somebody to reach a desktop.
+  const [runKind, setRunKind] = useState<'control' | 'retained_sample'>('control');
+  const [samples, setSamples] = useState<any[]>([]);
+  const [sampleId, setSampleId] = useState('');
 
   useEffect(() => {
     void (async () => {
@@ -483,6 +489,12 @@ function RunControlDialog({ control, onClose, onSaved }: {
     })();
   }, [control.id, control.preferredEntryMethod]);
 
+  useEffect(() => {
+    if (runKind !== 'retained_sample') return;
+    api<any[]>(`/iqc/portal/controls/${control.id}/retained-samples`)
+      .then(setSamples).catch(() => setSamples([]));
+  }, [control.id, runKind]);
+
   // An analyser attached to this control is always a door, whether or not
   // somebody remembered to tick it on the control's definition. Hiding the one
   // route that does not involve typing twenty-three numbers, because a setting
@@ -493,6 +505,10 @@ function RunControlDialog({ control, onClose, onSaved }: {
     : declared;
   const analytes = detail?.analytes ?? [];
   const qualitative = detail?.material.control_type === 'qualitative';
+  const retained = runKind === 'retained_sample';
+  const sample = samples.find(x => String(x.id) === sampleId);
+  /** What the chosen sample originally gave for one parameter. */
+  const originalFor = (analyteId: number) => sample?.values?.find(v => v.iqc_analyte_id === analyteId);
 
   /** Fold a parsed mapping into the value boxes, so every door ends in one form. */
   const applyMapping = useCallback((next: IqcMapping) => {
@@ -537,12 +553,15 @@ function RunControlDialog({ control, onClose, onSaved }: {
           : { analyteId: a.id, value: Number(raw) };
       });
     if (!readings.length) { setProblem('Enter at least one result before saving the run.'); setBusy(null); return; }
+    if (retained && !sampleId) { setProblem('Choose the previously run sample you are re-reading.'); setBusy(null); return; }
 
     try {
       const result = await api<any>('/iqc/runs', {
         method: 'POST',
         body: JSON.stringify({
           iqcMaterialId: control.id,
+          runKind,
+          retainedSampleId: retained ? Number(sampleId) : undefined,
           runDate,
           runTime, reagentLot: reagentLot || undefined, comment: comment || undefined,
           equipmentId: control.equipmentId ?? undefined,
@@ -599,7 +618,46 @@ function RunControlDialog({ control, onClose, onSaved }: {
             {control.equipmentName ? ` · ${control.equipmentName}` : ''}
           </p>
 
-          {methods.length > 1 && (
+          {/* The control material itself, or a sample already tested. The same
+              choice the module offers — a lot running out does not wait for
+              somebody to reach a desktop. */}
+          <div className="iqc-kind">
+            <button type="button" className={!retained ? 'is-on' : ''} onClick={() => setRunKind('control')}>
+              Control material
+            </button>
+            <button type="button" className={retained ? 'is-on' : ''} onClick={() => setRunKind('retained_sample')}>
+              Previously run sample
+            </button>
+          </div>
+
+          {retained && (
+            <label className="iqc-kind-pick">
+              <span>Sample</span>
+              <select value={sampleId} onChange={e => setSampleId(e.target.value)}>
+                <option value="">Choose a sample…</option>
+                {samples.map(x => (
+                  <option key={x.id} value={x.id}>
+                    {x.sample_reference} · first tested {x.original_run_date}
+                    {x.rerun_count ? ` · re-read ${x.rerun_count}×` : ''}
+                  </option>
+                ))}
+              </select>
+              {samples.length === 0 && (
+                <span className="muted">
+                  No sample is on this control&rsquo;s register yet. One is added under Quality Control &rarr;
+                  Run Control, where its original result is recorded.
+                </span>
+              )}
+              {sample && (
+                <span className="muted">
+                  Re-read against what it gave on {sample.original_run_date}
+                  {sample.original_run_number ? `, covered by ${sample.original_run_number}` : ''}.
+                </span>
+              )}
+            </label>
+          )}
+
+          {methods.length > 1 && !retained && (
             <div className="iqc-methods">
               {methods.map(m => (
                 <button key={m} type="button" className={method === m ? 'is-active' : ''}
@@ -609,13 +667,13 @@ function RunControlDialog({ control, onClose, onSaved }: {
               ))}
             </div>
           )}
-          <p className="iqc-method-hint">{IQC_ENTRY_METHOD_HINTS[method]}</p>
+          {!retained && <p className="iqc-method-hint">{IQC_ENTRY_METHOD_HINTS[method]}</p>}
 
-          {method === 'paste' && <PastePanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
-          {method === 'worksheet' && <WorksheetPanel controlId={control.id} analytes={analytes} values={values} setValues={setValues} onProblem={setProblem} />}
-          {method === 'upload' && <UploadPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
-          {method === 'scan' && <ScanPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
-          {method === 'instrument' && <InstrumentPanel control={control} detail={detail} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && method === 'paste' && <PastePanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && method === 'worksheet' && <WorksheetPanel controlId={control.id} analytes={analytes} values={values} setValues={setValues} onProblem={setProblem} />}
+          {!retained && method === 'upload' && <UploadPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && method === 'scan' && <ScanPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && method === 'instrument' && <InstrumentPanel control={control} detail={detail} onMapped={applyMapping} onProblem={setProblem} />}
 
           {mapping && <MappingReport mapping={mapping} />}
 
@@ -672,7 +730,12 @@ function RunControlDialog({ control, onClose, onSaved }: {
                           onValue={next => setValues(v => ({ ...v, [a.id]: next }))} />
                       )}
                       <span className="iqc-an-range">
-                        {a.target_mean != null ? `mean ${a.target_mean}` : ''}
+                        {retained
+                          ? (originalFor(a.id)
+                            ? `was ${originalFor(a.id)!.original_value ?? originalFor(a.id)!.original_qualitative_result ?? '—'}`
+                            : 'not recorded')
+                          : ''}
+                        {retained ? '' : a.target_mean != null ? `mean ${a.target_mean}` : ''}
                         {a.acceptable_low != null || a.acceptable_high != null
                           ? ` ${a.acceptable_low ?? '−'}–${a.acceptable_high ?? '−'}` : ''}
                         {a.expected_result ? QUALITATIVE_LABELS[a.expected_result as keyof typeof QUALITATIVE_LABELS] ?? a.expected_result : ''}
@@ -708,8 +771,10 @@ function RunControlDialog({ control, onClose, onSaved }: {
           {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
 
           <div className="pr-btns">
-            <button type="button" disabled={busy === 'save' || filled === 0} onClick={() => void save()}>
-              {busy === 'save' ? <Loader2 size={14} className="pd-spin" /> : <Check size={14} />} Record the run
+            <button type="button" disabled={busy === 'save' || filled === 0 || (retained && !sampleId)}
+              onClick={() => void save()}>
+              {busy === 'save' ? <Loader2 size={14} className="pd-spin" /> : <Check size={14} />}
+              {retained ? ' Record the re-read' : ' Record the run'}
             </button>
             <button type="button" className="secondary" onClick={onClose}>Cancel</button>
           </div>
