@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlaskConical, Beaker, CheckCircle2, AlertTriangle, LineChart, Plus, Trash2,
-  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil,
+  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X,
 } from 'lucide-react';
 import { api, errorText, apiRead } from '../services/api';
 import { useModules } from '../hooks/useModules';
@@ -20,8 +20,11 @@ import {
   QUALITATIVE_SCALES, QUALITATIVE_LABELS,
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, AST_METHODS, AST_METHOD_LABELS,
   CS_SCOPES, CS_SCOPE_LABELS, csNeedsOrganism, csNeedsPanel,
-  RULE_LABELS, RULE_MEANING, isRejection,
-  type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome,
+  RULE_LABELS, RULE_MEANING, isRejection, scaleForOutcome,
+  CONTINUITY_TOLERANCE_KINDS, CONTINUITY_TOLERANCE_KIND_LABELS, DEFAULT_CONTINUITY_TOLERANCE,
+  IQC_RUN_KINDS, IQC_RUN_KIND_LABELS, RETAINED_SOURCE_LABELS,
+  effectiveTolerance, formatTolerance,
+  type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome, type IqcRunKind,
 } from '../../shared/constants/iqc';
 import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
@@ -58,6 +61,8 @@ type Material = {
   prepared_by_name: string | null; preparation_date: string | null; preparation_method: string | null;
   base_material: string | null; validation_summary: string | null; open_vial_expiry: string | null;
   expected_organism: string | null; cs_scope: string | null;
+  performing_section_id: number | null;
+  continuity_tolerance_kind: string | null; continuity_tolerance_value: number | null;
   analyte_count: number; run_count: number; last_run_date: string | null;
 };
 
@@ -67,6 +72,7 @@ type Analyte = {
   acceptable_low: number | null; acceptable_high: number | null;
   decimal_places: number; expected_result: string | null;
   ast_method: string | null; expected_interpretation: string | null;
+  continuity_tolerance_kind: string | null; continuity_tolerance_value: number | null;
   is_active: number; display_order: number;
 };
 
@@ -76,6 +82,38 @@ type Run = {
   corrective_action: string | null; reviewed_at: string | null; reviewed_by: string | null;
   material_name: string; lot_number: string; test_name: string; control_type: IqcControlType;
   level_label: string | null; equipment_name: string | null; operator_name: string | null;
+  run_kind: string | null; retained_sample_reference: string | null;
+};
+
+/* ---- previously run samples, kept when control material runs out ---- */
+
+type RetainedValue = {
+  iqc_analyte_id: number; analyte: string; unit: string | null;
+  original_value: number | null; original_qualitative_result: string | null; original_interpretation: string | null;
+};
+
+type RetainedSample = {
+  id: number; sample_code: string; sample_reference: string; sample_type: string | null;
+  original_run_date: string; original_run_time: string | null; source: string;
+  equipment_name: string | null; section_name: string | null; reason: string | null;
+  original_run_number: string | null; original_control_date: string | null; original_control_status: string | null;
+  rerun_count: number; last_rerun_date: string | null;
+  values: RetainedValue[];
+};
+
+type CoverageRun = { id: number; run_number: string; run_date: string; run_time: string | null; status: string; rule_summary: string | null };
+
+type FeedCandidate = {
+  id: number; sample_id: string | null; received_at: string; instrument_run_at: string | null;
+  feed_name: string | null; parsed_values: { analyte?: string; value?: number | string }[];
+};
+
+type RunOutcome = {
+  status: string; ruleSummary: string | null; mayReleasePatientResults: boolean;
+  analytes: {
+    analyte: string; status: string; rule: string | null; value?: number | null; zScore?: number | null;
+    originalValue?: number | null; deviation?: number | null; deviationPercent?: number | null;
+  }[];
 };
 
 const STATUS_TONE: Record<string, string> = { in_control: 'ok', warning: 'warn', out_of_control: 'bad' };
@@ -204,6 +242,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       {tab === 'Run Control' && (
         canCreate
           ? <RunControl materials={materials.filter(m => m.is_active && (canCreateAll || ownUnit(m)))} equipment={equipment} staff={staff}
+              sections={unitsForDefining} mySectionId={mySectionId ?? (unitsLed[0]?.id ?? null)}
               onRecorded={async (msg) => { await load(); setNotice(msg); }} onError={setError} />
           : <p className="muted">You do not have permission to record control runs.</p>
       )}
@@ -566,6 +605,9 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     preparedByStaffId: '', preparationDate: material.preparation_date ?? '',
     preparationMethod: material.preparation_method ?? '', baseMaterial: material.base_material ?? '',
     validationSummary: material.validation_summary ?? '', expectedOrganism: material.expected_organism ?? '',
+    continuityToleranceKind: material.continuity_tolerance_kind ?? DEFAULT_CONTINUITY_TOLERANCE.kind,
+    continuityToleranceValue: material.continuity_tolerance_value === null || material.continuity_tolerance_value === undefined
+      ? String(DEFAULT_CONTINUITY_TOLERANCE.value) : String(material.continuity_tolerance_value),
   });
   const [rows, setRows] = useState(() => analytes.filter(a => a.is_active).map(a => ({
     analyte: a.analyte, unit: a.unit ?? '',
@@ -575,6 +617,8 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     acceptableHigh: a.acceptable_high === null ? '' : String(a.acceptable_high),
     decimalPlaces: String(a.decimal_places ?? 2), expectedResult: a.expected_result ?? '',
     astMethod: a.ast_method ?? '', expectedInterpretation: a.expected_interpretation ?? '',
+    continuityTolerance: a.continuity_tolerance_value === null || a.continuity_tolerance_value === undefined
+      ? '' : formatTolerance(a.continuity_tolerance_kind, a.continuity_tolerance_value).replace('±', ''),
   })));
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -657,6 +701,11 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
           {CS_SCOPES.map(s => <option key={s} value={s}>{CS_SCOPE_LABELS[s]}</option>)}
         </select></label>}
         {wantsOrganism && <label>Expected organism (reference strain)<TextField value={form.expectedOrganism} onValue={nextValue => set('expectedOrganism', nextValue)} placeholder="e.g. E. coli ATCC 25922" required /></label>}
+        <label>Re-read tolerance<select value={form.continuityToleranceKind} onChange={e => set('continuityToleranceKind', e.target.value)}>
+          {CONTINUITY_TOLERANCE_KINDS.map(k => <option key={k} value={k}>{CONTINUITY_TOLERANCE_KIND_LABELS[k]}</option>)}
+        </select></label>
+        <label>Allowed difference<input type="number" step="any" min={0} value={form.continuityToleranceValue}
+          onChange={e => set('continuityToleranceValue', e.target.value)} /></label>
       </div>
 
       {material.source === 'in_house' && (
@@ -681,7 +730,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
           <th>{isCs ? 'Antimicrobial agent' : 'Analyte'}</th>
           {isCs
             ? <><th>Method</th><th>Expected category</th></>
-            : <><th>Unit</th>{qualitative ? <th>Expected result</th> : <><th>Target mean</th><th>Target SD</th><th>Acceptable low</th><th>Acceptable high</th><th>Decimals</th></>}</>}
+            : <><th>Unit</th>{qualitative ? <th>Expected result</th> : <><th>Target mean</th><th>Target SD</th><th>Acceptable low</th><th>Acceptable high</th><th>Decimals</th><th>Re-read ±</th></>}</>}
           <th />
         </tr></thead>
         <tbody>
@@ -715,6 +764,10 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
                       <td><input type="number" step="any" value={r.acceptableLow} onChange={e => setRow(i, 'acceptableLow', e.target.value)} style={{ width: 96 }} /></td>
                       <td><input type="number" step="any" value={r.acceptableHigh} onChange={e => setRow(i, 'acceptableHigh', e.target.value)} style={{ width: 96 }} /></td>
                       <td><input type="number" min="0" max="4" value={r.decimalPlaces} onChange={e => setRow(i, 'decimalPlaces', e.target.value)} style={{ width: 64 }} /></td>
+                      <td><TextField value={r.continuityTolerance} onValue={nextValue => setRow(i, 'continuityTolerance', nextValue)}
+                        placeholder={form.continuityToleranceValue
+                          ? (form.continuityToleranceKind === 'absolute' ? form.continuityToleranceValue : `${form.continuityToleranceValue}%`)
+                          : ''} style={{ width: 76 }} /></td>
                     </>
                   )}
                 </>
@@ -727,7 +780,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
           ))}
         </tbody>
       </table>
-      <button type="button" className="secondary tiny" onClick={() => setRows(rs => [...rs, { analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '' }])}>
+      <button type="button" className="secondary tiny" onClick={() => setRows(rs => [...rs, { analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '', continuityTolerance: '' }])}>
         <Plus size={12} /> {isCs ? 'Add an agent' : 'Add an analyte'}
       </button>
       </>}
@@ -776,32 +829,73 @@ function ImportControls({ onImported }: { onImported: (created: number) => void 
 
 /* --------------------------------------------------------------- run control */
 
-function RunControl({ materials, equipment, staff, onRecorded, onError }: {
+function RunControl({ materials, equipment, staff, sections, mySectionId, onRecorded, onError }: {
   materials: Material[]; equipment: EquipmentItem[]; staff: Staff[];
+  /** The units this account may record a run for. One unit means no picker. */
+  sections: Section[]; mySectionId: number | null;
   onRecorded: (msg: string) => void | Promise<void>; onError: (m: string) => void;
 }) {
   const { can } = usePermissions();
+  const [runKind, setRunKind] = useState<IqcRunKind>('control');
+  const [unitId, setUnitId] = useState<string>(mySectionId != null ? String(mySectionId) : '');
   const [materialId, setMaterialId] = useState('');
   const [analytes, setAnalytes] = useState<Analyte[]>([]);
   const [values, setValues] = useState<Record<number, string>>({});
   const [meta, setMeta] = useState({ runDate: new Date().toISOString().slice(0, 10), runTime: '', shift: '', equipmentId: '', reagentLot: '', operatorStaffId: '', comment: '', observedOrganism: '' });
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<{ status: string; ruleSummary: string | null; analytes: { analyte: string; status: string; rule: string | null; zScore: number | null }[]; mayReleasePatientResults: boolean } | null>(null);
+  const [outcome, setOutcome] = useState<RunOutcome | null>(null);
 
+  // Previously run samples: the register for this control, which one is being
+  // re-read, and whether the form for enrolling a new one is open.
+  const [samples, setSamples] = useState<RetainedSample[]>([]);
+  const [sampleId, setSampleId] = useState('');
+  const [enrolling, setEnrolling] = useState(false);
+
+  const unitOf = (m: Material) => m.performing_section_id ?? m.section_id;
+  const canChooseUnit = sections.length > 1;
+  const inUnit = unitId === '' || !canChooseUnit
+    ? materials
+    : materials.filter(m => String(unitOf(m) ?? '') === unitId);
   const material = materials.find(m => String(m.id) === materialId);
+  const sample = samples.find(s => String(s.id) === sampleId);
+  const retained = runKind === 'retained_sample';
+  const isCs = material?.control_type === 'culture_sensitivity';
+  const categorical = material?.control_type === 'qualitative' || isCs;
+  // The instruments offered narrow to the unit, so a haematology bench is not
+  // scrolling past the chemistry analysers to find its own.
+  const instruments = unitId === '' || !canChooseUnit
+    ? equipment
+    : equipment.filter(x => x.section_id == null || String(x.section_id) === unitId);
+
+  // A control the unit picker has just filtered away cannot stay selected.
+  useEffect(() => {
+    if (materialId && !inUnit.some(m => String(m.id) === materialId)) setMaterialId('');
+  }, [unitId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    setOutcome(null); setValues({});
+    setOutcome(null); setValues({}); setSampleId(''); setEnrolling(false); setSamples([]);
     if (!materialId) { setAnalytes([]); return; }
     api<Analyte[]>(`/iqc/materials/${materialId}/analytes`)
       .then(rows => setAnalytes(rows.filter(a => a.is_active)))
       .catch(() => setAnalytes([]));
   }, [materialId]);
 
+  const loadSamples = useCallback(async () => {
+    if (!materialId) return;
+    try { setSamples(await api<RetainedSample[]>(`/iqc/materials/${materialId}/retained-samples`)); }
+    catch { setSamples([]); }
+  }, [materialId]);
+
+  useEffect(() => { if (retained && materialId) void loadSamples(); }, [retained, materialId, loadSamples]);
+
+  /** What the chosen sample originally gave for one analyte. */
+  const originalFor = (analyteId: number) => sample?.values.find(v => v.iqc_analyte_id === analyteId);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!material) return onError('Choose which control you are running.');
-    const isCs = material.control_type === 'culture_sensitivity';
+    if (retained && !sample) return onError('Choose the previously run sample you are re-reading.');
+
     const readings = analytes
       .map(a => {
         const raw = values[a.id];
@@ -812,27 +906,43 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
           : { analyteId: a.id, value: Number(raw) };
       })
       .filter(Boolean);
-    if (readings.length === 0 && !(isCs && meta.observedOrganism.trim())) {
-      return onError(isCs ? 'Record the organism identified and/or at least one susceptibility category.' : 'Enter at least one reading.');
-    }
-    if (isCs && csNeedsOrganism(material.cs_scope) && !meta.observedOrganism.trim()) {
-      return onError('Record the organism the reference strain identified as.');
+
+    if (retained) {
+      if (readings.length === 0) return onError('Enter what the sample gave on this re-read.');
+    } else {
+      if (readings.length === 0 && !(isCs && meta.observedOrganism.trim())) {
+        return onError(isCs ? 'Record the organism identified and/or at least one susceptibility category.' : 'Enter at least one reading.');
+      }
+      if (isCs && csNeedsOrganism(material.cs_scope) && !meta.observedOrganism.trim()) {
+        return onError('Record the organism the reference strain identified as.');
+      }
     }
 
     setBusy(true);
     try {
-      const r = await api<typeof outcome & { runNumber: string }>('/iqc/runs', {
-        method: 'POST', body: JSON.stringify({ iqcMaterialId: Number(materialId), ...meta, readings }),
+      const r = await api<RunOutcome & { runNumber: string }>('/iqc/runs', {
+        method: 'POST',
+        body: JSON.stringify({
+          iqcMaterialId: Number(materialId), ...meta, readings, runKind,
+          sectionId: unitId || undefined,
+          retainedSampleId: retained ? Number(sampleId) : undefined,
+        }),
       });
       setOutcome(r);
       setValues({});
+      // The sample's card carries how many times it has been re-read, so it is
+      // refreshed rather than left saying "not yet" over a run just recorded.
+      if (retained) await loadSamples();
+      const what = retained ? `Re-read of ${sample!.sample_reference}` : `Run ${r.runNumber}`;
       await onRecorded(
-        r!.status === 'out_of_control'
-          ? `Run ${r!.runNumber} recorded and REJECTED. Patient results are withheld until this is investigated.`
-          : `Run ${r!.runNumber} recorded — ${r!.status === 'warning' ? 'warning flagged' : 'in control'}.`);
+        r.status === 'out_of_control'
+          ? `${what} recorded and REJECTED. Patient results are withheld until this is investigated.`
+          : `${what} recorded — ${r.status === 'warning' ? 'warning flagged' : 'in control'}.`);
     } catch (err) { onError(errorText(err)); }
     finally { setBusy(false); }
   }
+
+  const ready = Boolean(material) && (retained ? Boolean(sample) : (analytes.length > 0 || isCs));
 
   return (
     <>
@@ -866,122 +976,509 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
     {can('iqc', 'create') && <form className="card iqc-run" onSubmit={submit}>
       <div className="section-head"><h3><ClipboardCheck size={16} /> Record a control run</h3></div>
 
-      <div className="form-grid">
-        <label>Control
-          <select value={materialId} onChange={e => setMaterialId(e.target.value)} required>
-            <option value="">Choose a control…</option>
-            {materials.map(m => (
-              <option key={m.id} value={m.id}>
-                {m.material_name}{m.level_label ? ` — ${m.level_label}` : ''} · {m.test_name} · lot {m.lot_number}
+      {/* 1 — what is going on the analyser */}
+      <fieldset className="iqc-step">
+        <legend><span className="step-n">1</span> What are you running?</legend>
+        <div className="iqc-choice">
+          {IQC_RUN_KINDS.map(k => (
+            <button key={k} type="button" className={runKind === k ? 'active' : ''}
+              onClick={() => { setRunKind(k); setOutcome(null); }}>
+              <strong>{IQC_RUN_KIND_LABELS[k]}</strong>
+              <span>
+                {k === 'control'
+                  ? 'The control material itself, judged against the limits on its definition.'
+                  : 'A sample this laboratory already tested, re-read and compared with the result it gave the first time.'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      {/* 2 — which control, and whose bench */}
+      <fieldset className="iqc-step">
+        <legend><span className="step-n">2</span> Which control?</legend>
+        <div className="form-grid">
+          {canChooseUnit && (
+            <label>Unit
+              <select value={unitId} onChange={e => setUnitId(e.target.value)}>
+                <option value="">All units</option>
+                {sections.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}{mySectionId != null && Number(s.id) === Number(mySectionId) ? ' (yours)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>Control
+            <select value={materialId} onChange={e => setMaterialId(e.target.value)} required>
+              <option value="">Choose a control…</option>
+              {inUnit.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.material_name}{m.level_label ? ` — ${m.level_label}` : ''} · {m.test_name} · lot {m.lot_number}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {canChooseUnit && inUnit.length === 0 && (
+          <p className="iqc-note warn">No active control is filed under this unit.</p>
+        )}
+        {material && (
+          <div className="iqc-run-ctx">
+            <span className={`chip type-${material.control_type}`}>{IQC_CONTROL_TYPE_LABELS[material.control_type]}</span>
+            <span className={`chip src-${material.source}`}>{material.source === 'in_house' ? 'In-house' : 'Commercial'}</span>
+            <span className="chip">{IQC_RULE_PROFILE_LABELS[material.rule_profile]}</span>
+            <span className="chip">{IQC_FREQUENCY_LABELS[material.qc_frequency as never] ?? material.qc_frequency}</span>
+            {material.section_name && <span className="chip">{material.section_name}</span>}
+          </div>
+        )}
+      </fieldset>
+
+      {/* 2b — the sample standing in for the control */}
+      {retained && material && (
+        <RetainedSamplePicker
+          material={material} analytes={analytes} samples={samples}
+          sampleId={sampleId} onPick={setSampleId}
+          enrolling={enrolling} onEnrolling={setEnrolling}
+          equipment={instruments}
+          onEnrolled={async (id) => { await loadSamples(); setSampleId(String(id)); setEnrolling(false); }}
+          onError={onError} />
+      )}
+
+      {/* 3 — when, where and who */}
+      {ready && (
+        <fieldset className="iqc-step">
+          <legend><span className="step-n">3</span> When, and on what?</legend>
+          <div className="form-grid">
+            <label>Run date<input type="date" value={meta.runDate} max={new Date().toISOString().slice(0, 10)} onChange={e => setMeta(m => ({ ...m, runDate: e.target.value }))} required /></label>
+            <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
+            <label>Shift<select value={meta.shift} onChange={e => setMeta(m => ({ ...m, shift: e.target.value }))}><option value="">—</option><option>Morning</option><option>Afternoon</option><option>Night</option></select></label>
+            <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">— None (manual method) —</option>{instruments.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+            <label>Reagent lot<TextField value={meta.reagentLot} onValue={nextValue => setMeta(m => ({ ...m, reagentLot: nextValue }))} /></label>
+            <label>Operator<select value={meta.operatorStaffId} onChange={e => setMeta(m => ({ ...m, operatorStaffId: e.target.value }))}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          </div>
+        </fieldset>
+      )}
+
+      {/* 4 — the readings */}
+      {ready && (
+        <fieldset className="iqc-step">
+          <legend><span className="step-n">4</span> {retained ? 'What did it give this time?' : 'The readings'}</legend>
+
+          {!retained && material && isCs && csNeedsOrganism(material.cs_scope) && (
+            <div className="form-grid" style={{ marginBottom: 10 }}>
+              <label>Organism identified
+                <TextField value={meta.observedOrganism} onValue={nextValue => setMeta(m => ({ ...m, observedOrganism: nextValue }))}
+                  placeholder={material.expected_organism ? `Expected: ${material.expected_organism}` : 'Organism the strain identified as'} />
+              </label>
+            </div>
+          )}
+
+          {material && analytes.length > 0 && (
+            <table className="data-table compact iqc-entry">
+              <thead><tr>
+                <th>{isCs ? 'Agent' : 'Analyte'}</th>
+                {retained
+                  ? <><th>Original</th>{!categorical && <th>Allowed</th>}<th>This re-read</th></>
+                  : categorical
+                    ? <><th>Expected</th><th>Observed</th></>
+                    : <><th>Target</th><th>Acceptable</th><th>Result</th></>}
+              </tr></thead>
+              <tbody>
+                {analytes.map(a => {
+                  const original = retained ? originalFor(a.id) : undefined;
+                  const tol = effectiveTolerance(a, material);
+                  return (
+                    <tr key={a.id}>
+                      <td><strong>{a.analyte}</strong>{a.unit ? <span className="muted"> ({a.unit})</span> : null}</td>
+                      {retained ? (
+                        <>
+                          <td className="muted">
+                            {!original ? '—'
+                              : categorical
+                                ? (AST_INTERPRETATION_LABELS[(original.original_interpretation ?? '') as never]
+                                    ?? QUALITATIVE_LABELS[(original.original_qualitative_result ?? '') as QualitativeOutcome]
+                                    ?? original.original_qualitative_result ?? original.original_interpretation ?? '—')
+                                : (original.original_value ?? '—')}
+                          </td>
+                          {!categorical && <td className="muted">{original ? formatTolerance(tol.kind, tol.value) : '—'}</td>}
+                          <td>
+                            {isCs ? (
+                              <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                                <option value="">—</option>
+                                {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                              </select>
+                            ) : material.control_type === 'qualitative' ? (
+                              <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                                <option value="">—</option>
+                                {scaleForOutcome(original?.original_qualitative_result ?? a.expected_result)
+                                  .map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
+                              </select>
+                            ) : (
+                              <input type="number" step="any" value={values[a.id] ?? ''}
+                                onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} />
+                            )}
+                          </td>
+                        </>
+                      ) : isCs ? (
+                        <>
+                          <td>{a.expected_interpretation ? AST_INTERPRETATION_LABELS[a.expected_interpretation as never] ?? a.expected_interpretation : '—'}</td>
+                          <td>
+                            <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                              <option value="">—</option>
+                              {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                            </select>
+                          </td>
+                        </>
+                      ) : material.control_type === 'qualitative' ? (
+                        <>
+                          <td>{a.expected_result ? QUALITATIVE_LABELS[a.expected_result as QualitativeOutcome] : '—'}</td>
+                          <td>
+                            <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                              <option value="">—</option>
+                              {scaleForOutcome(a.expected_result).map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
+                            </select>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="muted">{a.target_mean ?? '—'}{a.target_sd ? ` ± ${a.target_sd}` : ''}</td>
+                          <td className="muted">{a.acceptable_low ?? '—'} – {a.acceptable_high ?? '—'}</td>
+                          <td><input type="number" step="any" value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} /></td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {material && analytes.length === 0 && !isCs && (
+            <p className="iqc-note bad">This control has no analytes defined, so it cannot be run. Edit its definition first.</p>
+          )}
+
+          <label className="stack">Comment<TextField as="textarea" value={meta.comment} onValue={nextValue => setMeta(m => ({ ...m, comment: nextValue }))} rows={2} /></label>
+        </fieldset>
+      )}
+
+      <div className="form-actions">
+        <button type="submit" disabled={busy || !ready}>{busy ? 'Evaluating…' : retained ? 'Record re-read' : 'Record run'}</button>
+      </div>
+
+      {outcome && <RunOutcomePanel outcome={outcome} retained={retained} />}
+    </form>}
+    </>
+  );
+}
+
+/* ------------------------------------------------- previously run samples */
+
+/**
+ * Which previously tested sample is standing in for the control, and what it
+ * originally gave.
+ *
+ * The register is per control, so a sample enrolled against the haematology
+ * control cannot be re-read as if it were the chemistry one. Picking a sample
+ * shows the original result and the control run that covered it, because that
+ * link is the whole reason this is quality control and not a repeat test.
+ */
+function RetainedSamplePicker({ material, analytes, samples, sampleId, onPick, enrolling, onEnrolling, equipment, onEnrolled, onError }: {
+  material: Material; analytes: Analyte[]; samples: RetainedSample[];
+  sampleId: string; onPick: (id: string) => void;
+  enrolling: boolean; onEnrolling: (open: boolean) => void;
+  equipment: EquipmentItem[];
+  onEnrolled: (id: number) => void | Promise<void>; onError: (m: string) => void;
+}) {
+  const sample = samples.find(s => String(s.id) === sampleId);
+  const categorical = material.control_type === 'qualitative' || material.control_type === 'culture_sensitivity';
+
+  return (
+    <fieldset className="iqc-step accent">
+      <legend><span className="step-n">2b</span> Which previously run sample?</legend>
+
+      <div className="iqc-sample-pick">
+        <label>Sample
+          <select value={sampleId} onChange={e => onPick(e.target.value)}>
+            <option value="">Choose a sample…</option>
+            {samples.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.sample_reference} · first tested {s.original_run_date}
+                {s.rerun_count ? ` · re-read ${s.rerun_count}×` : ''}
               </option>
             ))}
           </select>
         </label>
-        <label>Run date<input type="date" value={meta.runDate} onChange={e => setMeta(m => ({ ...m, runDate: e.target.value }))} required /></label>
-        <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
-        <label>Shift<select value={meta.shift} onChange={e => setMeta(m => ({ ...m, shift: e.target.value }))}><option value="">—</option><option>Morning</option><option>Afternoon</option><option>Night</option></select></label>
-        <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">— None (manual method) —</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-        <label>Reagent lot<TextField value={meta.reagentLot} onValue={nextValue => setMeta(m => ({ ...m, reagentLot: nextValue }))} /></label>
-        <label>Operator<select value={meta.operatorStaffId} onChange={e => setMeta(m => ({ ...m, operatorStaffId: e.target.value }))}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <button type="button" className="secondary" onClick={() => onEnrolling(!enrolling)}>
+          {enrolling ? <X size={13} /> : <Plus size={13} />} {enrolling ? 'Close' : 'Add a sample'}
+        </button>
       </div>
 
-      {material && (
-        <div className="iqc-run-ctx">
-          <span className={`chip type-${material.control_type}`}>{IQC_CONTROL_TYPE_LABELS[material.control_type]}</span>
-          <span className={`chip src-${material.source}`}>{material.source === 'in_house' ? 'In-house' : 'Commercial'}</span>
-          <span className="chip">{IQC_RULE_PROFILE_LABELS[material.rule_profile]}</span>
-          <span className="chip">{IQC_FREQUENCY_LABELS[material.qc_frequency as never] ?? material.qc_frequency}</span>
-        </div>
+      {samples.length === 0 && !enrolling && (
+        <p className="iqc-note">No sample is on this control&rsquo;s register yet. Add the one you kept, with the result it originally gave.</p>
       )}
 
-      {material && material.control_type === 'culture_sensitivity' && csNeedsOrganism(material.cs_scope) && (
-        <div className="form-grid" style={{ marginTop: 8 }}>
-          <label>Organism identified
-            <TextField value={meta.observedOrganism} onValue={nextValue => setMeta(m => ({ ...m, observedOrganism: nextValue }))}
-              placeholder={material.expected_organism ? `Expected: ${material.expected_organism}` : 'Organism the strain identified as'} />
-          </label>
-        </div>
+      {enrolling && (
+        <EnrolRetainedSample material={material} analytes={analytes} equipment={equipment}
+          onSaved={onEnrolled} onCancel={() => onEnrolling(false)} onError={onError} />
       )}
 
-      {material && analytes.length > 0 && (
-        <table className="data-table compact iqc-entry">
-          <thead><tr>
-            <th>{material.control_type === 'culture_sensitivity' ? 'Agent' : 'Analyte'}</th>
-            {material.control_type === 'qualitative' || material.control_type === 'culture_sensitivity'
-              ? <><th>Expected</th><th>Observed</th></>
-              : <><th>Target</th><th>Acceptable</th><th>Result</th></>}
-          </tr></thead>
-          <tbody>
-            {analytes.map(a => (
-              <tr key={a.id}>
-                <td><strong>{a.analyte}</strong>{a.unit ? <span className="muted"> ({a.unit})</span> : null}</td>
+      {sample && (
+        <div className="iqc-sample-card">
+          <div className="iqc-sample-head">
+            <strong>{sample.sample_reference}</strong>
+            <span className="chip">{sample.sample_code}</span>
+            {sample.sample_type && <span className="chip">{sample.sample_type}</span>}
+            <span className="chip">{RETAINED_SOURCE_LABELS[(sample.source as never)] ?? sample.source}</span>
+          </div>
+          <dl className="iqc-sample-trace">
+            <div><dt>First tested</dt><dd>{sample.original_run_date}{sample.original_run_time ? ` ${sample.original_run_time}` : ''}</dd></div>
+            <div><dt>Instrument</dt><dd>{sample.equipment_name ?? '—'}</dd></div>
+            <div><dt>Control run that covered it</dt>
+              <dd>
+                {sample.original_run_number
+                  ? <>{sample.original_run_number} · {sample.original_control_date} · {STATUS_LABEL[sample.original_control_status ?? ''] ?? sample.original_control_status}</>
+                  : <span className="iqc-trace-gap">Not linked</span>}
+              </dd>
+            </div>
+            <div><dt>Re-read</dt><dd>{sample.rerun_count ? `${sample.rerun_count} time(s), last ${sample.last_rerun_date}` : 'Not yet'}</dd></div>
+          </dl>
+          <table className="data-table compact iqc-entry">
+            <thead><tr><th>{material.control_type === 'culture_sensitivity' ? 'Agent' : 'Analyte'}</th><th>Original result</th>{!categorical && <th>Allowed difference</th>}</tr></thead>
+            <tbody>
+              {analytes.map(a => {
+                const v = sample.values.find(x => x.iqc_analyte_id === a.id);
+                const tol = effectiveTolerance(a, material);
+                return (
+                  <tr key={a.id}>
+                    <td>{a.analyte}{a.unit ? <span className="muted"> ({a.unit})</span> : null}</td>
+                    <td>
+                      {!v ? <span className="muted">Not recorded</span>
+                        : categorical
+                          ? (AST_INTERPRETATION_LABELS[(v.original_interpretation ?? '') as never]
+                              ?? QUALITATIVE_LABELS[(v.original_qualitative_result ?? '') as QualitativeOutcome]
+                              ?? v.original_qualitative_result ?? v.original_interpretation)
+                          : v.original_value}
+                    </td>
+                    {!categorical && <td className="muted">{v ? formatTolerance(tol.kind, tol.value) : '—'}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {sample.reason && <p className="iqc-note">{sample.reason}</p>}
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
+/**
+ * Putting a sample on the register.
+ *
+ * Its original result is either typed in from the report it was issued on, or
+ * taken off the analyser, which is the same route a control result arrives by.
+ * Either way the record names the control run that was in control on the day,
+ * so the re-read can be followed back to control material.
+ */
+function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel, onError }: {
+  material: Material; analytes: Analyte[]; equipment: EquipmentItem[];
+  onSaved: (id: number) => void | Promise<void>; onCancel: () => void; onError: (m: string) => void;
+}) {
+  const [form, setForm] = useState({
+    sampleReference: '', sampleType: '',
+    originalRunDate: new Date().toISOString().slice(0, 10), originalRunTime: '',
+    equipmentId: material.equipment_id ? String(material.equipment_id) : '',
+    originalIqcRunId: '', reason: '',
+  });
+  const [values, setValues] = useState<Record<number, string>>({});
+  const [coverage, setCoverage] = useState<CoverageRun[]>([]);
+  const [candidates, setCandidates] = useState<FeedCandidate[]>([]);
+  const [source, setSource] = useState<'entered' | 'instrument'>('entered');
+  const [feedMessageId, setFeedMessageId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const categorical = material.control_type === 'qualitative' || material.control_type === 'culture_sensitivity';
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    api<CoverageRun[]>(`/iqc/materials/${material.id}/retained-coverage?on=${form.originalRunDate}`)
+      .then(setCoverage).catch(() => setCoverage([]));
+  }, [material.id, form.originalRunDate]);
+
+  useEffect(() => {
+    if (source !== 'instrument') return;
+    api<FeedCandidate[]>(`/iqc/materials/${material.id}/retained-candidates`)
+      .then(setCandidates).catch(() => setCandidates([]));
+  }, [material.id, source]);
+
+  /** Fill the sample and its original readings from what the analyser sent. */
+  const takeFromInstrument = (id: string) => {
+    setFeedMessageId(id);
+    const message = candidates.find(c => String(c.id) === id);
+    if (!message) return;
+    const next: Record<number, string> = {};
+    for (const parsed of message.parsed_values ?? []) {
+      const match = analytes.find(a => a.analyte.toLowerCase() === String(parsed.analyte ?? '').toLowerCase());
+      if (match && parsed.value !== undefined && parsed.value !== null) next[match.id] = String(parsed.value);
+    }
+    setValues(next);
+    if (message.sample_id) set('sampleReference', message.sample_id);
+    const at = message.instrument_run_at ?? message.received_at;
+    if (at) {
+      set('originalRunDate', String(at).slice(0, 10));
+      set('originalRunTime', String(at).slice(11, 16));
+    }
+  };
+
+  async function save() {
+    if (!form.sampleReference.trim()) return onError('Give the laboratory number the sample was reported under.');
+    const rows = analytes
+      .map(a => ({ analyteId: a.id, raw: values[a.id] }))
+      .filter(r => r.raw !== undefined && r.raw !== '')
+      .map(r => (categorical
+        ? { analyteId: r.analyteId, originalQualitativeResult: r.raw }
+        : { analyteId: r.analyteId, originalValue: Number(r.raw) }));
+    if (rows.length === 0) return onError('Record what the sample originally gave for at least one parameter.');
+
+    setBusy(true);
+    try {
+      const r = await api<{ id: number }>('/iqc/retained-samples', {
+        method: 'POST',
+        body: JSON.stringify({
+          iqcMaterialId: material.id, ...form, source,
+          feedMessageId: source === 'instrument' ? feedMessageId || undefined : undefined,
+          values: rows,
+        }),
+      });
+      await onSaved(r.id);
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="iqc-sample-new">
+      <div className="iqc-choice two">
+        {(['entered', 'instrument'] as const).map(s => (
+          <button key={s} type="button" className={source === s ? 'active' : ''} onClick={() => setSource(s)}>
+            <strong>{s === 'entered' ? 'Enter the original result' : 'Take it from the analyser'}</strong>
+            <span>
+              {s === 'entered'
+                ? 'Type the sample and the result it was reported with.'
+                : 'Pick the sample out of what the analyser has sent and its readings are filled in.'}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {source === 'instrument' && (
+        <label className="stack">Sample sent by the analyser
+          <select value={feedMessageId} onChange={e => takeFromInstrument(e.target.value)}>
+            <option value="">Choose…</option>
+            {candidates.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.sample_id || 'sample'} · {String(c.instrument_run_at ?? c.received_at).slice(0, 16).replace('T', ' ')}
+                {' · '}{c.parsed_values?.length ?? 0} parameters
+              </option>
+            ))}
+          </select>
+          {candidates.length === 0 && <span className="muted">Nothing has arrived from an analyser for this control.</span>}
+        </label>
+      )}
+
+      <div className="form-grid">
+        <label>Sample number<TextField value={form.sampleReference} onValue={v => set('sampleReference', v)} required /></label>
+        <label>Sample type<TextField value={form.sampleType} onValue={v => set('sampleType', v)} placeholder="e.g. EDTA whole blood" /></label>
+        <label>First tested on<input type="date" value={form.originalRunDate} max={new Date().toISOString().slice(0, 10)} onChange={e => set('originalRunDate', e.target.value)} required /></label>
+        <label>Time<input type="time" value={form.originalRunTime} onChange={e => set('originalRunTime', e.target.value)} /></label>
+        <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+        <label>Control run in force then
+          <select value={form.originalIqcRunId} onChange={e => set('originalIqcRunId', e.target.value)}>
+            <option value="">—</option>
+            {coverage.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.run_number} · {c.run_date}{c.run_time ? ` ${c.run_time}` : ''} · {STATUS_LABEL[c.status] ?? c.status}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {!form.originalIqcRunId && (
+        <p className="iqc-note warn">
+          Name the control run that was in control when this sample was first tested. Without it the re-read
+          traces back to nothing.
+        </p>
+      )}
+
+      <table className="data-table compact iqc-entry">
+        <thead><tr><th>{material.control_type === 'culture_sensitivity' ? 'Agent' : 'Analyte'}</th><th>Result it originally gave</th></tr></thead>
+        <tbody>
+          {analytes.map(a => (
+            <tr key={a.id}>
+              <td><strong>{a.analyte}</strong>{a.unit ? <span className="muted"> ({a.unit})</span> : null}</td>
+              <td>
                 {material.control_type === 'culture_sensitivity' ? (
-                  <>
-                    <td>{a.expected_interpretation ? AST_INTERPRETATION_LABELS[a.expected_interpretation as never] ?? a.expected_interpretation : '—'}</td>
-                    <td>
-                      <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
-                        <option value="">—</option>
-                        {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
-                      </select>
-                    </td>
-                  </>
+                  <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                    <option value="">—</option>
+                    {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                  </select>
                 ) : material.control_type === 'qualitative' ? (
-                  <>
-                    <td>{a.expected_result ? QUALITATIVE_LABELS[a.expected_result as QualitativeOutcome] : '—'}</td>
-                    <td>
-                      <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
-                        <option value="">—</option>
-                        {(QUALITATIVE_SCALES.find(s => s.outcomes.includes(a.expected_result as QualitativeOutcome))?.outcomes ?? QUALITATIVE_SCALES[0].outcomes)
-                          .map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
-                      </select>
-                    </td>
-                  </>
+                  <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                    <option value="">—</option>
+                    {scaleForOutcome(a.expected_result).map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
+                  </select>
                 ) : (
-                  <>
-                    <td className="muted">{a.target_mean ?? '—'}{a.target_sd ? ` ± ${a.target_sd}` : ''}</td>
-                    <td className="muted">{a.acceptable_low ?? '—'} – {a.acceptable_high ?? '—'}</td>
-                    <td><input type="number" step="any" value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} /></td>
-                  </>
+                  <input type="number" step="any" value={values[a.id] ?? ''}
+                    onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} />
                 )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-      {material && analytes.length === 0 && material.control_type !== 'culture_sensitivity' && (
-        <p className="iqc-note bad">This control has no analytes defined, so it cannot be run. Edit its definition first.</p>
-      )}
+      <label className="stack">Why the sample is being used
+        <TextField value={form.reason} onValue={v => set('reason', v)} placeholder="e.g. Control lot finished; replacement not yet delivered" />
+      </label>
 
-      <label className="stack">Comment<TextField as="textarea" value={meta.comment} onValue={nextValue => setMeta(m => ({ ...m, comment: nextValue }))} rows={2} /></label>
-
-      <div className="form-actions">
-        <button type="submit" disabled={busy || !material || (analytes.length === 0 && material?.control_type !== 'culture_sensitivity')}>{busy ? 'Evaluating…' : 'Record run'}</button>
+      <div className="iqc-sample-acts">
+        <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Add to the register'}</button>
+        <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
       </div>
+    </div>
+  );
+}
 
-      {outcome && (
-        <div className={`iqc-outcome ${STATUS_TONE[outcome.status]}`}>
-          <strong>
-            {outcome.status === 'out_of_control' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
-            {STATUS_LABEL[outcome.status]}
-          </strong>
-          {outcome.ruleSummary && <p>{outcome.ruleSummary}</p>}
-          {!outcome.mayReleasePatientResults && (
-            <p className="iqc-hold"><ShieldCheck size={13} /> Patient results are withheld for this run until it has been investigated and reviewed.</p>
-          )}
-          <ul>
-            {outcome.analytes.filter(a => a.rule && a.rule !== 'within_control').map(a => (
-              <li key={a.analyte}>
-                <strong>{a.analyte}</strong> — {RULE_LABELS[a.rule!] ?? a.rule}
-                {a.zScore !== null && <span className="muted"> (z = {a.zScore.toFixed(2)})</span>}
-                <div className="muted">{RULE_MEANING[a.rule!]}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
+/* --------------------------------------------------------------- the verdict */
+
+function RunOutcomePanel({ outcome, retained }: { outcome: RunOutcome; retained: boolean }) {
+  return (
+    <div className={`iqc-outcome ${STATUS_TONE[outcome.status]}`}>
+      <strong>
+        {outcome.status === 'out_of_control' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+        {STATUS_LABEL[outcome.status]}
+      </strong>
+      {outcome.ruleSummary && <p>{outcome.ruleSummary}</p>}
+      {!outcome.mayReleasePatientResults && (
+        <p className="iqc-hold"><ShieldCheck size={13} /> Patient results are withheld for this run until it has been investigated and reviewed.</p>
       )}
-    </form>}
-    </>
+      <ul>
+        {outcome.analytes.filter(a => a.rule && a.rule !== 'within_control').map(a => (
+          <li key={a.analyte}>
+            <strong>{a.analyte}</strong> — {RULE_LABELS[a.rule!] ?? a.rule}
+            {retained && a.deviation != null && (
+              <span className="muted">
+                {' '}({a.originalValue} → {a.value}
+                {a.deviationPercent != null ? `, ${a.deviationPercent > 0 ? '+' : ''}${a.deviationPercent.toFixed(1)}%` : ''})
+              </span>
+            )}
+            {!retained && a.zScore !== null && a.zScore !== undefined && <span className="muted"> (z = {a.zScore.toFixed(2)})</span>}
+            <div className="muted">{RULE_MEANING[a.rule!]}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -1048,6 +1545,9 @@ function RunReview({ runs, onChanged, canApprove, isAdmin, equipment, staff, onE
                   <strong>{r.material_name}</strong>
                   <span className="muted">{r.test_name} · lot {r.lot_number}{r.level_label ? ` · ${r.level_label}` : ''}</span>
                   <span className={`chip ${STATUS_TONE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                  {r.run_kind === 'retained_sample' && (
+                    <span className="chip">Previously run sample{r.retained_sample_reference ? ` · ${r.retained_sample_reference}` : ''}</span>
+                  )}
                   {r.patient_results_released === 0 && <span className="chip bad">Results withheld</span>}
                   {r.reviewed_at && <span className="chip ok">Reviewed</span>}
                 </div>

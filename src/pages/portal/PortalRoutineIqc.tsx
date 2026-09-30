@@ -11,7 +11,10 @@ import TextField from '../../components/ui/TextField';
 import {
   IQC_ENTRY_METHOD_LABELS, IQC_ENTRY_METHOD_HINTS, type IqcEntryMethod,
 } from '../../../shared/constants/routineWork';
-import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
+import {
+  QUALITATIVE_LABELS, RULE_LABELS, scaleForOutcome,
+  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS,
+} from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
 import type {
   IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
@@ -607,11 +610,20 @@ function RunControlDialog({ control, onClose, onSaved }: {
                   <li key={a.id} className={`${out ? 'is-out' : ''}${fromMapping ? ' is-mapped' : ''}`}>
                     <label>
                       <span className="iqc-an-name">{a.analyte}{a.unit ? <em> {a.unit}</em> : null}</span>
-                      {qualitative || detail.material.control_type === 'culture_sensitivity' ? (
+                      {detail.material.control_type === 'culture_sensitivity' ? (
                         <select value={raw} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
                           <option value="">—</option>
-                          {Object.entries(QUALITATIVE_LABELS).map(([key, label]) => (
-                            <option key={key} value={key}>{label}</option>
+                          {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                        </select>
+                      ) : qualitative ? (
+                        /* Only the scale this control is defined on. A control
+                           whose expected result is "Detected" is answered with
+                           Detected or Not detected — offering "Positive" beside
+                           them invites a reading the control cannot judge. */
+                        <select value={raw} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                          <option value="">—</option>
+                          {scaleForOutcome(a.expected_result).map(o => (
+                            <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>
                           ))}
                         </select>
                       ) : (
@@ -623,6 +635,7 @@ function RunControlDialog({ control, onClose, onSaved }: {
                         {a.acceptable_low != null || a.acceptable_high != null
                           ? ` ${a.acceptable_low ?? '−'}–${a.acceptable_high ?? '−'}` : ''}
                         {a.expected_result ? QUALITATIVE_LABELS[a.expected_result as keyof typeof QUALITATIVE_LABELS] ?? a.expected_result : ''}
+                        {a.expected_interpretation ? AST_INTERPRETATION_LABELS[a.expected_interpretation as keyof typeof AST_INTERPRETATION_LABELS] ?? a.expected_interpretation : ''}
                       </span>
                     </label>
                   </li>

@@ -3034,6 +3034,31 @@ button.tiny.danger:hover:not(:disabled) { background: var(--danger-bg); border-c
 /* ---- Run a control ---- */
 .iqc-run-ctx { display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0; }
 .iqc-entry td { vertical-align: middle; }
+.iqc-run fieldset.iqc-step { margin-top: 14px; }
+.iqc-run .form-grid { align-items: end; }
+.iqc-choice.two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+/* ---- Previously run samples ---- */
+.iqc-sample-pick { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.iqc-sample-pick label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; flex: 1; min-width: 260px; }
+.iqc-sample-pick button { white-space: nowrap; }
+.iqc-sample-card {
+  margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--panel);
+}
+.iqc-sample-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.iqc-sample-trace { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 11px 0 4px; }
+.iqc-sample-trace div { display: flex; flex-direction: column; gap: 2px; }
+.iqc-sample-trace dt { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.iqc-sample-trace dd { margin: 0; font-size: 12.5px; }
+.iqc-trace-gap { color: var(--warning); }
+.iqc-sample-new {
+  margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--overlay-1);
+  display: flex; flex-direction: column; gap: 11px;
+}
+.iqc-sample-new label.stack { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.iqc-sample-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .iqc-outcome {
   margin-top: 14px; padding: 13px 15px; border-radius: var(--radius-sm); border: 1px solid var(--border);
 }

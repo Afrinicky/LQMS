@@ -11,6 +11,7 @@ import {
   QUALITATIVE_SCALES, QUALITATIVE_LABELS, ANALYTE_TEMPLATES,
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, AST_METHODS, AST_METHOD_LABELS,
   CS_SCOPES, CS_SCOPE_LABELS, CS_SCOPE_HINTS, csNeedsOrganism, csNeedsPanel,
+  CONTINUITY_TOLERANCE_KINDS, CONTINUITY_TOLERANCE_KIND_LABELS, DEFAULT_CONTINUITY_TOLERANCE,
   type IqcSource, type IqcControlType, type IqcRuleProfile,
 } from '../../../shared/constants/iqc';
 import type { Section, Staff, EquipmentItem } from '../../../shared/types/api';
@@ -34,11 +35,14 @@ export type AnalyteDraft = {
   analyte: string; unit: string; targetMean: string; targetSd: string;
   acceptableLow: string; acceptableHigh: string; decimalPlaces: string; expectedResult: string;
   astMethod: string; expectedInterpretation: string;
+  /** Written as "10%" or "0.5"; blank means the control's own figure. */
+  continuityTolerance: string;
 };
 
 export const emptyAnalyte = (): AnalyteDraft => ({
   analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '',
   decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '',
+  continuityTolerance: '',
 });
 
 export default function DefineControlForm({
@@ -80,6 +84,8 @@ export default function DefineControlForm({
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
     preparedByStaffId: '', preparationDate: '', preparationMethod: '', baseMaterial: '',
     validationSummary: '', stabilityPeriod: '', instructions: '', expectedOrganism: '', csScope: 'both',
+    continuityToleranceKind: DEFAULT_CONTINUITY_TOLERANCE.kind as string,
+    continuityToleranceValue: String(DEFAULT_CONTINUITY_TOLERANCE.value),
   });
   const [rows, setRows] = useState<AnalyteDraft[]>([emptyAnalyte()]);
   const [scale, setScale] = useState(QUALITATIVE_SCALES[0].key);
@@ -143,6 +149,10 @@ export default function DefineControlForm({
   }
 
   const outcomes = QUALITATIVE_SCALES.find(s => s.key === scale)?.outcomes ?? [];
+  // What an analyte's own box falls back to, shown as its placeholder.
+  const toleranceHint = form.continuityToleranceValue
+    ? (form.continuityToleranceKind === 'absolute' ? form.continuityToleranceValue : `${form.continuityToleranceValue}%`)
+    : '';
 
   if (!(allowed ?? can('iqc', 'create'))) return null;
 
@@ -274,7 +284,7 @@ export default function DefineControlForm({
               ? <><th>Method</th><th>Expected category</th></>
               : controlType === 'qualitative'
                 ? <th>Expected result</th>
-                : <><th>Unit</th><th>Target mean</th><th>Target SD</th><th>Low</th><th>High</th><th>Dec.</th></>}
+                : <><th>Unit</th><th>Target mean</th><th>Target SD</th><th>Low</th><th>High</th><th>Dec.</th><th>Re-read ±</th></>}
             <th></th>
           </tr></thead>
           <tbody>
@@ -311,6 +321,8 @@ export default function DefineControlForm({
                     <td><input value={r.acceptableLow} onChange={e => setRow(i, 'acceptableLow', e.target.value)} type="number" step="any" style={{ width: 80 }} /></td>
                     <td><input value={r.acceptableHigh} onChange={e => setRow(i, 'acceptableHigh', e.target.value)} type="number" step="any" style={{ width: 80 }} /></td>
                     <td><input value={r.decimalPlaces} onChange={e => setRow(i, 'decimalPlaces', e.target.value)} type="number" min={0} max={4} style={{ width: 54 }} /></td>
+                    <td><TextField value={r.continuityTolerance} onValue={nextValue => setRow(i, 'continuityTolerance', nextValue)}
+                      placeholder={toleranceHint} style={{ width: 76 }} /></td>
                   </>
                 )}
                 <td>{rows.length > 1 && <button type="button" className="tiny" onClick={() => setRows(rs => rs.filter((_, x) => x !== i))}><Trash2 size={12} /></button>}</td>
@@ -338,6 +350,22 @@ export default function DefineControlForm({
           </label>
         </div>
         <p className="iqc-note">{IQC_RULE_PROFILE_HINTS[form.ruleProfile]}</p>
+
+        <div className="form-grid">
+          <label>Re-read tolerance
+            <select value={form.continuityToleranceKind} onChange={e => set('continuityToleranceKind', e.target.value)}>
+              {CONTINUITY_TOLERANCE_KINDS.map(k => <option key={k} value={k}>{CONTINUITY_TOLERANCE_KIND_LABELS[k]}</option>)}
+            </select>
+          </label>
+          <label>Allowed difference
+            <input type="number" step="any" min={0} value={form.continuityToleranceValue}
+              onChange={e => set('continuityToleranceValue', e.target.value)} />
+          </label>
+        </div>
+        <p className="iqc-note">
+          How far a previously run sample may differ from its original result when it is re-read in place of
+          this control. An analyte may carry its own figure in the table above.
+        </p>
       </fieldset>
 
       <div className="form-actions">

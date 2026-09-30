@@ -625,7 +625,7 @@ export function iqcPortalRoutes() {
       LEFT JOIN iqc_runs r ON r.id = res.iqc_run_id
       LEFT JOIN equipment_items e ON e.id = res.equipment_id
       LEFT JOIN staff s ON s.id = res.entered_by_staff_id
-      WHERE res.iqc_analyte_id = ?
+      WHERE res.iqc_analyte_id = ? AND COALESCE(r.run_kind, 'control') = 'control'
       ORDER BY res.run_date DESC, res.id DESC LIMIT ?`).all(req.params.id, limit) as any[];
     const points = rows.reverse();
     const numeric = points.filter(p => Number(p.is_qualitative) !== 1).map(p => Number(p.result_value)).filter(v => !Number.isNaN(v));
