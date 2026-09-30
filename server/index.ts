@@ -23,6 +23,7 @@ import { iqcRoutes } from './routes/iqc.js';
 import { iqcRunRoutes } from './routes/iqcRuns.js';
 import { iqcRetainedRoutes } from './routes/iqcRetained.js';
 import { iqcAnalyserRoutes } from './routes/iqcAnalyser.js';
+import { analyserFeedRoutes } from './routes/analyserFeed.js';
 import { iqcImportExportRoutes } from './routes/iqcImportExport.js';
 import { iqcAdminRoutes } from './routes/iqcAdmin.js';
 import { backupSyncRoutes } from './routes/backupSync.js';
@@ -140,6 +141,11 @@ export function createApiServer() {
   app.use('/api/iqc', iqcRetainedRoutes());
   app.use('/api/iqc', iqcRunRoutes());
   app.use('/api/iqc', iqcRoutes());
+  // Taking readings off an analyser, mounted per module with that module's own
+  // view right — so an account that may read EQA does not thereby gain the
+  // verification register.
+  app.use('/api/eqa', analyserFeedRoutes('eqa'));
+  app.use('/api/verification-validation', analyserFeedRoutes('verification_validation'));
   app.use('/api/eqa', eqaRoutes());
   app.use('/api/verification-validation', verificationValidationRoutes());
   app.use('/api/measurement-uncertainty', measurementUncertaintyRoutes());
@@ -181,6 +187,7 @@ export function createApiServer() {
   app.use('/api/poct', poctRoutes());
   app.use('/api/notifications', notificationsRoutes());
   app.use('/api/records-reports', recordsReportsRoutes());
+  app.use('/api/process-management', analyserFeedRoutes('process_management.critical'));
   app.use('/api/process-management', processManagementRoutes());
   app.use('/api/information-management', informationManagementRoutes());
   app.use('/api/environmental', environmentalRoutes());

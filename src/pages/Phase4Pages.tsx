@@ -8,6 +8,7 @@ import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
 import PermissionTabs from '../components/PermissionTabs';
+import AnalyserFetch from '../components/AnalyserFetch';
 import { AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS } from '../../shared/constants/iqc';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import type {
@@ -350,6 +351,9 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [programForm, setProgramForm] = useState({ programName: '', provider: '', testArea: '', sectionId: '', frequency: '', contact: '', isActive: true });
   const [eventForm, setEventForm] = useState({ eqaProgramId: '', cycleName: '', receivedDate: '', submissionDueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: '', score: '', findings: '', responsibleStaffId: '' });
   const [resultForm, setResultForm] = useState({ resultKind: 'general', analyteOrTest: '', antimicrobial: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
+  // Readings the analyser sent for this survey sample, held until somebody
+  // accepts them. A transmission is evidence, not a submitted result.
+  const [fetched, setFetched] = useState<{ analyte: string; value: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -396,6 +400,21 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
     try {
       await api(`/eqa/events/${selectedEvent.id}/results`, { method: 'POST', body: JSON.stringify(resultForm) });
       setResultForm({ resultKind: 'general', analyteOrTest: '', antimicrobial: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
+      await openEvent(selectedEvent.id);
+    } catch (e) { setError(errorText(e)); }
+  }
+
+  async function acceptFetched() {
+    if (!selectedEvent) return;
+    setError(null);
+    try {
+      for (const row of fetched) {
+        await api(`/eqa/events/${selectedEvent.id}/results`, {
+          method: 'POST',
+          body: JSON.stringify({ resultKind: 'general', analyteOrTest: row.analyte, reportedResult: row.value }),
+        });
+      }
+      setFetched([]);
       await openEvent(selectedEvent.id);
     } catch (e) { setError(errorText(e)); }
   }
@@ -492,7 +511,39 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
           </select>
         );
         return (
-          can('eqa', 'create') && <form className="form-grid" onSubmit={submitResultRow}>
+          can('eqa', 'create') && <>
+          {/* The survey sample was run on the analyser like any other, and its
+              results are typed in off the same printout. */}
+          <AnalyserFetch
+            module="eqa" kind="patient"
+            sectionId={programs.find(pr => pr.id === selectedEvent.eqa_program_id)?.section_id ?? null}
+            label="Fetch results from analyser"
+            onError={setError}
+            onArrive={message => {
+              const rows = (message.parsed_values ?? [])
+                .filter(v => v.analyte != null && v.value !== undefined && v.value !== null && String(v.value) !== '')
+                .map(v => ({ analyte: String(v.analyte), value: String(v.value) }));
+              if (rows.length) setFetched(rows);
+            }} />
+          {fetched.length > 0 && (
+            <div className="af-staged">
+              <p className="af-staged-head">{fetched.length} result{fetched.length === 1 ? '' : 's'} received. Check them, then add.</p>
+              <div className="af-staged-rows">
+                {fetched.map((row, index) => (
+                  <div className="af-staged-row" key={`${row.analyte}-${index}`}>
+                    <span>{row.analyte}</span>
+                    <TextField value={row.value} onValue={nextValue => setFetched(fetched.map((r, i) => (i === index ? { ...r, value: nextValue } : r)))} />
+                    <button type="button" className="af-drop" onClick={() => setFetched(fetched.filter((_, i) => i !== index))}>Remove</button>
+                  </div>
+                ))}
+              </div>
+              <div className="af-staged-act">
+                <button type="button" onClick={acceptFetched}>Add {fetched.length} result row{fetched.length === 1 ? '' : 's'}</button>
+                <button type="button" className="ghost" onClick={() => setFetched([])}>Discard</button>
+              </div>
+            </div>
+          )}
+          <form className="form-grid" onSubmit={submitResultRow}>
             <label>Result kind<select value={kind} onChange={e => setResultForm({ ...resultForm, resultKind: e.target.value })}>
               <option value="general">Analyte / test (quantitative or qualitative)</option>
               <option value="organism_id">Organism identification</option>
@@ -510,6 +561,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
             <label>Comment<TextField as="textarea" value={resultForm.comment} onValue={nextValue => setResultForm({ ...resultForm, comment: nextValue })} /></label>
             <button type="submit">Add result row</button>
           </form>
+          </>
         );
       })()}
       <table className="data-table"><thead><tr><th>Kind</th><th>Analyte / organism</th><th>Agent</th><th>Reported</th><th>Expected</th><th>Performance</th><th>Comment</th></tr></thead><tbody>
