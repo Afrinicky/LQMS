@@ -11,7 +11,8 @@ import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId, blockedForNoS
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
 import { extractIntoVersion } from '../services/documentContent.js';
 import { indexDocument } from '../services/dennisService.js';
-import { recordSignature } from '../services/signatureService.js';
+import { recordSignature, fileDataUri } from '../services/signatureService.js';
+import { ATTESTATION_STAFF_IN_SCOPE } from '../services/attestationScope.js';
 import { buildDocxFromHtml } from '../utils/documentBuild.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { recordCentralArchive } from './archives.js';
@@ -246,7 +247,10 @@ export function documentControlRoutes() {
   router.get('/attestations/list', requirePermission('documents.workflow', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
-    const filters: string[] = [];
+    // A person who has left never signs again, so an unsigned row of theirs is
+    // not outstanding work — it is noise on the register. Theirs show only when
+    // they signed before they went.
+    const filters: string[] = [ATTESTATION_STAFF_IN_SCOPE];
     const params: unknown[] = [];
     const docId = parseIntNullable(req.query.documentId);
     if (docId) { filters.push('(a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?))'); params.push(docId, docId); }
@@ -280,7 +284,8 @@ export function documentControlRoutes() {
              SUM(CASE WHEN a.status = 'signed' THEN 1 ELSE 0 END) AS attestations_signed,
              SUM(CASE WHEN a.status IN ('pending','overdue') THEN 1 ELSE 0 END) AS attestations_pending
       FROM documents d
-      JOIN document_attestations a ON a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = d.id)
+      JOIN document_attestations a ON (a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = d.id))
+        AND ${ATTESTATION_STAFF_IN_SCOPE}
       GROUP BY d.id
       ORDER BY d.document_code, d.title
     `).all());
@@ -294,16 +299,25 @@ export function documentControlRoutes() {
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     const versionId = resolveVersionId(db, req.params.id, req.query.versionId);
     const version = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
+    // The designation is what the laboratory calls the person on the register;
+    // the position title on their primary assignment is the fallback for
+    // records imported before designations were captured.
+    //
+    // Somebody who has left appears only if they signed while they were here.
+    // That signature stands as evidence the document was read by the people
+    // working to it; an unsigned row of theirs is not a pending action and has
+    // no business on a list an assessor reads.
     const rows = db.prepare(`
-      SELECT a.*, s.full_name AS staff_name, s.employee_no, sec.name AS section_name,
-             p.title AS position_title
+      SELECT a.*, s.full_name AS staff_name, s.employee_no, s.is_active AS staff_is_active,
+             COALESCE(NULLIF(TRIM(s.designation), ''), NULLIF(TRIM(s.job_title), ''), p.title) AS designation,
+             COALESCE(a.signature_file_id, s.signature_file_id) AS signature_file
       FROM document_attestations a
       LEFT JOIN staff s ON s.id = a.staff_id
-      LEFT JOIN sections sec ON sec.id = s.section_id
       LEFT JOIN staff_position_assignments spa ON spa.staff_id = s.id AND spa.is_active = 1 AND spa.assignment_type = 'primary'
       LEFT JOIN positions p ON p.id = spa.position_id
       WHERE (a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?))
       ${versionId ? 'AND a.document_version_id = ?' : ''}
+      AND ${ATTESTATION_STAFF_IN_SCOPE}
       ORDER BY CASE a.status WHEN 'signed' THEN 0 ELSE 1 END, a.attested_at, s.full_name
     `).all(...(versionId ? [req.params.id, req.params.id, versionId] : [req.params.id, req.params.id])) as any[];
     const lab = db.prepare("SELECT facility_name FROM laboratory_profile WHERE id = 1").get() as any;
@@ -316,6 +330,9 @@ table { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-top: 1
 th, td { border: 1px solid #a0aec0; padding: 5px 8px; text-align: left; vertical-align: top; }
 th { background: #edf2f7; font-weight: 600; }
 tr.pending td { color: #9b2c2c; background: #fff5f5; }
+td.sig { height: 34px; padding: 2px 6px; }
+td.sig img { max-height: 30px; max-width: 150px; object-fit: contain; display: block; }
+td.sig .nosig { color: #9aa5b1; font-size: 10px; font-style: italic; }
 .meta { font-size: 11px; color: #555; margin: 8px 0 10px; display: flex; flex-wrap: wrap; gap: 18px; }
 .meta div { min-width: 140px; }
 .meta strong { color: #2d3748; }
@@ -334,9 +351,18 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   <div><strong>Printed</strong><br/>${new Date().toISOString().slice(0, 19).replace('T', ' ')}</div>
 </div>
 <table>
-  <thead><tr><th style="width:5%;">#</th><th style="width:32%;">Staff name</th><th style="width:14%;">Staff ID</th><th style="width:16%;">Position</th><th style="width:15%;">Section / unit</th><th style="width:9%;">Status</th><th style="width:9%;">Signed on</th></tr></thead>
+  <thead><tr><th style="width:4%;">#</th><th style="width:26%;">Staff name</th><th style="width:12%;">Staff ID</th><th style="width:20%;">Designation</th><th style="width:20%;">Signature</th><th style="width:8%;">Status</th><th style="width:10%;">Signed on</th></tr></thead>
   <tbody>
-  ${rows.length ? rows.map((r: any, i: number) => `<tr class="${r.status !== 'signed' ? 'pending' : ''}"><td>${i + 1}</td><td>${htmlEscape(r.staff_name || '—')}</td><td>${htmlEscape(r.employee_no || '—')}</td><td>${htmlEscape(r.position_title || '—')}</td><td>${htmlEscape(r.section_name || '—')}</td><td>${htmlEscape(r.status)}</td><td>${htmlEscape(r.attested_at ? String(r.attested_at).slice(0, 10) : '—')}</td></tr>`).join('') : `<tr><td colspan="7" style="text-align:center; color:#888;">No attestations have been assigned for this document yet.</td></tr>`}
+  ${rows.length ? rows.map((r: any, i: number) => {
+    // The person's own signature, inlined. A printed sheet is opened in a blank
+    // window and cannot send an auth header, so a linked image would come back
+    // empty — the signature has to travel with the page.
+    const sig = r.status === 'signed' ? fileDataUri(r.signature_file) : null;
+    const sigCell = r.status === 'signed'
+      ? (sig ? `<img src="${sig}" alt="Signature of ${htmlEscape(r.staff_name || 'staff member')}"/>` : '<span class="nosig">signed — no signature image on file</span>')
+      : '';
+    return `<tr class="${r.status !== 'signed' ? 'pending' : ''}"><td>${i + 1}</td><td>${htmlEscape(r.staff_name || '—')}</td><td>${htmlEscape(r.employee_no || '—')}</td><td>${htmlEscape(r.designation || '—')}</td><td class="sig">${sigCell}</td><td>${htmlEscape(r.status)}</td><td>${htmlEscape(r.attested_at ? String(r.attested_at).slice(0, 10) : '—')}</td></tr>`;
+  }).join('') : `<tr><td colspan="7" style="text-align:center; color:#888;">No attestations have been assigned for this document yet.</td></tr>`}
   </tbody>
 </table>
 <div class="footer"><span>SECH_LIMS by Nickland — Attestation List</span><span>Personally signed by each staff member; signatures are non-transferable.</span></div>
@@ -355,7 +381,8 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const mayOversee = resolvePermission(req.user!.id, 'documents.workflow', 'view').allowed;
     const staffId = mayOversee ? asked : (req.user?.staffId ?? -1);
     if (!mayOversee && !req.user?.staffId) return res.json([]);
-    const where = staffId ? 'WHERE a.staff_id = ? AND a.status IN (\'pending\',\'overdue\')' : 'WHERE a.status IN (\'pending\',\'overdue\')';
+    const live = `(SELECT is_active FROM staff WHERE id = a.staff_id) = 1`;
+    const where = staffId ? `WHERE a.staff_id = ? AND a.status IN ('pending','overdue') AND ${live}` : `WHERE a.status IN ('pending','overdue') AND ${live}`;
     const params: unknown[] = staffId ? [staffId] : [];
     res.json(db.prepare(`SELECT a.*, d.id AS doc_id, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
   });
@@ -778,7 +805,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
         COALESCE(v.effective_date, lv.effective_date) AS current_effective_date,
         COALESCE(d.current_version_id, lv.id) AS resolved_version_id,
         ow.full_name AS owner_name, rv.full_name AS reviewer_name, ap.full_name AS approver_name,
-        (SELECT COUNT(*) FROM document_attestations a WHERE a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions dv WHERE dv.document_id = d.id)) AS attestations_total,
+        (SELECT COUNT(*) FROM document_attestations a WHERE (a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions dv WHERE dv.document_id = d.id)) AND ${ATTESTATION_STAFF_IN_SCOPE}) AS attestations_total,
         (SELECT COUNT(*) FROM document_attestations a WHERE (a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions dv WHERE dv.document_id = d.id)) AND a.status = 'signed') AS attestations_signed
       FROM documents d
       LEFT JOIN sections s ON s.id = d.section_id
@@ -1311,7 +1338,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
 
   router.get('/:id/attestations', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT a.*, s.full_name AS staff_name, v.version_number FROM document_attestations a LEFT JOIN staff s ON s.id = a.staff_id LEFT JOIN document_versions v ON v.id = a.document_version_id WHERE a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?) ORDER BY a.id DESC').all(req.params.id, req.params.id));
+    res.json(db.prepare(`SELECT a.*, s.full_name AS staff_name, v.version_number FROM document_attestations a LEFT JOIN staff s ON s.id = a.staff_id LEFT JOIN document_versions v ON v.id = a.document_version_id WHERE (a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?)) AND ${ATTESTATION_STAFF_IN_SCOPE} ORDER BY a.id DESC`).all(req.params.id, req.params.id));
   });
 
   // Sign an attestation. Signatures are strictly bound to the AUTHENTICATED user

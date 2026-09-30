@@ -977,6 +977,31 @@ button.danger, .btn.danger { background: linear-gradient(180deg, var(--danger-fr
 button.success, .btn.success { background: linear-gradient(180deg, var(--success-from), var(--success-to)); box-shadow: 0 4px 12px var(--success-line); }
 button.warning, .btn.warning { background: linear-gradient(180deg, var(--warning-from), var(--warning-to)); color: var(--on-warning); box-shadow: 0 4px 12px var(--warning-line); }
 
+/* ---- Attestation List: the "choose a document" picker ----
+   A row in the picker is a button, so without its own colours it inherits
+   `--on-accent` (white) from the rule above. On the light theme that is white
+   text on a white panel, and the document codes and titles disappeared
+   entirely. These rows set their own text colour, background and shadow. */
+button.att-doc-pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: none;
+  cursor: pointer;
+}
+button.att-doc-pick:hover { background: var(--overlay-2); box-shadow: none; }
+button.att-doc-pick:active { transform: none; }
+button.att-doc-pick.selected { background: var(--accent-soft); }
+button.att-doc-pick .att-doc-pick-title { font-weight: 600; color: var(--text); }
+button.att-doc-pick .att-doc-pick-meta { font-size: 11px; color: var(--muted); margin-top: 3px; font-weight: 500; }
+
 /* ============================================================================
    FORMS
    ========================================================================= */

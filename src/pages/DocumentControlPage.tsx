@@ -2305,10 +2305,12 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
           {filteredDocs.length === 0 && <p className="muted" style={{ padding: 12 }}>No documents with attestations found.</p>}
           {filteredDocs.map(d => {
             const isSelected = selectedDocId === d.id;
-            return <button key={d.id} type="button" onClick={() => setSelectedDocId(d.id)}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid var(--border)', background: isSelected ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}>
-              <div style={{ fontWeight: 600 }}>{d.document_code || '—'} {d.title}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+            // `att-doc-pick` carries the colours. Left to the global button
+            // rule these inherit `--on-accent` (white), which is invisible on
+            // the panel in the light theme — the document names simply vanished.
+            return <button key={d.id} type="button" className={`att-doc-pick${isSelected ? ' selected' : ''}`} onClick={() => setSelectedDocId(d.id)}>
+              <div className="att-doc-pick-title">{d.document_code || '—'} {d.title}</div>
+              <div className="att-doc-pick-meta">
                 {d.document_type || 'Document'} · <span style={{ color: 'var(--success)' }}>{d.attestations_signed} signed</span>{d.attestations_pending ? <> · <span style={{ color: 'var(--danger)' }}>{d.attestations_pending} pending</span></> : null}
               </div>
             </button>;

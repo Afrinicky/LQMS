@@ -42,6 +42,7 @@ import {
   PLACEMENT_GRACE_DAYS, TEMPORARY_CATEGORIES, TEMPORARY_APPOINTMENT_TYPES,
   isTimeLimited, placementExitReason,
 } from '../../shared/constants/personnel.js';
+import { withdrawOutstandingAttestations } from './attestationScope.js';
 
 type DB = any;
 
@@ -158,6 +159,8 @@ export function closePlacement(db: DB, staffId: number, opts: { reason?: string;
       .run(reason, date, opts.notes ?? null, staffId);
     db.prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND is_active = 1").run(staffId);
     db.prepare('UPDATE technical_authorizations SET is_active = 0 WHERE staff_id = ? AND is_active = 1').run(staffId);
+    // A controlled document they never signed is not theirs to sign any more.
+    withdrawOutstandingAttestations(db, staffId, reason);
     // An appointment to act as a unit supervisor cannot outlive the engagement
     // that carried it.
     db.prepare("UPDATE acting_unit_heads SET status = 'ended' WHERE acting_staff_id = ? AND status = 'active'").run(staffId);

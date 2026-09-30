@@ -32,6 +32,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import * as tailscale from '../services/tailscale.js';
 import * as XLSX from 'xlsx';
+import { withdrawOutstandingAttestations } from '../services/attestationScope.js';
 
 // adm-zip is loaded lazily for the same packaging reasons as archiver above:
 // it is a CommonJS module and a top-level static import breaks under app.asar.
@@ -412,7 +413,9 @@ export function commonRoutes() {
       drafts: count("SELECT COUNT(*) count FROM documents WHERE status = 'draft'"),
       dueReviews: count("SELECT COUNT(*) count FROM documents WHERE next_review_date IS NOT NULL AND next_review_date <= ? AND next_review_date >= ? AND status != 'obsolete'", dueCutoff, todayIso),
       overdueReviews: count("SELECT COUNT(*) count FROM documents WHERE next_review_date IS NOT NULL AND next_review_date < ? AND status != 'obsolete'", todayIso),
-      pendingAttestations: count("SELECT COUNT(*) count FROM document_attestations WHERE status IN ('pending','overdue')"),
+      // Only what somebody can still act on: a leaver's unsigned attestation is
+      // withdrawn, never outstanding.
+      pendingAttestations: count("SELECT COUNT(*) count FROM document_attestations a WHERE a.status IN ('pending','overdue') AND (SELECT is_active FROM staff WHERE id = a.staff_id) = 1"),
       obsoleteDocuments: count("SELECT COUNT(*) count FROM documents WHERE status = 'obsolete'")
     });
   });
@@ -1966,6 +1969,9 @@ export function commonRoutes() {
           .run(exitReason, exitDate, notes, req.user!.id, staff.id);
         db.prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND is_active = 1").run(staff.id);
         db.prepare('UPDATE technical_authorizations SET is_active = 0 WHERE staff_id = ? AND is_active = 1').run(staff.id);
+        // Nobody signs an attestation after they have gone. What they owed is
+        // withdrawn here rather than left pending for ever on the register.
+        withdrawOutstandingAttestations(db, staff.id, exitReason);
         if (account) {
           db.prepare('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
           db.prepare('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(account.id);
