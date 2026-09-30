@@ -4,6 +4,7 @@
  *
  *   GET  /iqc/materials/:id/analyser                  is an analyser attached, and what is waiting
  *   POST /iqc/materials/:id/analyser/fetch            ask it to look now
+ *   POST /iqc/materials/:id/analyser/listen           stand ready for the next transmission
  *   GET  /iqc/materials/:id/analyser/messages         the control runs waiting to be brought in
  *   GET  /iqc/materials/:id/analyser/messages/:m/map  those readings against this control's parameters
  *   GET  /iqc/materials/:id/analyser/patient-samples  patient results, for enrolling a previously run sample
@@ -23,6 +24,7 @@ import { Router } from 'express';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
+import { parseIntNullable } from './routeHelpers.js';
 
 import { mapRows } from '../services/iqcAnalyteMatching.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
@@ -66,8 +68,15 @@ export function iqcAnalyserRoutes() {
     return { material, link, feed };
   }
 
-  /** The waiting control runs for this control, newest first. */
-  function waitingFor(materialId: number, linkId: number | null, feedId: number | null) {
+  /**
+   * The waiting control runs for this control, newest first.
+   *
+   * `since` is what makes standing ready work: the screen remembers the newest
+   * message at the moment somebody pressed Fetch, and asks only for what has
+   * landed after it. Anything else and the run sitting there from yesterday
+   * would be taken for the one the analyser has just sent.
+   */
+  function waitingFor(materialId: number, linkId: number | null, feedId: number | null, since?: number | null) {
     const db = getDb();
     return (db.prepare(`SELECT m.id, m.sample_id, m.lot_number, m.received_at, m.instrument_run_at,
           m.parsed_values, m.status, m.status_note, m.iqc_material_id,
@@ -78,8 +87,29 @@ export function iqcAnalyserRoutes() {
         WHERE m.status IN ('matched', 'unmatched')
           AND (m.iqc_material_id = ?
                OR (m.iqc_material_id IS NULL AND (m.link_id = ? OR m.feed_id = ?)))
-        ORDER BY m.received_at DESC LIMIT 25`).all(materialId, linkId, feedId) as any[])
+          AND (? IS NULL OR m.id > ?)
+        ORDER BY m.received_at DESC LIMIT 25`).all(materialId, linkId, feedId, since ?? null, since ?? null) as any[])
       .map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) ?? [] }));
+  }
+
+  /**
+   * The newest thing this control's analyser has sent, as TWO marks.
+   *
+   * Control runs are numbered in iqc_feed_messages and patient results in
+   * instrument_messages, and those are separate sequences. One mark across both
+   * takes the larger of two unrelated numbers, and the smaller table's
+   * genuinely new rows then sit below it and are never seen — the bench presses
+   * Fetch, the analyser transmits, and nothing appears.
+   */
+  function newestWatermark(linkId: number | null, feedId: number | null): { control: number; patient: number } {
+    const db = getDb();
+    const control = db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
+        WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)
+      .get(linkId, linkId, feedId, feedId) as { id: number | null } | undefined;
+    const patient = linkId
+      ? (db.prepare('SELECT MAX(id) AS id FROM instrument_messages WHERE link_id = ?').get(linkId) as { id: number | null } | undefined)
+      : undefined;
+    return { control: Number(control?.id ?? 0), patient: Number(patient?.id ?? 0) };
   }
 
   router.get('/materials/:id/analyser', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
@@ -100,7 +130,8 @@ export function iqcAnalyserRoutes() {
       });
     }
 
-    const waiting = waitingFor(Number(material.id), link?.id ?? null, feed?.id ?? null);
+    const since = parseIntNullable(req.query.since);
+    const waiting = waitingFor(Number(material.id), link?.id ?? null, feed?.id ?? null, since);
     res.json({
       linked: true,
       source: link
@@ -153,6 +184,52 @@ export function iqcAnalyserRoutes() {
   });
 
   /**
+   * Stand ready for the next transmission.
+   *
+   * What "fetch" means for an analyser that dials in rather than being asked:
+   * there is nothing to pull, so the honest thing is to be ready and to say so.
+   * The link is started if it is one SECHLIMS may open, and the newest message
+   * this analyser has sent is handed back as a watermark. Everything after that
+   * watermark is new — which is what stops yesterday's run being taken for the
+   * one somebody is standing at the analyser waiting for.
+   */
+  router.post('/materials/:id/analyser/listen', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
+    const found = attachmentFor(req.params.id);
+    if (!found) return res.status(404).json({ error: 'IQC material not found' });
+    const { link, feed } = found;
+    if (!link && !feed) return res.status(400).json({ error: 'No analyser is attached to this control.' });
+
+    const since = newestWatermark(link?.id ?? null, feed?.id ?? null);
+    let note = 'Ready. Send the sample from the analyser and it will appear here.';
+    let listening = true;
+
+    if (link) {
+      if (!linkIsOurs(link.role, link.mode)) {
+        listening = false;
+        note = 'This link is recorded as one LHIMS owns, so SECHLIMS never opens it and nothing will arrive. '
+          + 'Set it to follow the LHIMS client\'s log to take a copy instead.';
+      } else {
+        const bridge = currentBridge();
+        if (!bridge) {
+          listening = false;
+          note = 'The analyser bridge is not running on this host.';
+        } else if (!bridge.isRunning(Number(link.id))) {
+          // Standing ready has to actually open the door. A screen that says
+          // "waiting" over a link that was never started waits for ever.
+          bridge.restart(Number(link.id));
+          note = 'The link was not running, so it was started. Send the sample from the analyser.';
+        } else if (canFetch(link.mode)) {
+          // A folder or a followed log is asked as well as waited on.
+          bridge.fetchNow(Number(link.id));
+        }
+      }
+      audit(req, { action: 'edit', entity: 'instrument_links', entityId: link.id, newValue: { armedForControl: req.params.id } });
+    }
+
+    res.json({ listening, since, note });
+  });
+
+  /**
    * One message, lined up against this control's parameters.
    *
    * Shown before anything is saved. A system that decides column four is MCHC
@@ -197,10 +274,12 @@ export function iqcAnalyserRoutes() {
     const { link } = found;
     if (!link) return res.json([]);
 
+    const since = parseIntNullable(req.query.since);
     const rows = getDb().prepare(`SELECT id, sample_id, received_at, instrument_run_at, parsed_values, result_count
         FROM instrument_messages
         WHERE link_id = ? AND kind = 'patient' AND result_count > 0
-        ORDER BY id DESC LIMIT 60`).all(link.id) as any[];
+          AND (? IS NULL OR id > ?)
+        ORDER BY id DESC LIMIT 60`).all(link.id, since, since) as any[];
 
     const map = safeJson(link.analyte_map) ?? {};
     res.json(rows.map(r => {

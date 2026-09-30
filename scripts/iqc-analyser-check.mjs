@@ -201,20 +201,78 @@ const enrolledDetail = (await j(`/iqc/retained-samples/${enrolled.json.id}`, { t
 check('recorded as having come off the analyser', enrolledDetail?.source === 'instrument');
 check('with the result the analyser actually gave', enrolledDetail?.values?.[0]?.original_value === 11.8);
 
+/* ============ 4b. standing ready, and a transmission arriving while it waits */
+console.log('\n[4b] Pressing Fetch stands ready, and the next transmission lands');
+const armed = await j(`/iqc/materials/${controlId}/analyser/listen`, { token: A, method: 'POST' });
+check('the door is opened', armed.json?.listening === true, JSON.stringify(armed.json));
+check('and a watermark is handed back for each kind of message',
+  Number(armed.json?.since?.control) > 0 && Number(armed.json?.since?.patient) > 0, JSON.stringify(armed.json?.since));
+
+// Nothing new yet: what is already there must not be mistaken for what is coming.
+const beforeControl = await j(`/iqc/materials/${controlId}/analyser?since=${armed.json.since.control}`, { token: A });
+check('what arrived before is not offered as new', (beforeControl.json?.waiting ?? []).length === 0);
+const beforePatient = await j(`/iqc/materials/${controlId}/analyser/patient-samples?since=${armed.json.since.patient}`, { token: A });
+check('nor is the patient result from before', (beforePatient.json ?? []).length === 0);
+
+// Now the analyser sends, as it would with somebody standing at it.
+await sendAstm(PORT, [
+  `H|\\^&|||XN-330^1.0|||||||P|1|${stamp}`,
+  `O|1|QC-RETAIN-${stamp}-B|${`LNK-${stamp}`}|^^^^FBC|R||20260930090000|||||||||||||||||F`,
+  'R|1|^^^HGB|13.7|g/dL||N||F',
+  'R|2|^^^WBC|6.30|10*9/L||N||F',
+  'L|1|N',
+]);
+await wait(900);
+
+const afterArm = await j(`/iqc/materials/${controlId}/analyser?since=${armed.json.since.control}`, { token: A });
+check('the new control run is picked up while waiting', (afterArm.json?.waiting ?? []).length === 1,
+  JSON.stringify((afterArm.json?.waiting ?? []).map(w => w.sample_id)));
+check('and it is the one just sent', String((afterArm.json?.waiting ?? [])[0]?.sample_id ?? '').endsWith('-B'));
+
+await sendAstm(PORT, [
+  `H|\\^&|||XN-330^1.0|||||||P|1|${stamp}`,
+  `O|1|SC2026-${(stamp % 10000) + 1}||^^^^FBC|R||20260930091500|||||||||||||||||F`,
+  'R|1|^^^HGB|12.2|g/dL||N||F',
+  'L|1|N',
+]);
+await wait(900);
+const patientAfter = await j(`/iqc/materials/${controlId}/analyser/patient-samples?since=${armed.json.since.patient}`, { token: A });
+check('a patient result sent while waiting is picked up too', (patientAfter.json ?? []).length === 1,
+  JSON.stringify((patientAfter.json ?? []).map(x => x.sample_id)));
+check('and carries its readings, ready to fill the boxes',
+  (patientAfter.json ?? [])[0]?.parsed_values?.some(v => v.analyte === 'Haemoglobin' && Number(v.value) === 12.2),
+  JSON.stringify((patientAfter.json ?? [])[0]?.parsed_values));
+
+// A link that is stopped is started by standing ready, or "waiting" is a lie.
+await j(`/instrument-links/${link.json.id}/stop`, { token: A, method: 'POST' });
+await wait(500);
+const rearmed = await j(`/iqc/materials/${controlId}/analyser/listen`, { token: A, method: 'POST' });
+check('standing ready starts a link that was stopped', rearmed.json?.listening === true, JSON.stringify(rearmed.json));
+await wait(900);
+const stateNow = String(((await j('/instrument-links', { token: A })).json ?? [])
+  .find(l => l.id === link.json.id)?.state ?? '');
+check('and it really is open again', ['listening', 'connected', 'following'].includes(stateNow), stateNow);
+
+// One the bridge will never open must say so rather than appear to wait.
+const blockedArm = await j(`/iqc/materials/${blockedMaterial.json.id}/analyser/listen`, { token: A, method: 'POST' });
+check('a link LHIMS owns refuses to pretend it is waiting', blockedArm.json?.listening === false);
+check('and says why', /LHIMS/.test(String(blockedArm.json?.note ?? '')), blockedArm.json?.note);
+
+
 /* ------------------------------------------------------- 5. the checks, once live */
 console.log('\n[5] The checks on a link that is working');
 const liveChecks = await j(`/instrument-links/${link.json.id}/checks`, { token: A });
 check('it reports as transmitting', liveChecks.json?.transmitting === true, JSON.stringify(liveChecks.json?.checks?.filter(c => c.status === 'todo')));
 check('with nothing outstanding', liveChecks.json?.outstanding === 0);
 check('and counts what arrived by kind',
-  liveChecks.json?.counts?.controls === 1 && liveChecks.json?.counts?.patients === 1,
+  liveChecks.json?.counts?.controls === 2 && liveChecks.json?.counts?.patients === 2,
   JSON.stringify(liveChecks.json?.counts));
 const patientsCheck = liveChecks.json?.checks?.find(c => c.key === 'patients');
 check('and says where patient results are going', String(patientsCheck?.detail ?? '').includes('previously run samples'));
 
 const activity = await j(`/instrument-links/${link.json.id}/activity`, { token: A });
-check('the stream shows both messages', (activity.json?.recent ?? []).length === 2);
-check('sorted by kind', activity.json?.byKind?.control === 1 && activity.json?.byKind?.patient === 1);
+check('the stream shows every message', (activity.json?.recent ?? []).length === 4);
+check('sorted by kind', activity.json?.byKind?.control === 2 && activity.json?.byKind?.patient === 2);
 
 const fetched = await j(`/iqc/materials/${controlId}/analyser/fetch`, { token: A, method: 'POST' });
 check('asking a listening link to fetch says plainly that it cannot',

@@ -916,6 +916,9 @@ export function iqcPortalRoutes() {
     const db = getDb();
     const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     const status = typeof req.query.status === 'string' ? req.query.status : null;
+    // Everything after the watermark somebody armed with, so a run that was
+    // already sitting there is never taken for the one just transmitted.
+    const since = parseIntNullable(req.query.since);
     // A control run reaches the bench from one of two places: a feed something
     // else posts into, or an analyser link the bridge is holding open. Both are
     // read here, and the link's name is taken when there is no feed — a message
@@ -937,7 +940,8 @@ export function iqcPortalRoutes() {
         WHERE (COALESCE(f.section_id, l.section_id) IS NULL
                OR COALESCE(f.section_id, l.section_id) = ? OR ? IS NULL)
           AND (? IS NULL OR m.status = ?)
-        ORDER BY m.received_at DESC LIMIT 200`).all(sectionId, sectionId, status, status) as any[];
+          AND (? IS NULL OR m.id > ?)
+        ORDER BY m.received_at DESC LIMIT 200`).all(sectionId, sectionId, status, status, since, since) as any[];
     res.json(rows.map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) })));
   });
 
@@ -1037,6 +1041,47 @@ export function iqcPortalRoutes() {
     if (!bridge) return res.json({ read: 0, note: 'The analyser bridge is not running on this host.' });
     const outcome = bridge.fetchNow(Number(link.id));
     res.json({ read: outcome.read, note: outcome.note });
+  });
+
+  /**
+   * Stand ready for the next transmission, from the bench.
+   *
+   * The same act as the module's: start the link if it is one SECHLIMS may
+   * open, and hand back the newest message as a watermark so the run sitting
+   * there from earlier is not taken for the one somebody is standing at the
+   * analyser waiting for.
+   */
+  router.post('/portal/controls/:id/analyser-listen', numericOnly, (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'Control not found' });
+    if (!reachableControl(db, req, Number(req.params.id))) {
+      return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
+    }
+    const link = material.equipment_id
+      ? db.prepare('SELECT * FROM instrument_links WHERE equipment_id = ? AND is_active = 1 ORDER BY id LIMIT 1')
+        .get(material.equipment_id) as any
+      : null;
+
+    const newest = db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
+        WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)
+      .get(link?.id ?? null, link?.id ?? null, material.feed_id, material.feed_id) as { id: number | null };
+    // A pair, so the module and the bench speak the same shape. The bench only
+    // ever watches control runs, so the patient mark stays at zero.
+    const since = { control: Number(newest?.id ?? 0), patient: 0 };
+
+    if (!link) return res.json({ listening: Boolean(material.feed_id), since, note: material.feed_id
+      ? 'Ready. Send the control from the analyser and it will appear here.'
+      : 'No analyser is attached to this control.' });
+
+    if (!linkIsOurs(link.role, link.mode)) {
+      return res.json({ listening: false, since, note: 'This link is one LHIMS owns, so nothing will arrive here.' });
+    }
+    const bridge = currentBridge();
+    if (!bridge) return res.json({ listening: false, since, note: 'The analyser bridge is not running on this host.' });
+    if (!bridge.isRunning(Number(link.id))) bridge.restart(Number(link.id));
+    else if (link.mode === 'file_drop' || link.mode === 'lhims_tap') bridge.fetchNow(Number(link.id));
+    res.json({ listening: true, since, note: 'Ready. Send the control from the analyser and it will appear here.' });
   });
 
   router.post('/portal/feed-messages/:id/reject', numericOnly, (req, res) => {

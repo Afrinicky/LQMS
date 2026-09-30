@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   Activity, AlertTriangle, Check, Cable, CheckCircle2, CircleDot, DownloadCloud, FolderOpen,
   Loader2, Play, Plug, Plus, Radio, ShieldCheck, Square, TestTube2, Trash2, Wifi, X,
@@ -369,7 +369,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
 
       {showForm && (
         <LinkForm form={form} setForm={setForm} profiles={profiles} lhimsMaps={lhimsMaps}
-          equipment={equipment} sections={sections}
+          equipment={equipment} sections={sections} host={host}
           editing={Boolean(editing)} passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
           onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
@@ -730,257 +730,326 @@ function TransmissionDialog({ link, host, canEdit, onClose, onSettings, onTakeCo
   );
 }
 
+/**
+ * One short explanation, folded away until somebody wants it.
+ *
+ * The form was right about what it had to say and wrong about when. Every
+ * field carried its full reasoning as a paragraph, so setting an analyser up
+ * meant reading four hundred words to fill in six boxes — and the sentence
+ * that actually mattered was buried among the ones that did not. Nothing is
+ * dropped; it is one line, and the rest opens on a click.
+ */
+function Why({ summary, children }: { summary: string; children: ReactNode }) {
+  return (
+    <details className="lf-why">
+      <summary>{summary}</summary>
+      <div>{children}</div>
+    </details>
+  );
+}
+
+function Section({ step, title, children }: { step: number; title: string; children: ReactNode }) {
+  return (
+    <section className="lf-section">
+      <h5><span className="lf-step">{step}</span> {title}</h5>
+      {children}
+    </section>
+  );
+}
+
 /* ----------------------------------------------------------------------------
    Adding or changing a link
+   ----------------------------------------------------------------------------
+   Grouped the way the job is actually done: say what the machine is, say how
+   it is reached, say how a control is recognised, and only then the things
+   most links never touch. Every field the form had is still here — what
+   changed is that the reading is optional and the order matches the walk to
+   the analyser.
    ------------------------------------------------------------------------- */
-function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, passwordSet, busy, onSave, onClose }: {
+function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, passwordSet, busy, host, onSave, onClose }: {
   form: typeof EMPTY; setForm: (fn: (f: typeof EMPTY) => typeof EMPTY) => void;
   profiles: Profile[]; lhimsMaps: LhimsMap[];
   equipment: Array<{ id: number; name: string }>; sections: Array<{ id: number; name: string }>;
-  editing: boolean; passwordSet: boolean; busy: boolean; onSave: () => void; onClose: () => void;
+  editing: boolean; passwordSet: boolean; busy: boolean; host: HostInfo | null;
+  onSave: () => void; onClose: () => void;
 }) {
   const set = <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => setForm(f => ({ ...f, [key]: value }));
   const profile = profiles.find(p => p.key === form.profileKey);
+  const lhimsOwned = form.role === 'lhims_owned';
+  // The one combination the bridge refuses to open. Saying it here, beside the
+  // two fields that cause it, is the difference between a link that works and
+  // a morning spent wondering why nothing arrives.
+  const willNeverOpen = lhimsOwned && !modeIsPassive(form.mode);
 
   return (
     <div className="ls-modal-back" onClick={onClose}>
-      <div className="ls-modal is-wide" onClick={e => e.stopPropagation()}>
+      <div className="ls-modal is-wide lf" onClick={e => e.stopPropagation()}>
         <header>
           <h4><Cable size={15} /> {editing ? 'Change this link' : 'Add an analyser link'}</h4>
           <button type="button" className="pq-link" onClick={onClose}><X size={14} /></button>
         </header>
 
-        <label><span>What to call it</span>
-          <TextField value={form.name} onValue={v => set('name', v)} autoFocus
-            placeholder="Haematology 2 — Sysmex XN-330" /></label>
-
-        <div className="iqc-run-meta">
-          <label><span>The analyser</span>
-            <select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}>
-              <option value="">Not linked to a registered instrument</option>
-              {equipment.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-          <label><span>Unit</span>
-            <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
-              <option value="">—</option>
-              {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </label>
-          <label><span>Which analyser it is</span>
-            <select value={form.profileKey} onChange={e => {
-              const next = profiles.find(p => p.key === e.target.value);
-              setForm(f => ({ ...f, profileKey: e.target.value, protocol: (next?.protocol as LinkProtocol) ?? f.protocol }));
-            }}>
-              <option value="">Not listed</option>
-              {profiles.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
-          </label>
-        </div>
-        {profile && (
-          <p className="iqc-panel-lead">
-            {profile.analyteCount} analyte{profile.analyteCount === 1 ? '' : 's'} already mapped for this instrument,
-            taken from the laboratory's own middleware configuration.
-            {profile.notes ? ` ${profile.notes}` : ''}
-          </p>
-        )}
-
-        {/* The safety-critical field. It decides whether the bridge will open
-            this link at all, so it is stated in full rather than abbreviated. */}
-        <label><span>What this link is for</span>
-          <select value={form.role} onChange={e => set('role', e.target.value as LinkRole)}>
-            {LINK_ROLES.map(r => <option key={r} value={r}>{LINK_ROLE_LABELS[r]}</option>)}
-          </select>
-        </label>
-        <p className={`il-role-hint${form.role === 'lhims_owned' ? ' is-lhims' : ''}`}>
-          {form.role === 'lhims_owned' && <AlertTriangle size={13} />}
-          {LINK_ROLE_HINTS[form.role]}
-        </p>
-
-        <div className="iqc-run-meta">
-          <label><span>How it is reached</span>
-            <select value={form.mode} onChange={e => set('mode', e.target.value as LinkMode)}>
-              {LINK_MODES.map(m => <option key={m} value={m}>{LINK_MODE_LABELS[m]}</option>)}
-            </select>
-          </label>
-          <label><span>What it speaks</span>
-            <select value={form.protocol} onChange={e => set('protocol', e.target.value as LinkProtocol)}>
-              {LINK_PROTOCOLS.map(p => <option key={p} value={p}>{LINK_PROTOCOL_LABELS[p]}</option>)}
-            </select>
-          </label>
-        </div>
-        <p className="iqc-panel-lead">{LINK_MODE_HINTS[form.mode]} {LINK_PROTOCOL_HINTS[form.protocol]}</p>
-
-        {form.mode === 'server' && (
-          <div className="iqc-run-meta">
-            <label><span>Port the analyser sends to</span>
-              <NumberField min={1} max={65535} value={form.listenPort ? Number(form.listenPort) : null}
-                onValue={n => set('listenPort', n ? String(n) : '')} />
+        {/* 1 — which machine */}
+        <Section step={1} title="Which analyser">
+          <div className="lf-grid">
+            <label className="lf-wide"><span>What to call it</span>
+              <TextField value={form.name} onValue={v => set('name', v)} autoFocus
+                placeholder="Haematology 2 — Sysmex XN-330" /></label>
+            <label><span>The instrument</span>
+              <select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}>
+                <option value="">Not linked to a registered instrument</option>
+                {equipment.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
             </label>
-            <label><span>Bind to (optional)</span>
-              <TextField value={form.listenHost} onValue={v => set('listenHost', v)} placeholder="every interface" /></label>
-          </div>
-        )}
-        {form.mode === 'client' && (
-          <div className="iqc-run-meta">
-            <label><span>Analyser address</span>
-              <TextField value={form.remoteHost} onValue={v => set('remoteHost', v)} placeholder="10.10.0.9" /></label>
-            <label><span>Port</span>
-              <NumberField min={1} max={65535} value={form.remotePort ? Number(form.remotePort) : null}
-                onValue={n => set('remotePort', n ? String(n) : '')} />
+            <label><span>Unit</span>
+              <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
+                <option value="">—</option>
+                {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+            <label className="lf-wide"><span>Model</span>
+              <select value={form.profileKey} onChange={e => {
+                const next = profiles.find(p => p.key === e.target.value);
+                setForm(f => ({ ...f, profileKey: e.target.value, protocol: (next?.protocol as LinkProtocol) ?? f.protocol }));
+              }}>
+                <option value="">Not listed</option>
+                {profiles.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
             </label>
           </div>
-        )}
-        {form.mode === 'file_drop' && (
-          <>
-            <label><span>Folder to watch</span>
-              <TextField value={form.watchPath} onValue={v => set('watchPath', v)} placeholder="C:\\Analyser\\Export" /></label>
-            <div className="iqc-run-meta">
-              <label><span>Which files (optional)</span>
-                <TextField value={form.filePattern} onValue={v => set('filePattern', v)} placeholder="*.txt, *.csv" />
-                <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
-                  Separated by commas. Left blank, every file in the folder is read — usually right, since a
-                  folder an analyser exports into holds nothing else.
-                </span>
-              </label>
-              <label><span>Move each file here after reading (optional)</span>
-                <TextField value={form.archivePath} onValue={v => set('archivePath', v)}
-                  placeholder="C:\\Analyser\\Export\\Done" /></label>
-            </div>
-            <label className="ls-check">
-              <input type="checkbox" checked={form.deleteAfterRead} disabled={Boolean(form.archivePath)}
-                onChange={e => set('deleteAfterRead', e.target.checked)} />
+          {profile && (
+            <p className="lf-hint">
+              <Check size={12} /> {profile.analyteCount} parameters already mapped for this model.
+              {profile.notes ? <Why summary="What this model needs">{profile.notes}</Why> : null}
+            </p>
+          )}
+        </Section>
+
+        {/* 2 — how it is reached. The safety-critical pair, side by side. */}
+        <Section step={2} title="How it connects">
+          <div className="lf-grid">
+            <label className="lf-wide"><span>What this link is for</span>
+              <select value={form.role} onChange={e => set('role', e.target.value as LinkRole)}>
+                {LINK_ROLES.map(r => <option key={r} value={r}>{LINK_ROLE_LABELS[r]}</option>)}
+              </select>
+            </label>
+            <label><span>How it is reached</span>
+              <select value={form.mode} onChange={e => set('mode', e.target.value as LinkMode)}>
+                {LINK_MODES.map(m => <option key={m} value={m}>{LINK_MODE_LABELS[m]}</option>)}
+              </select>
+            </label>
+            <label><span>What it speaks</span>
+              <select value={form.protocol} onChange={e => set('protocol', e.target.value as LinkProtocol)}>
+                {LINK_PROTOCOLS.map(p => <option key={p} value={p}>{LINK_PROTOCOL_LABELS[p]}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {willNeverOpen ? (
+            <p className="lf-alert">
+              <AlertTriangle size={13} />
               <span>
-                Delete each file once it has been read
-                {/* Off by default and deliberately so: the analyser's export is
-                    the laboratory's own record of what it sent, and a bridge
-                    that deletes it destroys the only copy the first time it
-                    misreads something. */}
-                <em>
-                  {' '}— leave this off unless the folder must stay empty. The export is your own record of what the
-                  analyser sent, and it is worth keeping. Moving files aside is the safer way to keep the folder clear.
-                </em>
+                Nothing will arrive on this link. SECHLIMS never binds or dials a link LHIMS owns.
+                {' '}<button type="button" className="pq-link" onClick={() => set('mode', 'lhims_tap')}>
+                  Follow its log instead
+                </button> — that reads a file and touches nothing.
               </span>
-            </label>
-          </>
-        )}
-        {form.mode === 'lhims_tap' && (
-          <>
-            <label><span>Path to the LHIMS client&rsquo;s {LHIMS_TAP_FILENAME}</span>
-              <TextField value={form.tapPath} onValue={v => set('tapPath', v)}
-                placeholder={`\\\\HAEM-PC\\LHIMS CLIENT\\${LHIMS_TAP_FILENAME}`} /></label>
-            <div className="il-tap-steps">
-              <strong>To switch the log on, on the PC running the LHIMS client:</strong>
-              <ol>{LHIMS_TAP_SETUP_STEPS.map((step, i) => <li key={i}>{step}</li>)}</ol>
-            </div>
-          </>
-        )}
+            </p>
+          ) : (
+            <Why summary="What these three choices mean">
+              <p><strong>{LINK_ROLE_LABELS[form.role]}</strong> — {LINK_ROLE_HINTS[form.role]}</p>
+              <p><strong>{LINK_MODE_LABELS[form.mode]}</strong> — {LINK_MODE_HINTS[form.mode]}</p>
+              <p><strong>{LINK_PROTOCOL_LABELS[form.protocol]}</strong> — {LINK_PROTOCOL_HINTS[form.protocol]}</p>
+            </Why>
+          )}
 
-        <label><span>Sample identifiers that mean &ldquo;this is a control&rdquo;</span>
-          <TextField value={form.controlPatterns} onValue={v => set('controlPatterns', v)} />
-          <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
+          {form.mode === 'server' && (
+            <>
+              <div className="lf-grid">
+                <label><span>Port the analyser sends to</span>
+                  <NumberField min={1} max={65535} value={form.listenPort ? Number(form.listenPort) : null}
+                    onValue={n => set('listenPort', n ? String(n) : '')} />
+                </label>
+                <label><span>Bind to (optional)</span>
+                  <TextField value={form.listenHost} onValue={v => set('listenHost', v)} placeholder="every interface" /></label>
+              </div>
+              {/* The address to walk over and type in, right where it is needed. */}
+              {host && host.addresses.length > 0 && (
+                <p className="lf-hint">
+                  On the analyser, set the host to <code>{host.addresses[0].address}</code>
+                  {form.listenPort ? <> and the port to <code>{form.listenPort}</code></> : null}.
+                  {host.addresses.length > 1 && (
+                    <Why summary="This machine has other addresses">
+                      {host.addresses.map(a => <div key={a.address}><code>{a.address}</code> — {a.name}</div>)}
+                    </Why>
+                  )}
+                </p>
+              )}
+            </>
+          )}
+          {form.mode === 'client' && (
+            <div className="lf-grid">
+              <label><span>Analyser address</span>
+                <TextField value={form.remoteHost} onValue={v => set('remoteHost', v)} placeholder="10.10.0.9" /></label>
+              <label><span>Port</span>
+                <NumberField min={1} max={65535} value={form.remotePort ? Number(form.remotePort) : null}
+                  onValue={n => set('remotePort', n ? String(n) : '')} />
+              </label>
+            </div>
+          )}
+          {form.mode === 'file_drop' && (
+            <>
+              <label className="lf-full"><span>Folder to watch</span>
+                <TextField value={form.watchPath} onValue={v => set('watchPath', v)} placeholder="C:\\Analyser\\Export" /></label>
+              <div className="lf-grid">
+                <label><span>Which files (optional)</span>
+                  <TextField value={form.filePattern} onValue={v => set('filePattern', v)} placeholder="*.txt, *.csv" /></label>
+                <label><span>Move read files to (optional)</span>
+                  <TextField value={form.archivePath} onValue={v => set('archivePath', v)}
+                    placeholder="C:\\Analyser\\Export\\Done" /></label>
+              </div>
+              <Why summary="About the folder">
+                <p>
+                  Left blank, every file in the folder is read — usually right, since a folder an analyser
+                  exports into holds nothing else.
+                </p>
+                <label className="ls-check">
+                  <input type="checkbox" checked={form.deleteAfterRead} disabled={Boolean(form.archivePath)}
+                    onChange={e => set('deleteAfterRead', e.target.checked)} />
+                  <span>
+                    Delete each file once it has been read
+                    <em>
+                      {' '}— leave this off unless the folder must stay empty. The export is your own record of
+                      what the analyser sent, and it is worth keeping. Moving files aside is the safer way to
+                      keep the folder clear.
+                    </em>
+                  </span>
+                </label>
+              </Why>
+            </>
+          )}
+          {form.mode === 'lhims_tap' && (
+            <>
+              <label className="lf-full"><span>Path to the LHIMS client&rsquo;s {LHIMS_TAP_FILENAME}</span>
+                <TextField value={form.tapPath} onValue={v => set('tapPath', v)}
+                  placeholder={`\\\\HAEM-PC\\LHIMS CLIENT\\${LHIMS_TAP_FILENAME}`} /></label>
+              <Why summary="How to switch that log on">
+                <ol className="lf-steps">{LHIMS_TAP_SETUP_STEPS.map((step, i) => <li key={i}>{step}</li>)}</ol>
+              </Why>
+            </>
+          )}
+        </Section>
+
+        {/* 3 — telling a control from a patient */}
+        <Section step={3} title="Recognising a control">
+          <label className="lf-full"><span>Sample identifiers that mean &ldquo;this is a control&rdquo;</span>
+            <TextField value={form.controlPatterns} onValue={v => set('controlPatterns', v)} />
+          </label>
+          <Why summary="How the match is made">
             Separated by commas. A message is treated as a control only when its sample identifier actually says
             so — a patient sample numbered SC2024-QC-0031 is not swept into the QC record because three of its
             characters spell QC.
-          </span>
-        </label>
+          </Why>
+        </Section>
 
-        <label className="ls-check">
-          <input type="checkbox" checked={form.forwardEnabled} disabled={form.role === 'lhims_owned'}
-            onChange={e => set('forwardEnabled', e.target.checked)} />
-          <span>
-            Also carry this analyser&rsquo;s patient results into LHIMS
-            <em>
-              {' '}— only for an analyser LHIMS is <strong>not</strong> already receiving, and only once this link
-              has proved itself. It makes the same call the LHIMS middleware makes, so LHIMS gains the analysers
-              its own client could never carry. Control runs are never sent; they belong on the IQC board.
-            </em>
-          </span>
-        </label>
-        {form.forwardEnabled && (
-          <>
-            <label><span>How to deliver</span>
-              <select value={form.forwardTarget} onChange={e => set('forwardTarget', e.target.value)}>
-                <option value="lhims_api">Post each result to the LHIMS API, as the middleware does</option>
-                <option value="tcp">Hand the raw transmission to another program</option>
-              </select>
-            </label>
-            {form.forwardTarget === 'lhims_api' ? (
-              <>
-                <div className="iqc-run-meta">
-                  <label><span>LHIMS address</span>
-                    <TextField value={form.lhimsUrl} onValue={v => set('lhimsUrl', v)}
-                      placeholder="http://10.10.0.5/lhims/" /></label>
-                  <label><span>Username</span>
-                    <TextField value={form.lhimsUsername} onValue={v => set('lhimsUsername', v)} /></label>
-                  <label><span>Password</span>
-                    <input type="password" value={form.lhimsPassword} autoComplete="new-password"
-                      placeholder={passwordSet ? 'unchanged' : ''}
-                      onChange={e => set('lhimsPassword', e.target.value)} />
-                  </label>
-                </div>
-                <label><span>What LHIMS calls each parameter</span>
-                  <select value={form.lhimsMapKey} onChange={e => set('lhimsMapKey', e.target.value)}>
-                    <option value="">Choose the analyser&rsquo;s LHIMS map…</option>
-                    {lhimsMaps.map(m => (
-                      <option key={m.key} value={m.key}>{m.label} — {m.measureCount} parameters</option>
-                    ))}
-                  </select>
-                  <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
-                    These are the measure ids from your own LHIMS client configuration files, so a result lands in
-                    the same LHIMS field the middleware would have put it in. A parameter with no id is not sent —
-                    it is listed for you instead, because LHIMS storing a value under the wrong id is worse than
-                    not storing it. Use &ldquo;Try one&rdquo; to see exactly which would go and which would not.
-                  </span>
-                </label>
-              </>
-            ) : (
-              <div className="iqc-run-meta">
-                <label><span>Address</span>
-                  <TextField value={form.forwardHost} onValue={v => set('forwardHost', v)} placeholder="10.10.0.5" /></label>
-                <label><span>Port</span>
-                  <NumberField min={1} max={65535} value={form.forwardPort ? Number(form.forwardPort) : null}
-                    onValue={n => set('forwardPort', n ? String(n) : '')} />
-                </label>
-              </div>
-            )}
-          </>
-        )}
+        {/* 4 — the settings most links never touch */}
+        <Section step={4} title="Options">
+          <label className="ls-check">
+            <input type="checkbox" checked={form.autoStart} onChange={e => set('autoStart', e.target.checked)} />
+            <span>Start this link automatically when the host starts</span>
+          </label>
 
-        {/* Fetching. Only offered for the modes that can actually be asked:
-            an analyser that connects to SECHLIMS decides for itself when to
-            transmit, and a schedule that can never do anything would only
-            teach people the setting does not work. */}
-        {CAN_FETCH(form.mode) && (
-          <>
-            <label className="ls-check">
-              <input type="checkbox" checked={form.fetchEnabled} onChange={e => set('fetchEnabled', e.target.checked)} />
-              <span>
-                Look for new results on a schedule
-                <em>
-                  {' '}— as well as reacting when something arrives. This is what catches up after the host has been
-                  switched off, and what picks up files that were already in the folder before the link existed.
-                  You can also press <strong>Fetch</strong> at any time.
-                </em>
-              </span>
-            </label>
-            {form.fetchEnabled && (
-              <label><span>How often to look (seconds)</span>
-                <NumberField min={30} max={86400} value={Number(form.fetchIntervalSeconds) || 300}
-                  onValue={n => set('fetchIntervalSeconds', String(n ?? 300))} />
-                <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
-                  Five minutes suits most folders. A share polled harder than it needs starts refusing connections,
-                  so choose the slowest interval the bench can live with.
+          {CAN_FETCH(form.mode) && (
+            <>
+              <label className="ls-check">
+                <input type="checkbox" checked={form.fetchEnabled} onChange={e => set('fetchEnabled', e.target.checked)} />
+                <span>
+                  Look for new results on a schedule
+                  <em> — catches up after the host has been switched off, and picks up files that were already there.</em>
                 </span>
               </label>
-            )}
-          </>
-        )}
+              {form.fetchEnabled && (
+                <div className="lf-grid">
+                  <label><span>How often to look (seconds)</span>
+                    <NumberField min={30} max={86400} value={Number(form.fetchIntervalSeconds) || 300}
+                      onValue={n => set('fetchIntervalSeconds', String(n ?? 300))} />
+                  </label>
+                </div>
+              )}
+              {form.fetchEnabled && (
+                <Why summary="Choosing an interval">
+                  Five minutes suits most folders. A share polled harder than it needs starts refusing
+                  connections, so choose the slowest interval the bench can live with.
+                </Why>
+              )}
+            </>
+          )}
 
-        <label className="ls-check">
-          <input type="checkbox" checked={form.autoStart} onChange={e => set('autoStart', e.target.checked)} />
-          <span>Start this link automatically when the host starts</span>
-        </label>
+          <label className="ls-check">
+            <input type="checkbox" checked={form.forwardEnabled} disabled={lhimsOwned}
+              onChange={e => set('forwardEnabled', e.target.checked)} />
+            <span>
+              Also carry this analyser&rsquo;s patient results into LHIMS
+              <em>
+                {lhimsOwned
+                  ? ' — not available for a link LHIMS already receives; two copies of one result is worse than none.'
+                  : ' — only for an analyser LHIMS is not already receiving. Control runs are never sent.'}
+              </em>
+            </span>
+          </label>
+          {form.forwardEnabled && (
+            <>
+              <div className="lf-grid">
+                <label className="lf-wide"><span>How to deliver</span>
+                  <select value={form.forwardTarget} onChange={e => set('forwardTarget', e.target.value)}>
+                    <option value="lhims_api">Post each result to the LHIMS API, as the middleware does</option>
+                    <option value="tcp">Hand the raw transmission to another program</option>
+                  </select>
+                </label>
+              </div>
+              {form.forwardTarget === 'lhims_api' ? (
+                <>
+                  <div className="lf-grid">
+                    <label><span>LHIMS address</span>
+                      <TextField value={form.lhimsUrl} onValue={v => set('lhimsUrl', v)}
+                        placeholder="http://10.10.0.5/lhims/" /></label>
+                    <label><span>Username</span>
+                      <TextField value={form.lhimsUsername} onValue={v => set('lhimsUsername', v)} /></label>
+                    <label><span>Password</span>
+                      <input type="password" value={form.lhimsPassword} autoComplete="new-password"
+                        placeholder={passwordSet ? 'unchanged' : ''}
+                        onChange={e => set('lhimsPassword', e.target.value)} />
+                    </label>
+                    <label className="lf-wide"><span>What LHIMS calls each parameter</span>
+                      <select value={form.lhimsMapKey} onChange={e => set('lhimsMapKey', e.target.value)}>
+                        <option value="">Choose the analyser&rsquo;s LHIMS map…</option>
+                        {lhimsMaps.map(m => (
+                          <option key={m.key} value={m.key}>{m.label} — {m.measureCount} parameters</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <Why summary="About the parameter map">
+                    These are the measure ids from your own LHIMS client configuration files, so a result lands
+                    in the same LHIMS field the middleware would have put it in. A parameter with no id is not
+                    sent — it is listed for you instead, because LHIMS storing a value under the wrong id is
+                    worse than not storing it. Use &ldquo;Try one&rdquo; to see exactly which would go and which
+                    would not.
+                  </Why>
+                </>
+              ) : (
+                <div className="lf-grid">
+                  <label><span>Address</span>
+                    <TextField value={form.forwardHost} onValue={v => set('forwardHost', v)} placeholder="10.10.0.5" /></label>
+                  <label><span>Port</span>
+                    <NumberField min={1} max={65535} value={form.forwardPort ? Number(form.forwardPort) : null}
+                      onValue={n => set('forwardPort', n ? String(n) : '')} />
+                  </label>
+                </div>
+              )}
+            </>
+          )}
+        </Section>
 
         <div className="pr-btns">
           <button type="button" disabled={busy || !form.name.trim()} onClick={onSave}>

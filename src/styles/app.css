@@ -2967,7 +2967,10 @@ button.link-button:hover { color: var(--text); }
 .iqc-define { display: flex; flex-direction: column; gap: 4px; }
 .iqc-step { border: 0; border-top: 1px solid var(--border); padding: 16px 0 6px; margin: 0; }
 .iqc-step:first-of-type { border-top: 0; }
-.iqc-step.accent { background: linear-gradient(90deg, var(--warning-bg), transparent 60%); border-radius: var(--radius-sm); padding-left: 12px; padding-right: 12px; }
+.iqc-step.accent {
+  background: var(--accent-soft); border-radius: var(--radius-sm);
+  padding: 14px 14px 10px; border-left: 3px solid var(--accent);
+}
 .iqc-step legend { display: flex; align-items: center; gap: 9px; font-size: 13.5px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .step-n {
   width: 22px; height: 22px; border-radius: 99px; display: grid; place-items: center; flex: none;
@@ -3040,54 +3043,70 @@ button.tiny.danger:hover:not(:disabled) { background: var(--danger-bg); border-c
 
 /* ---- Previously run samples ---- */
 .iqc-sample-pick { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
-.iqc-sample-pick label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; flex: 1; min-width: 260px; }
+.iqc-sample-pick label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; flex: 1; min-width: 240px; }
 .iqc-sample-pick button { white-space: nowrap; }
+
+/* The chosen sample, as a quiet card rather than another tinted box. */
 .iqc-sample-card {
-  margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); background: var(--panel);
+  margin-top: 12px; padding: 12px 14px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border);
 }
 .iqc-sample-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
-.iqc-sample-trace { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 11px 0 4px; }
+.iqc-sample-trace { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 11px 0 4px; }
 .iqc-sample-trace div { display: flex; flex-direction: column; gap: 2px; }
-.iqc-sample-trace dt { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.iqc-sample-trace dt { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); }
 .iqc-sample-trace dd { margin: 0; font-size: 12.5px; }
 .iqc-trace-gap { color: var(--warning); }
 .iqc-sample-new {
-  margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm); background: var(--overlay-1);
+  margin-top: 12px; padding: 13px 14px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 11px;
 }
 .iqc-sample-new label.stack { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .iqc-sample-acts { display: flex; gap: 8px; flex-wrap: wrap; }
-.iqc-outcome {
-  margin-top: 14px; padding: 13px 15px; border-radius: var(--radius-sm); border: 1px solid var(--border);
-}
-.iqc-outcome > strong { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; }
-.iqc-outcome p { margin: 7px 0 0; font-size: 12.5px; }
-.iqc-outcome ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
-.iqc-outcome ul .muted { font-size: 11.5px; line-height: 1.5; }
-.iqc-outcome.ok { background: var(--success-bg); border-color: var(--success-line); }
-.iqc-outcome.ok > strong { color: var(--success); }
-.iqc-outcome.warn { background: var(--warning-bg); border-color: var(--warning-line); }
-.iqc-outcome.warn > strong { color: var(--warning); }
-.iqc-outcome.bad { background: var(--danger-bg); border-color: var(--danger-line); }
-.iqc-outcome.bad > strong { color: var(--danger); }
-.iqc-hold { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
 
-/* ---- Review ---- */
-.tabs.inline { margin: 0; }
-.tabs.inline button { padding: 5px 12px; font-size: 12px; }
-.iqc-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.iqc-runs li { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); }
-.iqc-runs li.bad { border-color: var(--danger-line); }
-.iqc-run-main { flex: 1; min-width: 0; }
-.iqc-run-title { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 13px; }
-.iqc-run-meta { font-size: 11.5px; color: var(--faint); margin-top: 3px; }
-.iqc-run-rule { font-size: 12px; color: var(--danger); margin-top: 5px; }
-.iqc-run-action { font-size: 12px; color: var(--muted); margin-top: 5px; }
-.iqc-run-act { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.iqc-run-act input { flex: 1; min-width: 220px; font-size: 12.5px; }
-.iqc-run-act button { font-size: 12.5px; }
+/* ---- One way in: type the sample, or let the analyser send it ---- */
+.iqc-source { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.iqc-source > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; flex: 1; min-width: 220px; }
+.iqc-source-recent { max-width: 230px; font-size: 12px; }
+
+/* The button that opens the door and waits. Solid brand blue when idle;
+   while it waits it steps back to an outline, because a button mid-action
+   that still shouts is a button people press twice. */
+.iqc-fetch {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  padding: 8px 14px; border-radius: 9px; font-size: 12.5px; font-weight: 600;
+  background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent);
+  cursor: pointer; transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+.iqc-fetch:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+.iqc-fetch.is-waiting {
+  background: var(--accent-soft); color: var(--accent-bright); border-color: var(--accent);
+}
+
+.iqc-listening {
+  display: flex; align-items: center; gap: 9px; margin: 0;
+  font-size: 12px; color: var(--accent-bright); font-weight: 550;
+}
+.iqc-pulse {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none;
+  box-shadow: 0 0 0 0 var(--accent-glow); animation: iqc-pulse 1.8s ease-out infinite;
+}
+@keyframes iqc-pulse {
+  70% { box-shadow: 0 0 0 7px rgba(47, 107, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 107, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .iqc-pulse { animation: none; } }
+
+/* One line of guidance, sized so it sits under a field without becoming
+   another paragraph to read. */
+.iqc-hint { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+.iqc-hint.ok { color: var(--success); display: inline-flex; align-items: center; gap: 5px; }
+
+.iqc-tight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.iqc-tight-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.iqc-tight-grid input, .iqc-tight-grid select { font-size: 12.5px; }
+.iqc-tight-grid label.is-needed select { border-color: var(--accent); }
 
 /* ============================================================
    Backup & Restore
@@ -5688,25 +5707,36 @@ button.cell-mark:disabled { cursor: default; }
 .iqc-mapping p { margin: 5px 0 0; }
 .iqc-mapping .warn { color: var(--warning); font-weight: 600; }
 
-.iqc-entry { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.iqc-entry {
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface);
+}
 .iqc-entry-head {
-  display: flex; justify-content: space-between; padding: 6px 12px; background: var(--panel);
-  font-size: 11.5px; font-weight: 600;
+  display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;
+  background: var(--accent-soft); color: var(--accent-bright);
+  font-size: 11.5px; font-weight: 650; letter-spacing: 0.01em;
 }
 .iqc-analytes {
-  list-style: none; margin: 0; padding: 8px; display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 7px; max-height: 340px; overflow-y: auto;
+  list-style: none; margin: 0; padding: 9px; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 8px; max-height: 340px; overflow-y: auto;
 }
-.iqc-analytes li { padding: 5px 8px; border-radius: 7px; background: var(--surface); border: 1px solid transparent; }
-.iqc-analytes li.is-mapped { border-color: var(--info-line); }
+/* Each parameter is its own small card: a grid of bare inputs on a tinted
+   background reads as a spreadsheet, and a spreadsheet is what the bench is
+   trying to get away from. */
+.iqc-analytes li {
+  padding: 7px 9px; border-radius: 9px; background: var(--surface);
+  border: 1px solid var(--border); transition: border-color .14s ease, box-shadow .14s ease;
+}
+.iqc-analytes li:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.iqc-analytes li.is-mapped { border-color: var(--accent); background: var(--accent-soft); }
 .iqc-analytes li.is-out { border-color: var(--danger); background: var(--danger-bg); }
-.iqc-analytes label { display: flex; flex-direction: column; gap: 3px; }
-.iqc-an-name { font-size: 11.5px; font-weight: 600; }
+.iqc-analytes label { display: flex; flex-direction: column; gap: 4px; }
+.iqc-an-name { font-size: 11.5px; font-weight: 650; }
 .iqc-an-name em { color: var(--faint); font-style: normal; font-weight: 400; }
 .iqc-analytes input, .iqc-analytes select {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
-  color: var(--text); padding: 3px 7px; font-size: 12px;
+  background: var(--surface); border: 1px solid var(--border-control); border-radius: 7px;
+  color: var(--text); padding: 5px 8px; font-size: 13px; font-variant-numeric: tabular-nums;
 }
+.iqc-analytes input:focus, .iqc-analytes select:focus { outline: none; border-color: var(--accent); }
 .iqc-an-range { font-size: 10px; color: var(--faint); }
 .iqc-run-meta { display: flex; gap: 14px; flex-wrap: wrap; }
 .iqc-run-meta label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
@@ -6954,9 +6984,11 @@ button.cell-mark:disabled { cursor: default; }
 }
 :root:not([data-theme="dark"]) .oc-viewport { background: var(--panel); }
 :root:not([data-theme="dark"]) .iqc-step.accent {
-  background: var(--warning-bg);
-  border: 1px solid var(--warning-line);
-  border-left: 3px solid var(--warning);
+  /* Drawn from the brand blue rather than a caution yellow. Nothing on this
+     panel is a warning — it is simply the step that asks which sample. */
+  background: linear-gradient(180deg, rgba(47, 107, 255, 0.07), rgba(47, 107, 255, 0.03));
+  border: 1px solid var(--accent-soft);
+  border-left: 3px solid var(--accent);
 }
 
 /* ============================================================
@@ -7045,26 +7077,29 @@ button.cell-mark:disabled { cursor: default; }
 .il-stream-time { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 11.5px; }
 .il-stream li.k-unknown { border-color: var(--warning-line); }
 
-/* The analyser, on the screen where a control is run. */
+/* The analyser, on the screen where a control is run. A quiet card with one
+   blue thing on it — the button — rather than a tinted block competing with
+   the readings underneath it. */
 .iqc-analyser {
-  margin-bottom: 12px; padding: 11px 13px; border-radius: var(--radius-sm);
-  border: 1px solid var(--info-line); background: var(--info-bg);
+  margin-bottom: 12px; padding: 11px 13px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  display: flex; flex-direction: column; gap: 9px;
 }
 .iqc-analyser-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 12.5px; }
-.iqc-analyser-head strong { display: inline-flex; align-items: center; gap: 6px; }
-.iqc-analyser-head .muted { font-size: 11.5px; }
+.iqc-analyser-head strong { font-weight: 650; }
+.iqc-analyser-head .muted { font-size: 11.5px; flex: 1; }
 .iqc-analyser-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .iqc-analyser-dot.s-listening, .iqc-analyser-dot.s-connected, .iqc-analyser-dot.s-following { background: var(--success); }
 .iqc-analyser-dot.s-error { background: var(--danger); }
 .iqc-analyser-dot.s-blocked { background: var(--warning); }
-.iqc-analyser > p { margin: 8px 0 0; font-size: 12px; }
-.iqc-analyser-list { list-style: none; margin: 9px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.iqc-analyser > p { margin: 0; font-size: 12px; }
+.iqc-analyser-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .iqc-analyser-list li {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-  padding: 7px 11px; border-radius: var(--radius-sm); background: var(--panel); border: 1px solid var(--border);
+  padding: 7px 11px; border-radius: 8px; background: var(--accent-soft); border: 1px solid transparent;
   font-size: 12px;
 }
-.iqc-analyser-map { margin-top: 9px; font-size: 12px; line-height: 1.6; }
+.iqc-analyser-map { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
 .iqc-analyser-map strong { color: var(--success); }
 
 /* ============================================================
@@ -7083,3 +7118,78 @@ button.cell-mark:disabled { cursor: default; }
 .sp-lan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .sp-lan-head strong { font-size: 13px; }
 .sp-lan .hint { margin: 8px 0 0; line-height: 1.6; }
+
+/* ============================================================
+   Setting an analyser link up
+   ------------------------------------------------------------
+   The form had every sentence it needed and showed them all at
+   once, so filling in six boxes meant reading four hundred
+   words and the one that mattered was lost among them. Same
+   fields, grouped the way the job is done, with the reasoning
+   one click away instead of in the way.
+   ============================================================ */
+.lf .lf-section { padding: 14px 0; border-top: 1px solid var(--border); }
+.lf .lf-section:first-of-type { border-top: 0; padding-top: 4px; }
+.lf .lf-section h5 {
+  display: flex; align-items: center; gap: 9px; margin: 0 0 11px;
+  font-size: 13px; font-weight: 650;
+}
+.lf-step {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; flex: none;
+  background: var(--accent-soft); color: var(--accent-bright);
+  font-size: 11px; font-weight: 700;
+}
+.lf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 11px; }
+.lf-grid + .lf-grid, .lf-grid + .lf-full, .lf-full + .lf-grid { margin-top: 11px; }
+.lf-grid > label, .lf .lf-full {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0;
+}
+.lf .lf-full { margin-top: 11px; }
+.lf-grid > label > span, .lf .lf-full > span {
+  font-size: 11.5px; font-weight: 600; color: var(--muted);
+}
+.lf-wide { grid-column: 1 / -1; }
+
+/* One line where a paragraph was. */
+.lf-hint {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  margin: 10px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.6;
+}
+.lf-hint svg { flex: none; color: var(--success); transform: translateY(2px); }
+.lf-hint code { font-size: 11.5px; font-weight: 650; color: var(--accent-bright); }
+
+/* The rest of the sentence, on request. */
+.lf-why { margin-top: 9px; font-size: 11.5px; }
+.lf-why > summary {
+  cursor: pointer; color: var(--accent-bright); font-weight: 600;
+  list-style: none; display: inline-flex; align-items: center; gap: 5px;
+}
+.lf-why > summary::-webkit-details-marker { display: none; }
+.lf-why > summary::before { content: '?'; display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--accent-soft); font-size: 10px; font-weight: 700; }
+.lf-why[open] > summary { margin-bottom: 7px; }
+.lf-why > div {
+  padding: 9px 11px; border-radius: 8px; background: var(--overlay-1);
+  color: var(--muted); line-height: 1.65;
+}
+.lf-why p { margin: 0 0 7px; }
+.lf-why p:last-child { margin-bottom: 0; }
+.lf-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+
+/* The one combination that silently never opens, said where it is caused. */
+.lf-alert {
+  display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0;
+  padding: 9px 11px; border-radius: 8px;
+  background: var(--danger-bg); border: 1px solid var(--danger-line);
+  font-size: 11.5px; line-height: 1.6;
+}
+.lf-alert svg { flex: none; margin-top: 2px; color: var(--danger); }
+.lf .ls-check { margin-top: 10px; }
+/* A note beside a checkbox is explanation, not caution. The amber it inherited
+   made every optional setting look like a warning. */
+.lf .ls-check em { color: var(--muted); }
+.lf .ls-check > span { font-weight: 600; color: var(--text); }
+.lf .ls-check em { font-weight: 400; }
+/* A folded explanation must not sit on top of the field that follows it. */
+.lf-why + .lf-grid, .lf-why + .lf-full { margin-top: 12px; }
