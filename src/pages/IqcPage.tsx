@@ -11,7 +11,7 @@ import DisabledModule from '../components/DisabledModule';
 import PermissionTabs from '../components/PermissionTabs';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
-import { useAnalyserListen, armAnalyser } from '../hooks/useAnalyserListen';
+import { useAnalyserListen, armAnalyser, type Watermark } from '../hooks/useAnalyserListen';
 import { PageHeader, KpiStrip, ModuleAlerts } from '../components/ui';
 import LeveyJenningsChart, { type ChartData } from '../components/LeveyJenningsChart';
 import {
@@ -115,10 +115,15 @@ type AnalyserWaiting = {
   received_at: string; instrument_run_at: string | null;
   parsed_values: { analyte?: string; value?: number | string }[];
   status: string; status_note: string | null; source_name: string | null;
+  /** Set when the system read this transmission as another control's. */
+  matched_elsewhere: string | null;
 };
+
+type AnalyserChoice = { id: number; name: string; equipmentName: string | null; state: string; open: boolean };
 
 type AnalyserStatus = {
   linked: boolean; why?: string;
+  options?: AnalyserChoice[];
   source?: {
     kind: string; id: number; name: string; mode?: string; role?: string; protocol?: string;
     state: string; stateDetail: string | null; lastError: string | null; lastMessageAt: string | null;
@@ -875,6 +880,8 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   // brought in from it lined up against.
   const [analyser, setAnalyser] = useState<AnalyserStatus | null>(null);
   const [mapping, setMapping] = useState<AnalyserMapping | null>(null);
+  /** Set only when the bench overrides which analyser to take results from. */
+  const [linkId, setLinkId] = useState('');
 
   // Previously run samples: the register for this control, which one is being
   // re-read, and whether the form for enrolling a new one is open.
@@ -905,14 +912,25 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
 
   useEffect(() => {
     setOutcome(null); setValues({}); setSampleId(''); setEnrolling(false); setSamples([]);
-    setAnalyser(null); setMapping(null);
+    setAnalyser(null); setMapping(null); setLinkId('');
     if (!materialId) { setAnalytes([]); return; }
     api<Analyte[]>(`/iqc/materials/${materialId}/analytes`)
       .then(rows => setAnalytes(rows.filter(a => a.is_active)))
       .catch(() => setAnalytes([]));
-    api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser`)
-      .then(setAnalyser).catch(() => setAnalyser(null));
   }, [materialId]);
+
+  // Which analyser this control is taken from. It follows the instrument
+  // chosen on the run — the bench has already said which machine it is there,
+  // and asking twice is how a screen stops being believed — and can be
+  // overridden when the guess is wrong.
+  useEffect(() => {
+    if (!materialId) return;
+    const query = new URLSearchParams();
+    if (linkId) query.set('linkId', linkId);
+    else if (meta.equipmentId) query.set('equipmentId', meta.equipmentId);
+    api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser?${query}`)
+      .then(setAnalyser).catch(() => setAnalyser(null));
+  }, [materialId, meta.equipmentId, linkId]);
 
   const loadSamples = useCallback(async () => {
     if (!materialId) return;
@@ -1112,9 +1130,10 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
           {/* The analyser, where one is attached to this control. Typing a
               twenty-three parameter FBC off a printout is not a workflow; it
               is a reason to stop keeping the record. */}
-          {analyser?.linked && analyser.source && (
+          {analyser && (analyser.source || (analyser.options ?? []).length > 0) && (
             <AnalyserPanel
               materialId={Number(materialId)} status={analyser} mapping={mapping}
+              linkId={linkId} onLink={setLinkId} equipmentId={meta.equipmentId}
               onStatus={setAnalyser} onMapping={setMapping}
               onReadings={rows => setValues(v => {
                 const next = { ...v };
@@ -1236,13 +1255,18 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
  * quietly dropped — a system that decides column four is MCHC and is wrong has
  * written a false control record with a real name on it.
  */
-function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onReadings, onError }: {
+function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentId, onStatus, onMapping, onReadings, onError }: {
   materialId: number; status: AnalyserStatus; mapping: AnalyserMapping | null;
+  /** Set when the bench has overridden which analyser to take results from. */
+  linkId: string; onLink: (id: string) => void;
+  /** The instrument chosen on the run, which is the first guess. */
+  equipmentId: string;
   onStatus: (s: AnalyserStatus) => void; onMapping: (m: AnalyserMapping | null) => void;
   onReadings: (rows: AnalyserMapping['readings']) => void; onError: (m: string) => void;
 }) {
   const [busy, setBusy] = useState<number | null>(null);
-  const source = status.source!;
+  const source = status.source;
+  const options = status.options ?? [];
   const waiting = status.waiting ?? [];
 
   const bringIn = useCallback(async (message: AnalyserWaiting) => {
@@ -1258,29 +1282,47 @@ function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onRea
   // Pressing Fetch opens the door and waits. An analyser that dials in decides
   // for itself when to transmit, and a button that pretends otherwise is a
   // button people stop believing.
+  /** Whichever analyser the panel is pointed at, as query or body. */
+  const pick = linkId ? { linkId: Number(linkId) } : equipmentId ? { equipmentId: Number(equipmentId) } : {};
+  const query = new URLSearchParams(Object.entries(pick).map(([k, v]) => [k, String(v)]));
+
   const listen = useAnalyserListen<AnalyserWaiting>({
-    arm: () => armAnalyser(`/iqc/materials/${materialId}/analyser/listen`),
+    arm: () => api<{ listening: boolean; since: Watermark; note: string }>(
+      `/iqc/materials/${materialId}/analyser/listen`, { method: 'POST', body: JSON.stringify(pick) }),
     poll: async since => {
-      const next = await api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser?since=${since.control}`);
+      const next = await api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser?${query}&since=${since.control}`);
       return next.waiting ?? [];
     },
     onArrival: async message => {
       await bringIn(message);
-      try { onStatus(await api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser`)); } catch { /* the reading is in */ }
+      try { onStatus(await api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser?${query}`)); }
+      catch { /* the reading is in, which is what mattered */ }
     },
   });
 
   return (
     <div className="iqc-analyser">
       <div className="iqc-analyser-head">
-        <span className={`iqc-analyser-dot s-${source.state}`} />
-        <strong>{source.name}</strong>
+        <span className={`iqc-analyser-dot s-${source ? source.state : 'stopped'}`} />
+        {source ? <strong>{source.name}</strong> : <strong className="muted">No analyser matched</strong>}
         <span className="muted">
-          {source.lastMessageAt
-            ? `last heard ${String(source.lastMessageAt).slice(11, 16)}`
-            : 'nothing received yet'}
+          {source
+            ? (source.lastMessageAt ? `last heard ${String(source.lastMessageAt).slice(11, 16)}` : 'nothing received yet')
+            : status.why}
         </span>
+        {/* Where the guess is wrong, saying which machine it is takes one
+            click — rather than the panel vanishing and the bench going back
+            to typing the numbers off a printout. */}
+        {options.length > 1 && (
+          <select className="iqc-analyser-pick" value={linkId || (source?.kind === 'link' ? String(source.id) : '')}
+            onChange={e => onLink(e.target.value)}>
+            {options.map(o => (
+              <option key={o.id} value={o.id}>{o.name}{o.equipmentName ? ` · ${o.equipmentName}` : ''}</option>
+            ))}
+          </select>
+        )}
         <button type="button" className={`iqc-fetch${listen.waiting ? ' is-waiting' : ''}`}
+          disabled={!source && options.length === 0}
           onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
           {listen.waiting
             ? <><Loader2 size={13} className="pd-spin" /> Waiting… {listen.remaining}s</>
@@ -1299,13 +1341,13 @@ function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onRea
       {/* A link the bridge deliberately never opens will never deliver
           anything. Saying so is the difference between a bench waiting all
           morning and a bench fixing it in a minute. */}
-      {!source.open && (
+      {source && !source.open && (
         <p className="iqc-note warn">
           <AlertTriangle size={12} /> Nothing will arrive: this link is one LHIMS owns. Set it to follow the
           LHIMS client&rsquo;s log under Analyser Links to take a copy.
         </p>
       )}
-      {source.lastError && <p className="iqc-note bad">{source.lastError}</p>}
+      {source?.lastError && <p className="iqc-note bad">{source.lastError}</p>}
 
       {waiting.length === 0 ? (
         !listen.waiting && <p className="iqc-hint">Nothing waiting. Press Fetch, then send the control from the analyser.</p>
@@ -1318,6 +1360,7 @@ function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onRea
                 <span className="muted">
                   {' · '}{String(message.instrument_run_at ?? message.received_at).slice(5, 16).replace('T', ' ')}
                   {' · '}{message.parsed_values?.length ?? 0} parameters
+                  {message.matched_elsewhere ? ` · read as ${message.matched_elsewhere}` : ''}
                 </span>
               </div>
               <button type="button" className="pq-link" disabled={busy !== null} onClick={() => void bringIn(message)}>

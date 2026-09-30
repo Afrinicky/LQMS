@@ -508,6 +508,23 @@ function RunControlDialog({ control, onClose, onSaved }: {
 
   const filled = analytes.filter(a => String(values[a.id] ?? '').trim() !== '').length;
 
+  /**
+   * Fetch, on the run itself rather than behind a tab.
+   *
+   * Taking the numbers off the analyser is the one route that does not involve
+   * typing twenty-three of them, and it was reachable only by knowing that
+   * "entry methods" existed and picking the right one. It belongs beside the
+   * boxes it fills.
+   */
+  const fetchListen = useAnalyserListen<IqcFeedMessage>({
+    arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`),
+    poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
+    onArrival: async message => {
+      try { applyMapping(await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${control.id}`)); }
+      catch (e) { setProblem(errorText(e)); }
+    },
+  });
+
   async function save() {
     if (!detail) return;
     setBusy('save'); setProblem(null);
@@ -605,8 +622,24 @@ function RunControlDialog({ control, onClose, onSaved }: {
           <div className="iqc-entry">
             <div className="iqc-entry-head">
               <span>Parameters</span>
+              {detail.feed && (
+                <button type="button" className={`iqc-fetch tiny${fetchListen.waiting ? ' is-waiting' : ''}`}
+                  onClick={() => (fetchListen.waiting ? fetchListen.stop() : void fetchListen.start())}>
+                  {fetchListen.waiting
+                    ? <><Loader2 size={11} className="pd-spin" /> Waiting… {fetchListen.remaining}s</>
+                    : <><Radio size={11} /> Fetch from analyser</>}
+                </button>
+              )}
               <span className="muted">{filled} of {analytes.length} filled</span>
             </div>
+            {fetchListen.waiting && (
+              <p className="iqc-listening in-head">
+                <span className="iqc-pulse" />
+                Ready. Run the control on the analyser and its results drop into the boxes below.
+              </p>
+            )}
+            {!fetchListen.waiting && fetchListen.note && <p className="iqc-hint in-head">{fetchListen.note}</p>}
+            {fetchListen.problem && <p className="iqc-hint in-head crit">{fetchListen.problem}</p>}
             <ul className="iqc-analytes">
               {analytes.map(a => {
                 const raw = values[a.id] ?? '';

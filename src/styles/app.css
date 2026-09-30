@@ -7193,3 +7193,18 @@ button.cell-mark:disabled { cursor: default; }
 .lf .ls-check em { font-weight: 400; }
 /* A folded explanation must not sit on top of the field that follows it. */
 .lf-why + .lf-grid, .lf-why + .lf-full { margin-top: 12px; }
+
+/* Which analyser a control is taken from, when the guess is wrong. */
+.iqc-analyser-pick { font-size: 12px; max-width: 220px; }
+.iqc-analyser-head strong.muted { font-weight: 600; color: var(--muted); }
+.iqc-fetch:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Fetch, sitting on the parameters header where the boxes it fills are. */
+.iqc-fetch.tiny { padding: 4px 10px; font-size: 11.5px; border-radius: 7px; gap: 5px; }
+.iqc-entry-head { gap: 10px; }
+.iqc-entry-head > span:first-child { flex: none; }
+.iqc-entry-head > .muted { margin-left: auto; }
+.iqc-listening.in-head, .iqc-hint.in-head {
+  margin: 0; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.iqc-hint.in-head.crit { color: var(--danger); }

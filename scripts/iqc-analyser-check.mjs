@@ -85,7 +85,9 @@ const bare = await j('/iqc/materials', { token: A, method: 'POST', body: {
 } });
 const bareStatus = await j(`/iqc/materials/${bare.json.id}/analyser`, { token: A });
 check('a control with no instrument is not linked', bareStatus.json?.linked === false);
-check('and says why', String(bareStatus.json?.why ?? '').includes('does not name an instrument'));
+check('and says why, naming the remedy rather than the symptom',
+  /No analyser link is set up|Choose the machine/.test(String(bareStatus.json?.why ?? '')),
+  bareStatus.json?.why);
 
 /* ======================================== 2. an analyser the bridge will not open */
 console.log('\n[2] The link LHIMS owns: the safety rule says so out loud');
@@ -259,20 +261,82 @@ check('a link LHIMS owns refuses to pretend it is waiting', blockedArm.json?.lis
 check('and says why', /LHIMS/.test(String(blockedArm.json?.note ?? '')), blockedArm.json?.note);
 
 
+/* ============ 4c. the control-material path, and a mismatched instrument */
+console.log('\n[4c] Fetch is offered for control material, even when the instrument does not match');
+
+// The laboratory registered its machine twice under slightly different names —
+// which is normal, and used to make the whole panel vanish.
+const otherEquipment = await j('/equipment', { token: A, method: 'POST', body: {
+  name: `SYSMEX XN-330 (dup) ${stamp}`, equipmentCategory: 'analyser', status: 'operational',
+} });
+const mismatched = await j('/iqc/materials', { token: A, method: 'POST', body: {
+  materialName: `Mismatched FBC ${stamp}`, testName: 'Full blood count', lotNumber: `MIS-${stamp}`,
+  source: 'commercial', controlType: 'quantitative', qcFrequency: 'daily',
+  equipmentId: otherEquipment.json.id,
+  analytes: [{ analyte: 'Haemoglobin', unit: 'g/dL', targetMean: 13.5, targetSd: 0.4, decimalPlaces: 1 }],
+} });
+const mismatchedStatus = await j(`/iqc/materials/${mismatched.json.id}/analyser`, { token: A });
+check('an analyser that matches nothing still offers every link to choose from',
+  (mismatchedStatus.json?.options ?? []).length > 0, JSON.stringify(mismatchedStatus.json?.why));
+check('and names the one the bench should pick from',
+  (mismatchedStatus.json?.options ?? []).some(o => o.name.includes('Haematology 2')),
+  JSON.stringify((mismatchedStatus.json?.options ?? []).map(o => o.name)));
+
+// Saying which machine it is puts the panel back.
+const chosen = await j(`/iqc/materials/${mismatched.json.id}/analyser?linkId=${link.json.id}`, { token: A });
+check('choosing the analyser links it', chosen.json?.linked === true, JSON.stringify(chosen.json?.why));
+check('and it is the one chosen', chosen.json?.source?.id === link.json.id);
+
+// And it can be armed and fed, exactly like a matching one.
+const chosenArm = await j(`/iqc/materials/${mismatched.json.id}/analyser/listen`,
+  { token: A, method: 'POST', body: { linkId: link.json.id } });
+check('and stood ready', chosenArm.json?.listening === true, JSON.stringify(chosenArm.json));
+
+await sendAstm(PORT, [
+  `H|\\^&|||XN-330^1.0|||||||P|1|${stamp}`,
+  `O|1|QC-RETAIN-${stamp}-C|${`MIS-${stamp}`}|^^^^FBC|R||20260930100000|||||||||||||||||F`,
+  'R|1|^^^HGB|13.55|g/dL||N||F',
+  'L|1|N',
+]);
+await wait(900);
+const chosenWaiting = await j(
+  `/iqc/materials/${mismatched.json.id}/analyser?linkId=${link.json.id}&since=${chosenArm.json.since.control}`, { token: A });
+check('the control run reaches the control being run',
+  (chosenWaiting.json?.waiting ?? []).some(w => String(w.sample_id).endsWith('-C')),
+  JSON.stringify((chosenWaiting.json?.waiting ?? []).map(w => w.sample_id)));
+// The analyser sent no lot, so the system could only guess from the machine.
+// It says which control it guessed, rather than hiding the run entirely.
+check('and says plainly which control it was read as',
+  Boolean((chosenWaiting.json?.waiting ?? []).find(w => String(w.sample_id).endsWith('-C'))?.matched_elsewhere),
+  JSON.stringify((chosenWaiting.json?.waiting ?? []).map(w => w.matched_elsewhere)));
+
+const cMessage = (chosenWaiting.json.waiting ?? []).find(w => String(w.sample_id).endsWith('-C'));
+const mapped2 = await j(
+  `/iqc/materials/${mismatched.json.id}/analyser/messages/${cMessage.id}/map`, { token: A });
+check('and its reading fills the control\u2019s own box', mapped2.json?.readings?.[0]?.value === 13.55,
+  JSON.stringify(mapped2.json?.readings));
+
+// The instrument picked on the run form is the first guess, before anything else.
+const byRunInstrument = await j(
+  `/iqc/materials/${mismatched.json.id}/analyser?equipmentId=${analyser.json.id}`, { token: A });
+check('the instrument chosen on the run decides which analyser is used',
+  byRunInstrument.json?.source?.id === link.json.id, JSON.stringify(byRunInstrument.json?.source?.name));
+
+
 /* ------------------------------------------------------- 5. the checks, once live */
 console.log('\n[5] The checks on a link that is working');
 const liveChecks = await j(`/instrument-links/${link.json.id}/checks`, { token: A });
 check('it reports as transmitting', liveChecks.json?.transmitting === true, JSON.stringify(liveChecks.json?.checks?.filter(c => c.status === 'todo')));
 check('with nothing outstanding', liveChecks.json?.outstanding === 0);
 check('and counts what arrived by kind',
-  liveChecks.json?.counts?.controls === 2 && liveChecks.json?.counts?.patients === 2,
+  liveChecks.json?.counts?.controls === 3 && liveChecks.json?.counts?.patients === 2,
   JSON.stringify(liveChecks.json?.counts));
 const patientsCheck = liveChecks.json?.checks?.find(c => c.key === 'patients');
 check('and says where patient results are going', String(patientsCheck?.detail ?? '').includes('previously run samples'));
 
 const activity = await j(`/instrument-links/${link.json.id}/activity`, { token: A });
-check('the stream shows every message', (activity.json?.recent ?? []).length === 4);
-check('sorted by kind', activity.json?.byKind?.control === 2 && activity.json?.byKind?.patient === 2);
+check('the stream shows every message', (activity.json?.recent ?? []).length === 5);
+check('sorted by kind', activity.json?.byKind?.control === 3 && activity.json?.byKind?.patient === 2);
 
 const fetched = await j(`/iqc/materials/${controlId}/analyser/fetch`, { token: A, method: 'POST' });
 check('asking a listening link to fetch says plainly that it cannot',

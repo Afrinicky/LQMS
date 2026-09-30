@@ -48,24 +48,52 @@ export function iqcAnalyserRoutes() {
   /**
    * What is transmitting for this control.
    *
-   * An analyser link held against the instrument the control runs on, else a
-   * feed somebody attached to the control itself. Both are reported the same
-   * way, because the bench does not care which table the arrangement lives in.
+   * Matching only the control's own equipment_id was too narrow, and the way it
+   * failed was invisible: a laboratory that registered "Sysmex XN550" as its
+   * instrument and set the link up against "SYSMEX XN-550" has two equipment
+   * rows for one machine, no match, and the whole panel silently absent — so
+   * the bench went back to typing twenty-three numbers off a printout with no
+   * indication that anything was wrong.
+   *
+   * So the question is asked more widely, in the order of how sure the answer
+   * is: the instrument chosen on the run itself, then the one on the control,
+   * then a feed attached to the control, then the unit's own link, then — when
+   * this laboratory has exactly one analyser transmitting at all — that one.
+   * Every candidate is returned as well, so where the guess is wrong the bench
+   * can simply say which machine it is rather than being told there is none.
    */
-  function attachmentFor(materialId: unknown) {
+  function attachmentFor(materialId: unknown, preferredEquipmentId?: number | null, preferredLinkId?: number | null) {
     const db = getDb();
     const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(materialId) as any;
     if (!material) return null;
 
-    const link = material.equipment_id
-      ? db.prepare(`SELECT * FROM instrument_links WHERE equipment_id = ? AND is_active = 1
-          ORDER BY (state IN ('listening','connected','following')) DESC, id LIMIT 1`).get(material.equipment_id) as any
+    const unitId = material.performing_section_id ?? material.section_id ?? null;
+    const options = db.prepare(`SELECT l.*, e.name AS equipment_name
+        FROM instrument_links l LEFT JOIN equipment_items e ON e.id = l.equipment_id
+        WHERE l.is_active = 1
+        ORDER BY (l.state IN ('listening','connected','following')) DESC, l.name`).all() as any[];
+
+    const byEquipment = (id: number | null | undefined) =>
+      (id ? options.find(l => Number(l.equipment_id) === Number(id)) : undefined) ?? null;
+
+    const named: any = preferredLinkId
+      ? options.find(l => Number(l.id) === Number(preferredLinkId)) ?? null
       : null;
+    const inUnit: any = unitId
+      ? options.find(l => Number(l.section_id) === Number(unitId)) ?? null
+      : null;
+    const onlyOne: any = options.length === 1 ? options[0] : null;
+    const link: any = named
+      ?? byEquipment(preferredEquipmentId)
+      ?? byEquipment(material.equipment_id)
+      ?? inUnit
+      ?? onlyOne;
+
     const feed = material.feed_id
       ? db.prepare('SELECT * FROM iqc_instrument_feeds WHERE id = ? AND is_active = 1').get(material.feed_id) as any
       : null;
 
-    return { material, link, feed };
+    return { material, link, feed, options };
   }
 
   /**
@@ -78,17 +106,30 @@ export function iqcAnalyserRoutes() {
    */
   function waitingFor(materialId: number, linkId: number | null, feedId: number | null, since?: number | null) {
     const db = getDb();
+    // Everything this analyser has sent that has not been accepted, whichever
+    // control the system guessed it belonged to.
+    //
+    // Guessing is all it can do: an analyser that puts no lot number in its
+    // transmission leaves only the sample identifier and the instrument to go
+    // on, so a run of THIS control gets parked against whichever other control
+    // shares the machine. Hiding it then is the worst of both — the bench ran
+    // the control, watched the screen, and saw nothing. So it is offered, and
+    // said plainly to have been read as another control's, and the reading is
+    // mapped onto whichever control the bench is actually running.
     return (db.prepare(`SELECT m.id, m.sample_id, m.lot_number, m.received_at, m.instrument_run_at,
           m.parsed_values, m.status, m.status_note, m.iqc_material_id,
-          COALESCE(f.name, l.name) AS source_name
+          COALESCE(f.name, l.name) AS source_name,
+          CASE WHEN m.iqc_material_id IS NOT NULL AND m.iqc_material_id != ?
+               THEN mat.material_name END AS matched_elsewhere
         FROM iqc_feed_messages m
         LEFT JOIN iqc_instrument_feeds f ON f.id = m.feed_id
         LEFT JOIN instrument_links l ON l.id = m.link_id
+        LEFT JOIN iqc_materials mat ON mat.id = m.iqc_material_id
         WHERE m.status IN ('matched', 'unmatched')
-          AND (m.iqc_material_id = ?
-               OR (m.iqc_material_id IS NULL AND (m.link_id = ? OR m.feed_id = ?)))
+          AND (m.iqc_material_id = ? OR m.link_id = ? OR m.feed_id = ?)
           AND (? IS NULL OR m.id > ?)
-        ORDER BY m.received_at DESC LIMIT 25`).all(materialId, linkId, feedId, since ?? null, since ?? null) as any[])
+        ORDER BY (m.iqc_material_id = ?) DESC, m.received_at DESC LIMIT 25`)
+      .all(materialId, materialId, linkId, feedId, since ?? null, since ?? null, materialId) as any[])
       .map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) ?? [] }));
   }
 
@@ -113,19 +154,27 @@ export function iqcAnalyserRoutes() {
   }
 
   router.get('/materials/:id/analyser', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
-    const found = attachmentFor(req.params.id);
+    const found = attachmentFor(req.params.id, parseIntNullable(req.query.equipmentId), parseIntNullable(req.query.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
-    const { material, link, feed } = found;
+    const { material, link, feed, options } = found;
+
+    // Every analyser the bench could reasonably mean, so a wrong guess is a
+    // dropdown rather than a dead end.
+    const choices = options.map(l => ({
+      id: l.id, name: l.name, equipmentName: l.equipment_name ?? null,
+      state: l.state, open: linkIsOurs(l.role, l.mode),
+    }));
 
     if (!link && !feed) {
       return res.json({
         linked: false,
-        // Named rather than left blank: "no analyser" and "an analyser this
-        // control was never pointed at" are different problems with different
+        // Named rather than left blank: "no analyser at all" and "none that
+        // matches this control" are different problems with different
         // remedies, and the bench cannot act on the first wording.
-        why: material.equipment_id
-          ? 'No analyser link is set up for this control’s instrument yet.'
-          : 'This control does not name an instrument, so there is nothing to take results from.',
+        why: options.length
+          ? 'None of the analyser links match this control’s instrument. Choose the machine it runs on.'
+          : 'No analyser link is set up on this system yet. One is added under Analyser Links.',
+        options: choices,
         waiting: [],
       });
     }
@@ -134,6 +183,7 @@ export function iqcAnalyserRoutes() {
     const waiting = waitingFor(Number(material.id), link?.id ?? null, feed?.id ?? null, since);
     res.json({
       linked: true,
+      options: choices,
       source: link
         ? {
             kind: 'link', id: link.id, name: link.name, mode: link.mode, role: link.role,
@@ -163,7 +213,8 @@ export function iqcAnalyserRoutes() {
    * rather than pretended away.
    */
   router.post('/materials/:id/analyser/fetch', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
-    const found = attachmentFor(req.params.id);
+    const found = attachmentFor(req.params.id,
+      parseIntNullable(req.body?.equipmentId), parseIntNullable(req.body?.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
     const { material, link, feed } = found;
     if (!link && !feed) return res.status(400).json({ error: 'No analyser is attached to this control.' });
@@ -194,7 +245,8 @@ export function iqcAnalyserRoutes() {
    * one somebody is standing at the analyser waiting for.
    */
   router.post('/materials/:id/analyser/listen', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
-    const found = attachmentFor(req.params.id);
+    const found = attachmentFor(req.params.id,
+      parseIntNullable(req.body?.equipmentId), parseIntNullable(req.body?.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
     const { link, feed } = found;
     if (!link && !feed) return res.status(400).json({ error: 'No analyser is attached to this control.' });
@@ -269,7 +321,8 @@ export function iqcAnalyserRoutes() {
    * is deliberately not offered here — it is not a previously run sample.
    */
   router.get('/materials/:id/analyser/patient-samples', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
-    const found = attachmentFor(req.params.id);
+    const found = attachmentFor(req.params.id,
+      parseIntNullable(req.query.equipmentId), parseIntNullable(req.query.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
     const { link } = found;
     if (!link) return res.json([]);
