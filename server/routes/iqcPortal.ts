@@ -94,6 +94,25 @@ export function iqcPortalRoutes() {
    * The same unit resolution the board uses, so a chart is reachable exactly
    * when the control that produced it is — no wider, and no narrower.
    */
+  /**
+   * The analyser link that serves a control, asked as widely as the module.
+   *
+   * The instrument on the control first, then the unit's, then — when this
+   * laboratory has exactly one link at all — that one. Matching only on
+   * equipment_id is how a machine registered twice under slightly different
+   * names ends up with no analyser and no explanation.
+   */
+  function linkForControl(db: any, material: any) {
+    const unitId = material.performing_section_id ?? material.section_id ?? null;
+    return db.prepare(`SELECT * FROM instrument_links
+        WHERE is_active = 1
+          AND (equipment_id = ? OR section_id = ?
+               OR (SELECT COUNT(*) FROM instrument_links WHERE is_active = 1) = 1)
+        ORDER BY (equipment_id = ?) DESC, (section_id = ?) DESC,
+                 (state IN ('listening','connected','following')) DESC, id
+        LIMIT 1`).get(material.equipment_id, unitId, material.equipment_id, unitId) ?? null;
+  }
+
   function reachableControl(db: any, req: any, materialId: number): boolean {
     const sectionId = currentSection(db, req);
     if (!sectionId) return false;
@@ -562,12 +581,21 @@ export function iqcPortalRoutes() {
     // runs on — which is the usual case now and was previously reported as
     // "no instrument feed is attached", sending the bench off to configure
     // something that was already working.
+    // What is transmitting for this control, asked as widely as the module asks
+    // it. Matching only the control's own equipment_id meant a laboratory that
+    // registered its machine as "Sysmex XN550" while the link was set up
+    // against "SYSMEX XN-550" — two rows for one analyser — got no feed, no
+    // Fetch button, and no hint that anything was wrong.
     const feed = material.feed_id
       ? db.prepare('SELECT id, name, transport, protocol, last_message_at, last_error, is_active FROM iqc_instrument_feeds WHERE id = ?').get(material.feed_id)
-      : material.equipment_id
-        ? db.prepare(`SELECT id, name, mode AS transport, protocol, last_message_at, last_error, is_active, state
-            FROM instrument_links WHERE equipment_id = ? AND is_active = 1 ORDER BY id LIMIT 1`).get(material.equipment_id)
-        : null;
+      : (() => {
+          const l = linkForControl(db, material) as any;
+          return l ? {
+            id: l.id, name: l.name, transport: l.mode, protocol: l.protocol,
+            last_message_at: l.last_message_at, last_error: l.last_error,
+            is_active: l.is_active, state: l.state,
+          } : null;
+        })();
     const waiting = db.prepare(`SELECT COUNT(*) AS n FROM iqc_feed_messages
         WHERE iqc_material_id = ? AND status = 'matched'`).get(req.params.id) as any;
 
@@ -1030,10 +1058,7 @@ export function iqcPortalRoutes() {
     if (!reachableControl(db, req, Number(req.params.id))) {
       return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
     }
-    const link = material.equipment_id
-      ? db.prepare('SELECT * FROM instrument_links WHERE equipment_id = ? AND is_active = 1 ORDER BY id LIMIT 1')
-        .get(material.equipment_id) as any
-      : null;
+    const link = linkForControl(db, material) as any;
     if (!link || !linkIsOurs(link.role, link.mode) || !(link.mode === 'file_drop' || link.mode === 'lhims_tap')) {
       return res.json({ read: 0, note: 'This analyser sends when it is ready; there is nothing here to ask it for.' });
     }
@@ -1041,6 +1066,37 @@ export function iqcPortalRoutes() {
     if (!bridge) return res.json({ read: 0, note: 'The analyser bridge is not running on this host.' });
     const outcome = bridge.fetchNow(Number(link.id));
     res.json({ read: outcome.read, note: outcome.note });
+  });
+
+  /**
+   * The previously run samples this control may be re-read against.
+   *
+   * Scoped the way the bench is scoped — by the unit whose board the control is
+   * on — rather than by the Quality Control view right, which a technician
+   * running the morning's controls does not hold. Enrolling a sample is still a
+   * setup act done in the module; this is only the register to pick from.
+   */
+  router.get('/portal/controls/:id/retained-samples', numericOnly, (req, res) => {
+    const db = getDb();
+    if (!reachableControl(db, req, Number(req.params.id))) {
+      return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
+    }
+    const rows = db.prepare(`SELECT s.*, e.name AS equipment_name,
+        orig.run_number AS original_run_number, orig.run_date AS original_control_date,
+        orig.status AS original_control_status,
+        (SELECT COUNT(*) FROM iqc_runs r WHERE r.retained_sample_id = s.id) AS rerun_count,
+        (SELECT MAX(r.run_date) FROM iqc_runs r WHERE r.retained_sample_id = s.id) AS last_rerun_date
+      FROM iqc_retained_samples s
+      LEFT JOIN equipment_items e ON e.id = s.equipment_id
+      LEFT JOIN iqc_runs orig ON orig.id = s.original_iqc_run_id
+      WHERE s.iqc_material_id = ? AND s.is_active = 1
+      ORDER BY s.original_run_date DESC, s.id DESC`).all(req.params.id) as any[];
+    res.json(rows.map(r => ({
+      ...r,
+      values: db.prepare(`SELECT v.*, a.analyte, a.unit FROM iqc_retained_sample_values v
+          JOIN iqc_analytes a ON a.id = v.iqc_analyte_id
+          WHERE v.retained_sample_id = ? ORDER BY a.display_order, a.id`).all(r.id),
+    })));
   });
 
   /**
@@ -1058,10 +1114,7 @@ export function iqcPortalRoutes() {
     if (!reachableControl(db, req, Number(req.params.id))) {
       return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
     }
-    const link = material.equipment_id
-      ? db.prepare('SELECT * FROM instrument_links WHERE equipment_id = ? AND is_active = 1 ORDER BY id LIMIT 1')
-        .get(material.equipment_id) as any
-      : null;
+    const link = linkForControl(db, material) as any;
 
     const newest = db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
         WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)

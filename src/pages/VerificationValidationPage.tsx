@@ -10,6 +10,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import TextField from '../components/ui/TextField';
+import AnalyserFetch from '../components/AnalyserFetch';
 import { Notice } from '../components/ui/Feedback';
 
 // ==========================================================================
@@ -352,7 +353,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
         {study.parameters.length === 0 && <tr><td colSpan={canManage ? 8 : 7} className="muted">No characteristics yet — add the standard set below.</td></tr>}
       </tbody></table>
     </div>
-    {dataFor && <ParamDataEditor param={dataFor} onClose={() => setDataFor(null)} onComputed={onRefresh} setError={setError} />}
+    {dataFor && <ParamDataEditor param={dataFor} study={study} onClose={() => setDataFor(null)} onComputed={onRefresh} setError={setError} />}
     {canManage && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
       <select value={addParam} onChange={e => setAddParam(e.target.value)}><option value="">Add a characteristic…</option>{Object.entries(catalogue).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
       <button type="button" onClick={onAddParam} disabled={!addParam}>+ Add</button>
@@ -395,7 +396,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
 
 // ---- Raw-data workbench for a single performance characteristic ----
 type DP = { sampleLabel: string; valueA: string; valueB: string };
-function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VParam; onClose: () => void; onComputed: () => void; setError: (m: string | null) => void }) {
+function ParamDataEditor({ param, study, onClose, onComputed, setError }: { param: VParam; study: Study; onClose: () => void; onComputed: () => void; setError: (m: string | null) => void }) {
   const { can } = usePermissions();
   const paired = param.parameter === 'method_comparison' || param.parameter === 'linearity';
   const bLabel = param.parameter === 'method_comparison' ? 'Comparator (B)' : param.parameter === 'linearity' ? 'Assigned (B)' : 'Value B';
@@ -408,6 +409,30 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
       .catch(() => setRows(Array.from({ length: 5 }, () => ({ sampleLabel: '', valueA: '', valueB: '' }))));
   }, [param.id]);
   function setCell(i: number, k: keyof DP, v: string) { setRows(r => r.map((row, idx) => idx === i ? { ...row, [k]: v } : row)); }
+
+  /**
+   * A replicate the analyser just sent. Twenty replicates is twenty of these,
+   * each landing on the next free line rather than replacing what is there.
+   */
+  function takeReading(sampleId: string | null, values: Array<{ analyte?: string; value?: number | string }>) {
+    const flat = (name?: string) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const wanted = flat(study.analyte || study.test_name);
+    const hit = values.find(v => flat(v.analyte) === wanted)
+      ?? values.find(v => wanted && flat(v.analyte).includes(wanted))
+      ?? (values.length === 1 ? values[0] : undefined);
+    if (!hit || hit.value === undefined || hit.value === null || String(hit.value) === '') {
+      setError(`That transmission carried nothing for ${study.analyte || study.test_name}.`);
+      return;
+    }
+    setError(null);
+    setRows(r => {
+      const label = sampleId || '';
+      const free = r.findIndex(row => row.valueA === '');
+      const filled = { sampleLabel: label, valueA: String(hit.value), valueB: '' };
+      if (free === -1) return [...r, filled];
+      return r.map((row, i) => (i === free ? { ...filled, valueB: row.valueB } : row));
+    });
+  }
   async function saveCompute() {
     setError(null);
     try {
@@ -425,6 +450,14 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
   return <div className="card" style={{ marginTop: 12, background: 'var(--panel-2)' }}>
     <div className="section-head" style={{ alignItems: 'center' }}><h4 style={{ margin: 0 }}>Raw data — {param.parameter_label}</h4><button className="secondary" style={{ marginLeft: 'auto' }} onClick={onClose}>Close</button></div>
     <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{help}</p>
+    {can('verification_validation', 'edit') && (
+      <AnalyserFetch
+        module="verification-validation" kind="patient"
+        equipmentId={study.equipment_id} sectionId={study.section_id}
+        label="Fetch a reading from the analyser"
+        onError={setError}
+        onArrive={message => takeReading(message.sample_id, message.parsed_values ?? [])} />
+    )}
     <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>Sample</th><th>{aLabel}</th>{paired && <th>{bLabel}</th>}</tr></thead><tbody>
       {rows.map((row, i) => <tr key={i}>
         <td><TextField value={row.sampleLabel} onValue={nextValue => setCell(i, 'sampleLabel', nextValue)} style={{ width: 120 }} placeholder={`#${i + 1}`} /></td>

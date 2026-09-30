@@ -23,6 +23,7 @@ import type {
   PreExaminationInstruction, SampleReceiptRecord, ReferenceIntervalRecord, ResultComparabilityStudy, ContingencyPlan
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
+import AnalyserFetch from '../components/AnalyserFetch';
 import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -147,6 +148,42 @@ export function ProcessManagementPage() {
   async function closeRejection(id: number) { try { await post(`/process-management/specimen-rejections/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
   async function submitRule(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/critical-result-rules', ruleForm); setRuleForm({ ruleCode: '', testCatalogId: '', analyteName: '', unit: '', lowCriticalValue: '', highCriticalValue: '', notificationTimeframeMinutes: '', escalationInstruction: '' }); await load(); } catch (e) { setError(errorText(e)); } }
   async function toggleRule(id: number) { try { await post(`/process-management/critical-result-rules/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  /**
+   * A result the analyser just sent. A critical value is the one reading
+   * nobody should be retyping under pressure, so the transmission fills the
+   * event in and the rule it breaches is selected if one is configured.
+   */
+  function takeCriticalReading(sampleId: string | null, values: Array<{ analyte?: string; value?: number | string }>) {
+    const flat = (name?: string | null) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const live = rules.filter(r => r.is_active);
+    const forTest = criticalForm.testCatalogId
+      ? live.filter(r => String(r.test_catalog_id ?? '') === criticalForm.testCatalogId)
+      : live;
+    let rule: CriticalResultRule | undefined;
+    let hit = values.find(v => {
+      rule = (forTest.length ? forTest : live).find(r => flat(r.analyte_name) === flat(v.analyte));
+      return Boolean(rule);
+    });
+    if (!hit) {
+      rule = undefined;
+      hit = values.find(v => flat(v.analyte) === flat(criticalForm.analyteName))
+        ?? (values.length === 1 ? values[0] : undefined);
+    }
+    if (!hit) {
+      setError('That transmission carried several analytes and none matches a critical-result rule. Name the analyte first.');
+      return;
+    }
+    setError(null);
+    setCriticalForm(f => ({
+      ...f,
+      requestReference: sampleId || f.requestReference,
+      analyteName: String(hit!.analyte ?? f.analyteName),
+      resultValue: String(hit!.value ?? ''),
+      unit: rule?.unit || f.unit,
+      criticalRuleId: rule ? String(rule.id) : f.criticalRuleId,
+    }));
+  }
+
   async function submitCritical(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/critical-results', criticalForm); setCriticalForm({ eventDate: '', eventTime: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', analyteName: '', resultValue: '', unit: '', criticalRuleId: '', notifiedTo: '', notificationMethod: '', notificationTime: '', readBackConfirmed: false, escalationNotes: '' }); await load(); } catch (e) { setError(errorText(e)); } }
   async function ackCritical(id: number) { try { await post(`/process-management/critical-results/${id}/acknowledge`, {}); await load(); } catch (e) { setError(errorText(e)); } }
   async function criticalCreateNc(id: number) { try { await post(`/process-management/critical-results/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
@@ -445,6 +482,13 @@ export function ProcessManagementPage() {
     </>}
 
     {tab === 'Critical Notifications' && <>
+      <AnalyserFetch
+        module="process-management" kind="patient"
+        equipmentId={tests.find(t => String(t.id) === criticalForm.testCatalogId)?.equipment_id ?? null}
+        sectionId={criticalForm.sectionId ? Number(criticalForm.sectionId) : null}
+        label="Fetch the result from the analyser"
+        onError={setError}
+        onArrive={message => takeCriticalReading(message.sample_id, message.parsed_values ?? [])} />
       <form className="form-grid" onSubmit={submitCritical}>
         <label>Event date<input type="date" value={criticalForm.eventDate} onChange={e => setCriticalForm({ ...criticalForm, eventDate: e.target.value })} required /></label>
         <label>Event time<input type="time" value={criticalForm.eventTime} onChange={e => setCriticalForm({ ...criticalForm, eventTime: e.target.value })} required /></label>
