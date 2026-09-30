@@ -6,7 +6,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
 import { backupFolder } from '../services/backupDestinations.js';
-import { config, isLanExposed, type AppMode } from '../config/index.js';
+import { config, type AppMode } from '../config/index.js';
+import {
+  boundHost, boundPort, boundToLan, portMovedFromConfigured,
+  storedLanChoice, setStoredLanChoice, hostSetInEnvironment,
+} from '../services/hostBinding.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
@@ -3446,12 +3450,15 @@ export function commonRoutes() {
   }
 
   function lanUrls(): string[] {
-    if (!isLanExposed()) return [];
+    // The port that was actually bound, not the one that was asked for. A host
+    // whose port was taken walks on to the next, and handing somebody the
+    // configured number sends them to nothing.
+    if (!boundToLan()) return [];
     const urls: string[] = [];
     const ifaces = os.networkInterfaces();
     for (const name of Object.keys(ifaces)) {
       for (const net of ifaces[name] ?? []) {
-        if (net.family === 'IPv4' && !net.internal) urls.push(`http://${net.address}:${config.api.port}/`);
+        if (net.family === 'IPv4' && !net.internal) urls.push(`http://${net.address}:${boundPort()}/`);
       }
     }
     return urls;
@@ -3464,14 +3471,25 @@ export function commonRoutes() {
     // another machine simply times out — so the host has to say so itself
     // rather than leaving somebody to infer it from a bind address.
     const reach = await tailscale.reachability({
-      host: config.api.host, port: config.api.port, lanExposed: isLanExposed(),
+      host: boundHost(), port: boundPort(), lanExposed: boundToLan(),
     });
     res.json({
       mode,
       modeSource: source,
       envDefaultMode: config.mode,
-      api: { host: config.api.host, port: config.api.port, publicUrl: config.api.publicUrl },
-      lanExposed: isLanExposed(),
+      api: { host: boundHost(), port: boundPort(), publicUrl: config.api.publicUrl },
+      lanExposed: boundToLan(),
+      // Whether LAN access is a choice this laboratory can make from here, and
+      // what it has chosen. An environment variable set deliberately still
+      // wins, so the screen says so rather than offering a switch that does
+      // nothing.
+      lan: {
+        exposed: boundToLan(),
+        choice: storedLanChoice(getDb()),
+        lockedToEnvironment: hostSetInEnvironment(),
+        configuredPort: config.api.port,
+        portMoved: portMovedFromConfigured(),
+      },
       lanReady: true,
       lanUrls: lanUrls(),
       reach,
@@ -3492,6 +3510,40 @@ export function commonRoutes() {
     ).run(requested);
     audit(req, { action: 'edit', entity: 'system_mode', entityId: 'systemMode', oldValue: before, newValue: requested });
     res.json({ ok: true, mode: requested });
+  });
+
+  /**
+   * Let other devices on this network reach the laboratory, or stop them.
+   *
+   * Stored rather than set in the environment, because the whole reason this
+   * exists is that an environment variable does not survive a restart: the host
+   * came back on loopback, a Tailscale route kept working because it proxies to
+   * loopback, the plain LAN address stopped, and nothing said why.
+   *
+   * It takes effect when the host next starts. Rebinding a live listener would
+   * drop every connected bench mid-request to save somebody a restart.
+   */
+  router.put('/system/lan', requirePermission('settings', 'edit'), (req, res) => {
+    if (hostSetInEnvironment()) {
+      return res.status(400).json({
+        error: 'This host\'s bind address is set in its environment (SECH_LIMS_API_HOST), which takes precedence. '
+          + 'Change it there, or clear it to manage access from here.',
+      });
+    }
+    const requested = req.body?.enabled;
+    if (typeof requested !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false' });
+
+    const before = storedLanChoice(getDb());
+    setStoredLanChoice(getDb(), requested);
+    audit(req, { action: 'edit', entity: 'system_lan', entityId: 'lanExposed', oldValue: before, newValue: requested });
+    res.json({
+      ok: true,
+      enabled: requested,
+      appliesAtRestart: requested !== boundToLan(),
+      note: requested
+        ? 'Other devices on this network will be able to open the laboratory once the host is restarted.'
+        : 'Only this computer will be able to open the laboratory once the host is restarted.',
+    });
   });
 
   router.get('/dashboard/system-health-summary', requirePermission('settings', 'view'), (_req, res) => {

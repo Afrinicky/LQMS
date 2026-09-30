@@ -75,6 +75,7 @@ import { ensureDataDirs, getDb } from './db/database.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
 import { seedDefaults } from './db/seed.js';
 import { config } from './config/index.js';
+import { resolveBindHost, recordBinding, hostIsLan } from './services/hostBinding.js';
 
 /**
  * Resolve the directory that holds the built renderer (dist/index.html).
@@ -239,9 +240,14 @@ export function createApiServer() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = config.api.port;
-  const host = config.api.host;
+  // Loopback unless the laboratory has said otherwise — and that choice is a
+  // stored setting, not an environment variable, so it survives the restart
+  // that used to quietly put the host back on 127.0.0.1 and take the LAN down.
+  const host = resolveBindHost(getDb);
   createApiServer().listen(port, host, () => {
-    console.log(`SECH_LIMS host API listening on http://${host}:${port}`);
+    recordBinding(host, port);
+    console.log(`SECH_LIMS host API listening on http://${host}:${port}`
+      + (hostIsLan(host) ? ' (reachable from the network)' : ' (this computer only)'));
     // The same jobs the packaged desktop application starts — see
     // services/backgroundJobs.ts for why they are not written out here.
     startBackgroundServices(getDb);

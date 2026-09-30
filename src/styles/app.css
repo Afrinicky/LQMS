@@ -7066,3 +7066,20 @@ button.cell-mark:disabled { cursor: default; }
 }
 .iqc-analyser-map { margin-top: 9px; font-size: 12px; line-height: 1.6; }
 .iqc-analyser-map strong { color: var(--success); }
+
+/* ============================================================
+   Who may reach this host
+   ------------------------------------------------------------
+   The switch that used to be an environment variable, and the
+   sentence explaining the failure it causes — a Tailscale route
+   that keeps working while the plain network address stops,
+   because one reaches the host over loopback and the other does
+   not.
+   ============================================================ */
+.sp-lan {
+  margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.sp-lan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sp-lan-head strong { font-size: 13px; }
+.sp-lan .hint { margin: 8px 0 0; line-height: 1.6; }

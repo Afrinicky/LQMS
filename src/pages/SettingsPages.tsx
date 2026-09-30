@@ -3171,10 +3171,34 @@ function QualityWorkflowSettings() {
  * — so the one thing this card owes anybody is a plain yes or no, and the next
  * step when the answer is no.
  */
-function RemoteAccessCard({ info }: { info: SystemConnectivity }) {
+function RemoteAccessCard({ info, canEdit, onChanged }: {
+  info: SystemConnectivity; canEdit: boolean; onChanged: () => void;
+}) {
   const reach = info.reach;
   const ts = reach?.tailscale;
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [lanNote, setLanNote] = useState<string | null>(null);
+  const [lanError, setLanError] = useState<string | null>(null);
+  const lan = info.lan;
+
+  /**
+   * Switch the network on or off for this host.
+   *
+   * It takes effect at the next restart on purpose: rebinding a live listener
+   * would drop every bench mid-request to save one person a restart.
+   */
+  async function setLan(enabled: boolean) {
+    setBusy(true); setLanError(null); setLanNote(null);
+    try {
+      const r = await api<{ note: string; appliesAtRestart: boolean }>('/system/lan', {
+        method: 'PUT', body: JSON.stringify({ enabled }),
+      });
+      setLanNote(r.note);
+      onChanged();
+    } catch (e) { setLanError(errorText(e)); }
+    finally { setBusy(false); }
+  }
 
   const command = `tailscale serve --bg ${info.api.port}`;
   async function copyCommand() {
@@ -3221,8 +3245,48 @@ function RemoteAccessCard({ info }: { info: SystemConnectivity }) {
         </>
       )}
 
+      {/* Whether this network may reach the laboratory at all. This used to be
+          an environment variable, which meant it did not survive a restart: the
+          host came back on loopback, a Tailscale route kept working because it
+          proxies to loopback, and the plain network address simply stopped. */}
+      {lan && (
+        <div className="sp-lan">
+          <div className="sp-lan-head">
+            <strong>Other devices on this network</strong>
+            {lan.lockedToEnvironment ? (
+              <span className="chip">Set in this host&rsquo;s environment</span>
+            ) : (
+              <div className="tabs inline">
+                <button type="button" disabled={!canEdit || busy} className={lan.choice === true ? 'active' : ''}
+                  onClick={() => void setLan(true)}>Allowed</button>
+                <button type="button" disabled={!canEdit || busy} className={lan.choice !== true ? 'active' : ''}
+                  onClick={() => void setLan(false)}>This computer only</button>
+              </div>
+            )}
+          </div>
+          <p className="hint">
+            {lan.exposed
+              ? 'The host is listening on every interface, so any device on this network can open it.'
+              : 'The host is listening on this computer only. A device on the network gets no answer at all — '
+                + 'which is why a laboratory published over Tailscale keeps working while its plain network '
+                + 'address stops: Tailscale reaches the host over loopback, and the network does not.'}
+            {lan.choice === true && !lan.exposed && ' It is switched on and takes effect when the host is next restarted.'}
+            {lan.choice === false && lan.exposed && ' It is switched off and takes effect when the host is next restarted.'}
+          </p>
+          {lan.portMoved && (
+            <Notice kind="warn" silent>
+              This host is on port <code>{info.api.port}</code>, not the <code>{lan.configuredPort}</code> it was
+              configured for — that port was already in use when it started. Devices set up with the old address
+              will not reach it.
+            </Notice>
+          )}
+          {lanNote && <Notice kind="success">{lanNote}</Notice>}
+          {lanError && <Notice kind="error">{lanError}</Notice>}
+        </div>
+      )}
+
       <table className="table" style={{ maxWidth: 640, marginTop: 12 }}><tbody>
-        <tr><td>Bind address</td><td><code>{info.api.host}</code>{info.api.host === '127.0.0.1' && <span className="hint"> — this computer only</span>}</td></tr>
+        <tr><td>Listening on</td><td><code>{info.api.host}</code>{info.api.host === '127.0.0.1' && <span className="hint"> — this computer only</span>}</td></tr>
         <tr><td>Port</td><td><code>{info.api.port}</code></td></tr>
         <tr>
           <td>Tailscale</td>
@@ -3302,7 +3366,7 @@ export function ConnectivityMode() {
       {error && <Notice kind="error">{error}</Notice>}
     </div>
 
-    <RemoteAccessCard info={info} />
+    <RemoteAccessCard info={info} canEdit={canEdit} onChanged={load} />
 
     <div className="card">
       <h3>Cloud synchronization</h3>
