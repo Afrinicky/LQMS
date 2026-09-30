@@ -114,7 +114,14 @@ export const config: AppConfig = Object.freeze({
   }),
 });
 
-/** True when the API is bound to a LAN-reachable address (not loopback only). */
+/**
+ * True when the API was CONFIGURED to bind a LAN-reachable address.
+ *
+ * What was actually bound is the better question and lives in
+ * services/hostBinding, which knows the laboratory's stored choice as well as
+ * the environment, and what the listener really got. This remains for callers
+ * that only have the deployment's intent to go on.
+ */
 export function isLanExposed(): boolean {
   return config.api.host === '0.0.0.0' || config.api.host === '::';
 }

@@ -22,6 +22,17 @@ export type SystemConnectivity = {
   envDefaultMode: AppMode;
   api: { host: string; port: number; publicUrl: string | null };
   lanExposed: boolean;
+  /** Whether other devices may reach this host, and whether that is settable here. */
+  lan: {
+    exposed: boolean;
+    /** What the laboratory has chosen; null when it has never been asked. */
+    choice: boolean | null;
+    /** Set in the environment, so the screen must not offer a switch. */
+    lockedToEnvironment: boolean;
+    configuredPort: number;
+    /** The host ended up on a different port from the configured one. */
+    portMoved: boolean;
+  };
   lanReady: boolean;
   lanUrls: string[];
   /** Whether anybody other than this computer can open the laboratory. */

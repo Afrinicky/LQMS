@@ -28,6 +28,7 @@
     "check:iqc-targets": "node scripts/iqc-targets-check.mjs",
     "check:iqc-retained": "node scripts/iqc-retained-check.mjs",
     "check:iqc-analyser": "node scripts/iqc-analyser-check.mjs",
+    "check:lan-access": "node scripts/lan-access-check.mjs",
     "check:unit-equipment": "node scripts/unit-equipment-check.mjs",
     "check:portal-setup": "node scripts/portal-setup-check.mjs",
     "check:routine-work": "node scripts/routine-work-check.mjs",
