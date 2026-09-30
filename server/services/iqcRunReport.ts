@@ -120,8 +120,10 @@ export function collectRunReport(db: BetterSqlite3.Database, selection: RunRepor
         seen.add(analyteId);
         const analyte = db.prepare('SELECT * FROM iqc_analytes WHERE id = ?').get(analyteId) as Row | undefined;
         if (!analyte) continue;
-        const series = db.prepare(`SELECT * FROM iqc_results
-          WHERE iqc_analyte_id = ? AND is_qualitative = 0 ${lastDate ? 'AND run_date <= ?' : ''}
+        const series = db.prepare(`SELECT * FROM iqc_results res
+          WHERE iqc_analyte_id = ? AND is_qualitative = 0
+            AND NOT EXISTS (SELECT 1 FROM iqc_runs r WHERE r.id = res.iqc_run_id AND r.run_kind = 'retained_sample')
+            ${lastDate ? 'AND run_date <= ?' : ''}
           ORDER BY run_date DESC, id DESC LIMIT ?`)
           .all(...(lastDate ? [analyteId, lastDate, REPORT_CHART_WINDOW] : [analyteId, REPORT_CHART_WINDOW])) as Row[];
         const points = series.reverse();

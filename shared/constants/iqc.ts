@@ -200,6 +200,8 @@ export const RULE_LABELS: Record<string, string> = {
   expected_mismatch: 'Does not match expected result',
   organism_mismatch: 'Organism not identified as expected',
   interpretation_mismatch: 'Susceptibility category not as expected',
+  continuity_out_of_tolerance: 'Differs from the original result by more than allowed',
+  continuity_mismatch: 'Does not reproduce the original result',
 };
 
 /** What each rule is telling the bench to look at. Shown beside a failure. */
@@ -215,13 +217,16 @@ export const RULE_MEANING: Record<string, string> = {
   expected_mismatch: 'The control did not give its expected result. The test system is not performing — do not report patient results.',
   organism_mismatch: 'The reference strain did not identify as the expected organism. The medium, inoculum or identification system is not performing — do not report patient results.',
   interpretation_mismatch: 'The agent gave a category other than the expected S/I/R for the reference strain. Check disk potency, inoculum density and incubation before reporting susceptibilities.',
+  continuity_out_of_tolerance: 'The sample re-read outside the difference allowed against its original result. The system is not giving the same answer it gave before — do not report patient results.',
+  continuity_mismatch: 'The sample did not reproduce the result it originally gave. The system is not giving the same answer it gave before — do not report patient results.',
 };
 
 /** Rules that stop patient results going out. A warning does not. */
 export function isRejection(rule?: string | null): boolean {
   return Boolean(rule && rule.startsWith('reject_'))
     || rule === 'out_of_range' || rule === 'expected_mismatch'
-    || rule === 'organism_mismatch' || rule === 'interpretation_mismatch';
+    || rule === 'organism_mismatch' || rule === 'interpretation_mismatch'
+    || rule === 'continuity_out_of_tolerance' || rule === 'continuity_mismatch';
 }
 
 /**
@@ -311,3 +316,81 @@ export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcCo
     analytes: [],
   },
 ];
+
+/* ============================================================================
+   Running a previously tested sample instead of control material
+   ----------------------------------------------------------------------------
+   A control lot runs out before the replacement arrives, and the analyser
+   cannot be used unrecorded. What the bench does is re-run a sample it has
+   already tested — one whose original result was produced while a control was
+   in control — and check that the analyser still gives the same answer.
+
+   The sample is therefore not a substitute for traceability; it carries it.
+   The record keeps the original result, the run it was produced in, and the
+   control run that covered it, so the new reading can be read back to real
+   control material.
+   ========================================================================= */
+
+/** What a run was performed on. */
+export const IQC_RUN_KINDS = ['control', 'retained_sample'] as const;
+export type IqcRunKind = (typeof IQC_RUN_KINDS)[number];
+
+export const IQC_RUN_KIND_LABELS: Record<IqcRunKind, string> = {
+  control: 'Control material',
+  retained_sample: 'Previously run sample',
+};
+
+/** Where a retained sample's original result came from. */
+export const RETAINED_SOURCES = ['entered', 'instrument'] as const;
+export type RetainedSource = (typeof RETAINED_SOURCES)[number];
+
+export const RETAINED_SOURCE_LABELS: Record<RetainedSource, string> = {
+  entered: 'Entered',
+  instrument: 'From the analyser',
+};
+
+/** How far a re-run may sit from the original before it fails. */
+export const CONTINUITY_TOLERANCE_KINDS = ['percent', 'absolute'] as const;
+export type ContinuityToleranceKind = (typeof CONTINUITY_TOLERANCE_KINDS)[number];
+
+export const CONTINUITY_TOLERANCE_KIND_LABELS: Record<ContinuityToleranceKind, string> = {
+  percent: 'Percentage of the original result',
+  absolute: 'Absolute difference',
+};
+
+/** Used where a control and its analytes name nothing of their own. */
+export const DEFAULT_CONTINUITY_TOLERANCE: { kind: ContinuityToleranceKind; value: number } = {
+  kind: 'percent', value: 10,
+};
+
+export function formatTolerance(kind?: string | null, value?: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '';
+  return kind === 'absolute' ? `±${value}` : `±${value}%`;
+}
+
+/**
+ * One box per analyte rather than two: "10%" is a percentage, "0.5" is an
+ * absolute difference. The bench types what it means.
+ */
+export function parseTolerance(text?: string | null): { kind: ContinuityToleranceKind; value: number } | null {
+  const raw = String(text ?? '').trim();
+  if (!raw) return null;
+  const percent = raw.endsWith('%');
+  const value = Number(raw.replace('%', '').replace('±', '').trim());
+  if (!Number.isFinite(value) || value < 0) return null;
+  return { kind: percent ? 'percent' : 'absolute', value };
+}
+
+/** The tolerance in force for one analyte: its own, else the control's, else the default. */
+export function effectiveTolerance(
+  analyte: { continuity_tolerance_kind?: string | null; continuity_tolerance_value?: number | null } | null | undefined,
+  material: { continuity_tolerance_kind?: string | null; continuity_tolerance_value?: number | null } | null | undefined,
+): { kind: ContinuityToleranceKind; value: number } {
+  const pick = (kind?: string | null, value?: number | null) =>
+    (value !== null && value !== undefined && Number.isFinite(Number(value)))
+      ? { kind: (kind === 'absolute' ? 'absolute' : 'percent') as ContinuityToleranceKind, value: Number(value) }
+      : null;
+  return pick(analyte?.continuity_tolerance_kind, analyte?.continuity_tolerance_value)
+    ?? pick(material?.continuity_tolerance_kind, material?.continuity_tolerance_value)
+    ?? DEFAULT_CONTINUITY_TOLERANCE;
+}

@@ -180,6 +180,10 @@ export function establishTargets(db: DB, analyteId: number, options?: { userId?:
         -- A rejected run was investigated and repeated. Folding it back in
         -- would widen the limits by the size of the fault they exist to catch.
         AND res.status IN ('accepted', 'warning')
+        -- A re-read of a patient sample says whether the system still gives
+        -- the same answer; it is not a measurement of the control material,
+        -- so it takes no part in the control's mean and SD.
+        AND NOT EXISTS (SELECT 1 FROM iqc_runs r WHERE r.id = res.iqc_run_id AND r.run_kind = 'retained_sample')
         ${since ? 'AND res.run_date >= ?' : ''}
       ORDER BY res.run_date, res.id`).all(...(since ? [analyteId, since] : [analyteId])) as any[];
 

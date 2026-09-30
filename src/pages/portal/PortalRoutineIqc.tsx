@@ -11,7 +11,10 @@ import TextField from '../../components/ui/TextField';
 import {
   IQC_ENTRY_METHOD_LABELS, IQC_ENTRY_METHOD_HINTS, type IqcEntryMethod,
 } from '../../../shared/constants/routineWork';
-import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
+import {
+  QUALITATIVE_LABELS, RULE_LABELS, scaleForOutcome,
+  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS,
+} from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
 import type {
   IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
@@ -479,7 +482,14 @@ function RunControlDialog({ control, onClose, onSaved }: {
     })();
   }, [control.id, control.preferredEntryMethod]);
 
-  const methods = (detail?.material.entryMethods ?? control.entryMethods ?? ['manual']) as IqcEntryMethod[];
+  // An analyser attached to this control is always a door, whether or not
+  // somebody remembered to tick it on the control's definition. Hiding the one
+  // route that does not involve typing twenty-three numbers, because a setting
+  // was left at its default, is how a bench goes back to paper.
+  const declared = (detail?.material.entryMethods ?? control.entryMethods ?? ['manual']) as IqcEntryMethod[];
+  const methods = detail?.feed && !declared.includes('instrument')
+    ? ([...declared, 'instrument'] as IqcEntryMethod[])
+    : declared;
   const analytes = detail?.analytes ?? [];
   const qualitative = detail?.material.control_type === 'qualitative';
 
@@ -607,11 +617,20 @@ function RunControlDialog({ control, onClose, onSaved }: {
                   <li key={a.id} className={`${out ? 'is-out' : ''}${fromMapping ? ' is-mapped' : ''}`}>
                     <label>
                       <span className="iqc-an-name">{a.analyte}{a.unit ? <em> {a.unit}</em> : null}</span>
-                      {qualitative || detail.material.control_type === 'culture_sensitivity' ? (
+                      {detail.material.control_type === 'culture_sensitivity' ? (
                         <select value={raw} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
                           <option value="">—</option>
-                          {Object.entries(QUALITATIVE_LABELS).map(([key, label]) => (
-                            <option key={key} value={key}>{label}</option>
+                          {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                        </select>
+                      ) : qualitative ? (
+                        /* Only the scale this control is defined on. A control
+                           whose expected result is "Detected" is answered with
+                           Detected or Not detected — offering "Positive" beside
+                           them invites a reading the control cannot judge. */
+                        <select value={raw} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                          <option value="">—</option>
+                          {scaleForOutcome(a.expected_result).map(o => (
+                            <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>
                           ))}
                         </select>
                       ) : (
@@ -623,6 +642,7 @@ function RunControlDialog({ control, onClose, onSaved }: {
                         {a.acceptable_low != null || a.acceptable_high != null
                           ? ` ${a.acceptable_low ?? '−'}–${a.acceptable_high ?? '−'}` : ''}
                         {a.expected_result ? QUALITATIVE_LABELS[a.expected_result as keyof typeof QUALITATIVE_LABELS] ?? a.expected_result : ''}
+                        {a.expected_interpretation ? AST_INTERPRETATION_LABELS[a.expected_interpretation as keyof typeof AST_INTERPRETATION_LABELS] ?? a.expected_interpretation : ''}
                       </span>
                     </label>
                   </li>
@@ -972,15 +992,32 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
 }) {
   const [messages, setMessages] = useState<IqcFeedMessage[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [fetchNote, setFetchNote] = useState<string | null>(null);
 
+  // Both statuses: a message the system matched to this control, and one it
+  // recognised as a control but could not place. The second is the one the
+  // bench needs most — it is waiting precisely because nobody has claimed it.
   const load = useCallback(async () => {
-    try { setMessages(await api<IqcFeedMessage[]>('/iqc/portal/feed-messages?status=matched')); }
+    try { setMessages(await api<IqcFeedMessage[]>('/iqc/portal/feed-messages')); }
     catch (e) { onProblem(errorText(e)); }
   }, [onProblem]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const mine = (messages ?? []).filter(m => m.iqc_material_id === control.id);
+  /** Ask the analyser to look now, for the links that can be asked. */
+  const fetchNow = useCallback(async () => {
+    setFetching(true); setFetchNote(null);
+    try {
+      const answer = await api<{ read: number; note: string }>(`/iqc/portal/controls/${control.id}/analyser-fetch`, { method: 'POST' });
+      setFetchNote(answer.note);
+      await load();
+    } catch (e) { onProblem(errorText(e)); }
+    finally { setFetching(false); }
+  }, [control.id, load, onProblem]);
+
+  const mine = (messages ?? []).filter(m =>
+    m.iqc_material_id === control.id || (m.iqc_material_id == null && m.status === 'unmatched'));
 
   if (!detail.feed) {
     return (
@@ -1000,7 +1037,11 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
         <Radio size={12} /> {detail.feed.name}
         {detail.feed.last_message_at ? ` · last heard from at ${String(detail.feed.last_message_at).slice(11, 16)}` : ' · nothing received yet'}
         {detail.feed.last_error && <span className="crit"> · {detail.feed.last_error}</span>}
+        <button type="button" className="pq-link" disabled={fetching} onClick={() => void fetchNow()}>
+          {fetching ? <Loader2 size={11} className="pd-spin" /> : <Download size={11} />} Fetch now
+        </button>
       </p>
+      {fetchNote && <p className="muted">{fetchNote}</p>}
       {mine.length === 0 ? (
         <p className="muted">
           Nothing is waiting from this instrument. Run the control on the analyser and send it as you would a
@@ -1013,7 +1054,11 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
             <li key={message.id}>
               <div>
                 <strong>{message.sample_id || 'control sample'}</strong>
-                <span className="muted"> · {String(message.received_at).slice(0, 16).replace('T', ' ')} · {message.parsed_values?.length ?? 0} parameters</span>
+                <span className="muted">
+                  {' · '}{String(message.received_at).slice(0, 16).replace('T', ' ')}
+                  {' · '}{message.parsed_values?.length ?? 0} parameters
+                  {message.iqc_material_id == null ? ' · not matched to a control' : ''}
+                </span>
               </div>
               <button type="button" className="pq-link" disabled={busy}
                 onClick={async () => {

@@ -3034,6 +3034,31 @@ button.tiny.danger:hover:not(:disabled) { background: var(--danger-bg); border-c
 /* ---- Run a control ---- */
 .iqc-run-ctx { display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0; }
 .iqc-entry td { vertical-align: middle; }
+.iqc-run fieldset.iqc-step { margin-top: 14px; }
+.iqc-run .form-grid { align-items: end; }
+.iqc-choice.two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+/* ---- Previously run samples ---- */
+.iqc-sample-pick { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.iqc-sample-pick label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; flex: 1; min-width: 260px; }
+.iqc-sample-pick button { white-space: nowrap; }
+.iqc-sample-card {
+  margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--panel);
+}
+.iqc-sample-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.iqc-sample-trace { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 11px 0 4px; }
+.iqc-sample-trace div { display: flex; flex-direction: column; gap: 2px; }
+.iqc-sample-trace dt { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.iqc-sample-trace dd { margin: 0; font-size: 12.5px; }
+.iqc-trace-gap { color: var(--warning); }
+.iqc-sample-new {
+  margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--overlay-1);
+  display: flex; flex-direction: column; gap: 11px;
+}
+.iqc-sample-new label.stack { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.iqc-sample-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .iqc-outcome {
   margin-top: 14px; padding: 13px 15px; border-radius: var(--radius-sm); border: 1px solid var(--border);
 }
@@ -6933,3 +6958,111 @@ button.cell-mark:disabled { cursor: default; }
   border: 1px solid var(--warning-line);
   border-left: 3px solid var(--warning);
 }
+
+/* ============================================================
+   Analyser links — getting one to transmit
+   ------------------------------------------------------------
+   The screen used to say "listening" and nothing else, while the
+   analyser said nothing at all. These are the parts that answer
+   the question somebody actually arrives with: why is nothing
+   coming through, and what do I change.
+   ============================================================ */
+.il-blocked {
+  display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 0;
+  padding: 8px 11px; border-radius: var(--radius-sm);
+  background: var(--danger-bg); border: 1px solid var(--danger-line);
+  font-size: 12px; line-height: 1.55;
+}
+.il-blocked svg { flex: none; margin-top: 2px; color: var(--danger); }
+.il-detail.is-quiet { color: var(--muted); }
+
+/* What to type into the analyser. */
+.il-host {
+  margin: 12px 0; padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--info-line); background: var(--info-bg);
+}
+.il-host.inline { margin: 10px 0; }
+.il-host-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; margin-bottom: 7px; }
+.il-host p { margin: 0 0 8px; font-size: 12px; line-height: 1.55; }
+.il-host-addr, .il-host-ports { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.il-host-ports { margin-top: 7px; }
+.il-host-addr li, .il-host-ports li {
+  display: flex; align-items: baseline; gap: 7px; padding: 5px 10px;
+  border-radius: var(--radius-sm); background: var(--panel); border: 1px solid var(--border);
+  font-size: 12px;
+}
+.il-host-addr code, .il-host-ports code { font-size: 12.5px; font-weight: 600; }
+.il-host-addr .muted, .il-host-ports .muted { font-size: 11px; }
+
+/* The verdict, before any detail. */
+.il-verdict {
+  display: flex; align-items: flex-start; gap: 11px; margin: 4px 0 14px;
+  padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
+.il-verdict > div { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.il-verdict strong { font-size: 13.5px; }
+.il-verdict span { font-size: 12px; color: var(--muted); }
+.il-verdict.ok { background: var(--success-bg); border-color: var(--success-line); }
+.il-verdict.ok strong, .il-verdict.ok > svg { color: var(--success); }
+.il-verdict.todo { background: var(--warning-bg); border-color: var(--warning-line); }
+.il-verdict.todo strong, .il-verdict.todo > svg { color: var(--warning); }
+.il-verdict.crit { background: var(--danger-bg); border-color: var(--danger-line); }
+.il-verdict.crit strong, .il-verdict.crit > svg { color: var(--danger); }
+.il-verdict button { white-space: nowrap; }
+
+/* The checklist. */
+.il-checks { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.il-checks li {
+  display: flex; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--panel);
+}
+.il-checks li > div { flex: 1; min-width: 0; }
+.il-checks strong { font-size: 12.5px; }
+.il-checks p { margin: 3px 0 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.il-check-mark { flex: none; margin-top: 1px; }
+.il-checks li.s-ok .il-check-mark { color: var(--success); }
+.il-checks li.s-info .il-check-mark { color: var(--faint); }
+.il-checks li.s-warn { border-color: var(--warning-line); }
+.il-checks li.s-warn .il-check-mark { color: var(--warning); }
+.il-checks li.s-todo { border-color: var(--danger-line); }
+.il-checks li.s-todo .il-check-mark { color: var(--danger); }
+.il-check-fix { color: var(--text) !important; }
+
+.il-trans-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.il-sub { margin: 14px 0 8px; font-size: 12.5px; }
+
+/* Watching it arrive. */
+.il-kinds { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; margin-bottom: 9px; }
+.il-kinds span { padding: 3px 9px; border-radius: var(--radius-pill); border: 1px solid var(--border); }
+.il-kinds .k-control { border-color: var(--success-line); color: var(--success); }
+.il-kinds .k-patient { border-color: var(--info-line); color: var(--info); }
+.il-kinds .k-unknown { border-color: var(--warning-line); color: var(--warning); }
+.il-stream { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
+.il-stream li {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 12px;
+  padding: 7px 11px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border);
+}
+.il-stream-time { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 11.5px; }
+.il-stream li.k-unknown { border-color: var(--warning-line); }
+
+/* The analyser, on the screen where a control is run. */
+.iqc-analyser {
+  margin-bottom: 12px; padding: 11px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--info-line); background: var(--info-bg);
+}
+.iqc-analyser-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 12.5px; }
+.iqc-analyser-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.iqc-analyser-head .muted { font-size: 11.5px; }
+.iqc-analyser-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.iqc-analyser-dot.s-listening, .iqc-analyser-dot.s-connected, .iqc-analyser-dot.s-following { background: var(--success); }
+.iqc-analyser-dot.s-error { background: var(--danger); }
+.iqc-analyser-dot.s-blocked { background: var(--warning); }
+.iqc-analyser > p { margin: 8px 0 0; font-size: 12px; }
+.iqc-analyser-list { list-style: none; margin: 9px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.iqc-analyser-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 7px 11px; border-radius: var(--radius-sm); background: var(--panel); border: 1px solid var(--border);
+  font-size: 12px;
+}
+.iqc-analyser-map { margin-top: 9px; font-size: 12px; line-height: 1.6; }
+.iqc-analyser-map strong { color: var(--success); }

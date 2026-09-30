@@ -20,11 +20,15 @@ import { mayActOnUnit } from '../services/unitLeadership.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
-import { evaluateRun, chartStatistics, type AnalyteDef, type History } from '../services/iqcEvaluation.js';
+import {
+  evaluateRun, evaluateContinuityRun, chartStatistics,
+  type AnalyteDef, type History, type OriginalReading,
+} from '../services/iqcEvaluation.js';
 import {
   effectiveTarget, withEffectiveTarget, establishTargets, establishForMaterial, refreshEstablishedTargets,
   DEFINITIVE_POINTS, DEFINITIVE_DAYS, INTERIM_POINTS, INTERIM_DAYS,
 } from '../services/iqcTargets.js';
+import { effectiveTolerance, parseTolerance } from '../../shared/constants/iqc.js';
 import type { IqcControlType, IqcRuleProfile } from '../../shared/constants/iqc.js';
 
 type MaterialRow = {
@@ -89,20 +93,24 @@ export function iqcRunRoutes() {
         const name = String(a.analyte ?? '').trim();
         if (!name) return;
         const existing = db.prepare('SELECT id FROM iqc_analytes WHERE iqc_material_id = ? AND analyte = ?').get(req.params.id, name) as { id: number } | undefined;
+        const tol = parseTolerance(a.continuityTolerance as string);
         const values = [
           a.unit ?? null, num(a.targetMean), num(a.targetSd), num(a.acceptableLow), num(a.acceptableHigh),
           num(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null,
           (a.astMethod as string) || null, (a.expectedInterpretation as string) || null,
+          tol?.kind ?? null, tol?.value ?? null,
           i, a.isActive === false ? 0 : 1,
         ];
         if (existing) {
           db.prepare(`UPDATE iqc_analytes SET unit = ?, target_mean = ?, target_sd = ?, acceptable_low = ?, acceptable_high = ?,
-              decimal_places = ?, expected_result = ?, ast_method = ?, expected_interpretation = ?, display_order = ?, is_active = ? WHERE id = ?`).run(...values, existing.id);
+              decimal_places = ?, expected_result = ?, ast_method = ?, expected_interpretation = ?,
+              continuity_tolerance_kind = ?, continuity_tolerance_value = ?, display_order = ?, is_active = ? WHERE id = ?`).run(...values, existing.id);
           keep.add(existing.id);
         } else {
           const r = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd, acceptable_low,
-              acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation, display_order, is_active)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.params.id, name, ...values);
+              acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation,
+              continuity_tolerance_kind, continuity_tolerance_value, display_order, is_active)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.params.id, name, ...values);
           keep.add(Number(r.lastInsertRowid));
         }
       });
@@ -127,12 +135,14 @@ export function iqcRunRoutes() {
     if (req.query.to) { where.push('r.run_date <= ?'); params.push(String(req.query.to)); }
     if (req.query.pendingReview === '1') where.push('r.reviewed_at IS NULL');
     let q = `SELECT r.*, m.material_name, m.lot_number, m.test_name, m.control_type, m.level_label,
-        e.name AS equipment_name, s.full_name AS operator_name, rev.full_name AS reviewed_by
+        e.name AS equipment_name, s.full_name AS operator_name, rev.full_name AS reviewed_by,
+        rs.sample_reference AS retained_sample_reference, rs.sample_code AS retained_sample_code
       FROM iqc_runs r
       JOIN iqc_materials m ON m.id = r.iqc_material_id
       LEFT JOIN equipment_items e ON e.id = r.equipment_id
       LEFT JOIN staff s ON s.id = r.operator_staff_id
-      LEFT JOIN staff rev ON rev.id = r.reviewed_by_staff_id`;
+      LEFT JOIN staff rev ON rev.id = r.reviewed_by_staff_id
+      LEFT JOIN iqc_retained_samples rs ON rs.id = r.retained_sample_id`;
     if (where.length) q += ` WHERE ${where.join(' AND ')}`;
     q += ' ORDER BY r.run_date DESC, r.id DESC LIMIT 500';
     res.json(db.prepare(q).all(...params));
@@ -141,11 +151,16 @@ export function iqcRunRoutes() {
   router.get('/runs/:id', requirePermission('iqc', 'view'), (req, res) => {
     const db = getDb();
     const run = db.prepare(`SELECT r.*, m.material_name, m.lot_number, m.test_name, m.control_type, m.rule_profile,
-        m.level_label, m.source, e.name AS equipment_name, s.full_name AS operator_name, rev.full_name AS reviewed_by
+        m.level_label, m.source, e.name AS equipment_name, s.full_name AS operator_name, rev.full_name AS reviewed_by,
+        rs.sample_reference AS retained_sample_reference, rs.sample_code AS retained_sample_code,
+        rs.original_run_date AS retained_original_run_date, rs.original_iqc_run_id AS retained_original_iqc_run_id,
+        orig.run_number AS retained_original_run_number
       FROM iqc_runs r JOIN iqc_materials m ON m.id = r.iqc_material_id
       LEFT JOIN equipment_items e ON e.id = r.equipment_id
       LEFT JOIN staff s ON s.id = r.operator_staff_id
       LEFT JOIN staff rev ON rev.id = r.reviewed_by_staff_id
+      LEFT JOIN iqc_retained_samples rs ON rs.id = r.retained_sample_id
+      LEFT JOIN iqc_runs orig ON orig.id = rs.original_iqc_run_id
       WHERE r.id = ?`).get(req.params.id);
     if (!run) return res.status(404).json({ error: 'Control run not found' });
     const readings = db.prepare(`SELECT res.*, a.analyte, a.unit, a.target_mean, a.target_sd, a.acceptable_low, a.acceptable_high, a.decimal_places,
@@ -154,6 +169,92 @@ export function iqcRunRoutes() {
       WHERE res.iqc_run_id = ? ORDER BY a.display_order, res.id`).all(req.params.id);
     res.json({ ...run, readings });
   });
+
+  /**
+   * Record a re-read of a previously run sample.
+   *
+   * The control material is finished; the sample stands in for it. So the run
+   * is not judged against the control's target — it is judged against what
+   * this laboratory itself got for that sample the first time, within the
+   * difference the control allows. The run keeps the sample, the original
+   * reading and the control run that covered it, which is what makes the
+   * result traceable back to control material rather than to nothing.
+   */
+  function recordRetainedRun(req: any, res: any, db: any, material: MaterialRow, runDate: string) {
+    const sampleId = parseIntNullable(req.body?.retainedSampleId);
+    if (!sampleId) return res.status(400).json({ error: 'Choose the previously run sample being re-read.' });
+    const sample = db.prepare('SELECT * FROM iqc_retained_samples WHERE id = ? AND iqc_material_id = ?')
+      .get(sampleId, material.id) as any;
+    if (!sample) return res.status(404).json({ error: 'That sample is not enrolled against this control.' });
+    if (sample.is_active !== 1) return res.status(400).json({ error: 'That sample has been taken out of use.' });
+    if (runDate < String(sample.original_run_date)) {
+      return res.status(400).json({ error: `That sample was first tested on ${sample.original_run_date}; a re-read cannot predate it.` });
+    }
+
+    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
+      .all(material.id) as any[];
+    const readings = Array.isArray(req.body?.readings) ? req.body.readings : [];
+    if (readings.length === 0) return res.status(400).json({ error: 'Enter what the sample gave on this re-read.' });
+
+    const stored = db.prepare('SELECT * FROM iqc_retained_sample_values WHERE retained_sample_id = ?').all(sampleId) as any[];
+    const originals: OriginalReading[] = stored.map(v => ({
+      analyteId: Number(v.iqc_analyte_id),
+      value: v.original_value,
+      qualitativeResult: v.original_qualitative_result ?? v.original_interpretation ?? null,
+    }));
+    const byAnalyteId = new Map(analytes.map(a => [a.id, a]));
+    const verdict = evaluateContinuityRun(
+      material.control_type, analytes as AnalyteDef[], readings, originals,
+      id => effectiveTolerance(byAnalyteId.get(id), material as any),
+    );
+
+    const createdAt = new Date().toISOString();
+    const runNumber = generateRecordNumber(db, 'iqc_runs', 'QCR', createdAt, 'run_number');
+    const operatorStaffId = getStaffIdOrCurrent(req, req.body?.operatorStaffId);
+
+    let runId = 0;
+    const tx = db.transaction(() => {
+      const r = db.prepare(`INSERT INTO iqc_runs (run_number, iqc_material_id, run_date, run_time, shift, equipment_id,
+          section_id, operator_staff_id, reagent_lot, status, rule_summary, patient_results_released, comment,
+          run_kind, retained_sample_id, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'retained_sample', ?, ?)`)
+        .run(runNumber, material.id, runDate, req.body?.runTime ?? null, req.body?.shift ?? null,
+          parseIntNullable(req.body?.equipmentId) ?? sample.equipment_id,
+          parseIntNullable(req.body?.sectionId) ?? sample.section_id, operatorStaffId,
+          req.body?.reagentLot ?? null, verdict.status, verdict.ruleSummary,
+          verdict.mayReleasePatientResults ? 1 : 0, req.body?.comment ?? null, sample.id, req.user!.id);
+      runId = Number(r.lastInsertRowid);
+
+      const insert = db.prepare(`INSERT INTO iqc_results (iqc_material_id, iqc_run_id, iqc_analyte_id, run_date, run_time,
+          result_value, qualitative_result, expected_result, is_qualitative, interpretation_result, entered_by_staff_id,
+          equipment_id, status, rule_violation, comment, original_value, original_qualitative_result,
+          deviation, deviation_percent, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const isCs = material.control_type === 'culture_sensitivity';
+      for (const v of verdict.analytes) {
+        if (!v.analyteId) continue;
+        const categorical = v.value === null && v.qualitativeResult !== null;
+        insert.run(material.id, runId, v.analyteId, runDate, req.body?.runTime ?? null,
+          v.value ?? 0,
+          isCs ? null : v.qualitativeResult, v.originalQualitativeResult, categorical && !isCs ? 1 : 0,
+          isCs ? v.qualitativeResult : null,
+          operatorStaffId, parseIntNullable(req.body?.equipmentId) ?? sample.equipment_id,
+          v.status, v.rule, null, v.originalValue, v.originalQualitativeResult,
+          v.deviation, v.deviationPercent, req.user!.id);
+      }
+    });
+    tx();
+
+    audit(req, {
+      action: 'create', entity: 'iqc_runs', entityId: runId,
+      newValue: { runNumber, runKind: 'retained_sample', sample: sample.sample_code, status: verdict.status, rule: verdict.ruleSummary },
+    });
+    return res.status(201).json({
+      id: runId, runNumber, runKind: 'retained_sample',
+      retainedSample: { id: sample.id, code: sample.sample_code, reference: sample.sample_reference },
+      ...verdict,
+    });
+  }
 
   /**
    * Record a control run. The rules that apply come from the material, so the
@@ -170,12 +271,19 @@ export function iqcRunRoutes() {
     if (material.is_active !== 1) return res.status(400).json({ error: 'That control material is no longer active.' });
 
     const runDate = String(req.body?.runDate ?? '').trim() || new Date().toISOString().slice(0, 10);
-    if (material.expiry_date && material.expiry_date < runDate) {
+    // A previously run sample is used precisely BECAUSE the control material is
+    // finished or out of date, so the lot's expiry does not refuse it.
+    const runKind = req.body?.runKind === 'retained_sample' ? 'retained_sample' : 'control';
+    if (runKind === 'control' && material.expiry_date && material.expiry_date < runDate) {
       return res.status(400).json({ error: `That control lot expired on ${material.expiry_date}. Use a current lot.` });
     }
 
     const isCs = material.control_type === 'culture_sensitivity';
     const observedOrganism = isCs ? (String(req.body?.observedOrganism ?? '').trim() || null) : null;
+
+    if (runKind === 'retained_sample') {
+      return recordRetainedRun(req, res, db, material, runDate);
+    }
 
     // The limits the run is judged against are the effective ones: what a human
     // entered where they entered it, and otherwise what this laboratory has
@@ -200,6 +308,9 @@ export function iqcRunRoutes() {
     const priorStmt = db.prepare(`SELECT res.result_value FROM iqc_results res
       JOIN iqc_runs r ON r.id = res.iqc_run_id
       WHERE res.iqc_analyte_id = ? AND r.status != 'out_of_control' AND r.run_date <= ?
+        -- A re-read of a patient sample is not a reading of the control
+        -- material, so it never enters the control's own run history.
+        AND COALESCE(r.run_kind, 'control') = 'control'
       ORDER BY r.run_date DESC, r.id DESC LIMIT 12`);
     for (const a of analytes) {
       const rows = priorStmt.all(a.id, runDate) as { result_value: number }[];
@@ -323,8 +434,9 @@ export function iqcRunRoutes() {
     const material = db.prepare('SELECT id, material_name, lot_number, control_type FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
     const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(req.params.id) as any[];
-    const counted = db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT run_date) AS days FROM iqc_results
-        WHERE iqc_analyte_id = ? AND COALESCE(is_qualitative, 0) != 1 AND status IN ('accepted', 'warning')`);
+    const counted = db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT run_date) AS days FROM iqc_results res
+        WHERE iqc_analyte_id = ? AND COALESCE(is_qualitative, 0) != 1 AND status IN ('accepted', 'warning')
+          AND NOT EXISTS (SELECT 1 FROM iqc_runs r WHERE r.id = res.iqc_run_id AND r.run_kind = 'retained_sample')`);
     res.json({
       material,
       requirement: { points: DEFINITIVE_POINTS, days: DEFINITIVE_DAYS, interimPoints: INTERIM_POINTS, interimDays: INTERIM_DAYS },
@@ -407,7 +519,7 @@ export function iqcRunRoutes() {
       LEFT JOIN iqc_runs r ON r.id = res.iqc_run_id
       LEFT JOIN equipment_items e ON e.id = res.equipment_id
       LEFT JOIN staff s ON s.id = res.entered_by_staff_id
-      WHERE ${where.join(' AND ')}
+      WHERE ${where.join(' AND ')} AND COALESCE(r.run_kind, 'control') = 'control'
       ORDER BY res.run_date DESC, res.id DESC LIMIT ?`).all(...params, limit) as Record<string, unknown>[];
 
     const points = rows.reverse();

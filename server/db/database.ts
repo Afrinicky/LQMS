@@ -6710,6 +6710,80 @@ CREATE TABLE IF NOT EXISTS iqc_import_layouts (
     if (!cols.has('feed_message_id')) database.exec('ALTER TABLE iqc_runs ADD COLUMN feed_message_id INTEGER REFERENCES iqc_feed_messages(id)');
   }
 
+  // -------------------------------------------------------------------
+  // Running a previously tested sample when control material has run out.
+  //
+  // The sample is one this laboratory already tested, on a day its controls
+  // were in control. Re-running it asks a narrower question than a control
+  // does — does the analyser still give the answer it gave before? — so the
+  // record keeps the original result, the run that produced it, and the
+  // control run that covered it, and judges the re-read against them.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS iqc_retained_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sample_code TEXT NOT NULL UNIQUE,
+  iqc_material_id INTEGER NOT NULL REFERENCES iqc_materials(id),
+  sample_reference TEXT NOT NULL,          -- the laboratory number the sample was reported under
+  sample_type TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  original_run_date TEXT NOT NULL,
+  original_run_time TEXT,
+  -- The control run that was in control when the original result was produced.
+  original_iqc_run_id INTEGER REFERENCES iqc_runs(id),
+  -- Where the original numbers came from: typed in, or read off the analyser.
+  source TEXT NOT NULL DEFAULT 'entered',  -- entered | instrument
+  feed_message_id INTEGER REFERENCES iqc_feed_messages(id),
+  reason TEXT,
+  notes TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_iqc_retained_material ON iqc_retained_samples(iqc_material_id, is_active);
+
+CREATE TABLE IF NOT EXISTS iqc_retained_sample_values (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  retained_sample_id INTEGER NOT NULL REFERENCES iqc_retained_samples(id) ON DELETE CASCADE,
+  iqc_analyte_id INTEGER NOT NULL REFERENCES iqc_analytes(id),
+  original_value REAL,
+  original_qualitative_result TEXT,
+  original_interpretation TEXT,
+  UNIQUE (retained_sample_id, iqc_analyte_id)
+);
+`);
+
+  // What a re-read may differ from the original by. The control carries the
+  // default; an analyte may name its own, because a percentage that suits
+  // haemoglobin does not suit a platelet count.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_materials)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('continuity_tolerance_kind')) database.exec('ALTER TABLE iqc_materials ADD COLUMN continuity_tolerance_kind TEXT');
+    if (!cols.has('continuity_tolerance_value')) database.exec('ALTER TABLE iqc_materials ADD COLUMN continuity_tolerance_value REAL');
+  }
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_analytes)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('continuity_tolerance_kind')) database.exec('ALTER TABLE iqc_analytes ADD COLUMN continuity_tolerance_kind TEXT');
+    if (!cols.has('continuity_tolerance_value')) database.exec('ALTER TABLE iqc_analytes ADD COLUMN continuity_tolerance_value REAL');
+  }
+  // A run says what it was performed on. Everything recorded before this is a
+  // run of control material, which is what the default reads.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_runs)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('run_kind')) database.exec("ALTER TABLE iqc_runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'control'");
+    if (!cols.has('retained_sample_id')) database.exec('ALTER TABLE iqc_runs ADD COLUMN retained_sample_id INTEGER REFERENCES iqc_retained_samples(id)');
+  }
+  // The original reading a re-read was judged against, kept beside it so the
+  // comparison survives any later change to the retained sample's record.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_results)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('original_value')) database.exec('ALTER TABLE iqc_results ADD COLUMN original_value REAL');
+    if (!cols.has('original_qualitative_result')) database.exec('ALTER TABLE iqc_results ADD COLUMN original_qualitative_result TEXT');
+    if (!cols.has('deviation')) database.exec('ALTER TABLE iqc_results ADD COLUMN deviation REAL');
+    if (!cols.has('deviation_percent')) database.exec('ALTER TABLE iqc_results ADD COLUMN deviation_percent REAL');
+  }
+
   // Environmental monitoring: manual charting or automatic loggers, and whether
   // the month's paper chart may be attached. A laboratory that charts by hand
   // should never be shown a data-logger screen, so the mode is a setting and

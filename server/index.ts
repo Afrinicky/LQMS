@@ -21,6 +21,8 @@ import { safetyRoutes } from './routes/safety.js';
 import { organisationRoutes } from './routes/organisation.js';
 import { iqcRoutes } from './routes/iqc.js';
 import { iqcRunRoutes } from './routes/iqcRuns.js';
+import { iqcRetainedRoutes } from './routes/iqcRetained.js';
+import { iqcAnalyserRoutes } from './routes/iqcAnalyser.js';
 import { iqcImportExportRoutes } from './routes/iqcImportExport.js';
 import { iqcAdminRoutes } from './routes/iqcAdmin.js';
 import { backupSyncRoutes } from './routes/backupSync.js';
@@ -133,6 +135,8 @@ export function createApiServer() {
   app.use('/api/iqc', iqcPortalRoutes());
   app.use('/api/iqc', iqcAdminRoutes());
   app.use('/api/iqc', iqcImportExportRoutes());
+  app.use('/api/iqc', iqcAnalyserRoutes());
+  app.use('/api/iqc', iqcRetainedRoutes());
   app.use('/api/iqc', iqcRunRoutes());
   app.use('/api/iqc', iqcRoutes());
   app.use('/api/eqa', eqaRoutes());

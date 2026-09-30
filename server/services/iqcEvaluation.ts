@@ -309,3 +309,110 @@ export function chartStatistics(values: number[], targetMean: number | null, tar
   const sdIndex = bias !== null && targetSd ? bias / targetSd : null;
   return { n, mean, sd, cv, bias, biasPercent, sdIndex };
 }
+
+/* ============================================================================
+   Re-reading a previously tested sample
+   ----------------------------------------------------------------------------
+   A different question from the one a control asks. A control is judged against
+   an assigned target; a retained sample is judged against the answer this
+   laboratory itself got the first time. The rules are therefore not Westgard's
+   — they are "is it still the same result, within the difference the control
+   allows".
+   ========================================================================= */
+
+/** What the sample gave the first time it was tested. */
+export type OriginalReading = {
+  analyteId: number;
+  value?: number | null;
+  qualitativeResult?: string | null;
+};
+
+export type ContinuityVerdict = AnalyteVerdict & {
+  originalValue: number | null;
+  originalQualitativeResult: string | null;
+  deviation: number | null;
+  deviationPercent: number | null;
+  toleranceKind: string | null;
+  toleranceValue: number | null;
+};
+
+export type ContinuityRunVerdict = Omit<RunVerdict, 'analytes'> & { analytes: ContinuityVerdict[] };
+
+export function evaluateContinuityRun(
+  controlType: IqcControlType,
+  analytes: AnalyteDef[],
+  readings: Reading[],
+  originals: OriginalReading[],
+  toleranceFor: (analyteId: number) => { kind: string; value: number },
+): ContinuityRunVerdict {
+  const byId = new Map(analytes.map(a => [a.id, a]));
+  const originalById = new Map(originals.map(o => [o.analyteId, o]));
+  const categorical = controlType === 'qualitative' || controlType === 'culture_sensitivity';
+
+  const verdicts: ContinuityVerdict[] = [];
+  for (const r of readings) {
+    const def = byId.get(r.analyteId);
+    if (!def) continue;
+    const original = originalById.get(r.analyteId);
+    const tol = toleranceFor(def.id);
+    const observedText = String(r.interpretation ?? r.qualitativeResult ?? '').trim();
+    const base: ContinuityVerdict = {
+      analyteId: def.id, analyte: def.analyte,
+      value: num(r.value), qualitativeResult: observedText || null,
+      expectedResult: null, zScore: null, status: 'accepted', rule: 'within_control',
+      originalValue: null, originalQualitativeResult: null,
+      deviation: null, deviationPercent: null,
+      toleranceKind: categorical ? null : tol.kind, toleranceValue: categorical ? null : tol.value,
+    };
+
+    if (!original) {
+      // Nothing was recorded for this parameter when the sample was enrolled,
+      // so there is nothing to compare it with. It is kept, not judged.
+      verdicts.push(base);
+      continue;
+    }
+
+    if (categorical) {
+      const originalText = String(original.qualitativeResult ?? '').trim();
+      base.originalQualitativeResult = originalText || null;
+      base.expectedResult = originalText || null;
+      if (!originalText) { verdicts.push(base); continue; }
+      const same = observedText && observedText.toLowerCase() === originalText.toLowerCase();
+      verdicts.push({ ...base, status: same ? 'accepted' : 'out_of_control', rule: same ? 'within_control' : 'continuity_mismatch' });
+      continue;
+    }
+
+    const originalValue = num(original.value);
+    const observedValue = num(r.value);
+    base.originalValue = originalValue;
+    if (originalValue === null) { verdicts.push(base); continue; }
+    if (observedValue === null) {
+      verdicts.push({ ...base, status: 'out_of_control', rule: 'continuity_mismatch' });
+      continue;
+    }
+
+    const deviation = observedValue - originalValue;
+    const deviationPercent = originalValue !== 0 ? (deviation / Math.abs(originalValue)) * 100 : null;
+    // A percentage of zero says nothing, so a sample that originally read zero
+    // is held to the same figure as an absolute difference rather than passing
+    // or failing on arithmetic that has no meaning.
+    const within = tol.kind === 'percent' && deviationPercent !== null
+      ? Math.abs(deviationPercent) <= tol.value
+      : Math.abs(deviation) <= tol.value;
+
+    verdicts.push({
+      ...base, deviation, deviationPercent,
+      status: within ? 'accepted' : 'out_of_control',
+      rule: within ? 'within_control' : 'continuity_out_of_tolerance',
+    });
+  }
+
+  const rejected = verdicts.filter(v => v.status === 'out_of_control');
+  const say = (v: ContinuityVerdict) => `${v.analyte}: ${RULE_LABELS[v.rule ?? ''] ?? v.rule}`;
+  return {
+    status: rejected.length ? 'out_of_control' : 'in_control',
+    ruleSummary: rejected.length ? rejected.map(say).join('; ') : null,
+    analytes: verdicts,
+    mayReleasePatientResults: !verdicts.some(v => isRejection(v.rule)),
+  };
+}

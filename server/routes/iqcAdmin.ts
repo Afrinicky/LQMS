@@ -34,7 +34,7 @@ import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { evaluateRun, type AnalyteDef, type History } from '../services/iqcEvaluation.js';
 import {
   IQC_SOURCES, IQC_CONTROL_TYPES, IQC_FREQUENCIES, IQC_RULE_PROFILES,
-  QUALITATIVE_OUTCOMES, PROFILES_FOR_TYPE,
+  QUALITATIVE_OUTCOMES, PROFILES_FOR_TYPE, parseTolerance,
   type IqcControlType, type IqcRuleProfile,
 } from '../../shared/constants/iqc.js';
 
@@ -171,6 +171,12 @@ export function iqcAdminRoutes() {
         ? given(req.body?.expectedOrganism, before.expected_organism)
         : null,
       cs_scope: csScope,
+      continuity_tolerance_kind: req.body?.continuityToleranceValue === undefined
+        ? before.continuity_tolerance_kind
+        : (num(req.body.continuityToleranceValue) === null ? null : (req.body?.continuityToleranceKind === 'absolute' ? 'absolute' : 'percent')),
+      continuity_tolerance_value: req.body?.continuityToleranceValue === undefined
+        ? before.continuity_tolerance_value
+        : num(req.body.continuityToleranceValue),
       is_active: req.body?.isActive === undefined ? before.is_active : (req.body.isActive ? 1 : 0),
     };
 
@@ -180,12 +186,15 @@ export function iqcAdminRoutes() {
           source = ?, control_type = ?, rule_profile = ?, qc_frequency = ?, manufacturer = ?, expiry_date = ?,
           open_vial_expiry = ?, storage_condition = ?, section_id = ?, equipment_id = ?, prepared_by_staff_id = ?,
           preparation_date = ?, preparation_method = ?, base_material = ?, validation_summary = ?,
-          stability_period = ?, instructions = ?, expected_organism = ?, cs_scope = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          stability_period = ?, instructions = ?, expected_organism = ?, cs_scope = ?,
+          continuity_tolerance_kind = ?, continuity_tolerance_value = ?,
+          is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(after.material_name, after.test_name, after.lot_number, after.level_label, after.source,
           after.control_type, after.rule_profile, after.qc_frequency, after.manufacturer, after.expiry_date,
           after.open_vial_expiry, after.storage_condition, after.section_id, after.equipment_id,
           after.prepared_by_staff_id, after.preparation_date, after.preparation_method, after.base_material,
-          after.validation_summary, after.stability_period, after.instructions, after.expected_organism, after.cs_scope, after.is_active, req.params.id);
+          after.validation_summary, after.stability_period, after.instructions, after.expected_organism, after.cs_scope,
+          after.continuity_tolerance_kind, after.continuity_tolerance_value, after.is_active, req.params.id);
 
       if (!sent) return;
       const keep = new Set<number>();
@@ -195,21 +204,25 @@ export function iqcAdminRoutes() {
         const expected = String(a.expectedResult ?? '').trim().toLowerCase() || null;
         const astMethod = String(a.astMethod ?? '').trim() || null;
         const expectedInterpretation = String(a.expectedInterpretation ?? '').trim().toUpperCase() || null;
+        const tol = parseTolerance(a.continuityTolerance as string);
         const values = [
           a.unit ?? null, num(a.targetMean), num(a.targetSd), num(a.acceptableLow), num(a.acceptableHigh),
-          num(a.decimalPlaces) ?? 2, expected, astMethod, expectedInterpretation, i, a.isActive === false ? 0 : 1,
+          num(a.decimalPlaces) ?? 2, expected, astMethod, expectedInterpretation,
+          tol?.kind ?? null, tol?.value ?? null, i, a.isActive === false ? 0 : 1,
         ];
         const existing = db.prepare('SELECT id FROM iqc_analytes WHERE iqc_material_id = ? AND analyte = ? COLLATE NOCASE')
           .get(req.params.id, name) as { id: number } | undefined;
         if (existing) {
           db.prepare(`UPDATE iqc_analytes SET unit = ?, target_mean = ?, target_sd = ?, acceptable_low = ?,
-            acceptable_high = ?, decimal_places = ?, expected_result = ?, ast_method = ?, expected_interpretation = ?, display_order = ?, is_active = ? WHERE id = ?`)
+            acceptable_high = ?, decimal_places = ?, expected_result = ?, ast_method = ?, expected_interpretation = ?,
+            continuity_tolerance_kind = ?, continuity_tolerance_value = ?, display_order = ?, is_active = ? WHERE id = ?`)
             .run(...values, existing.id);
           keep.add(existing.id); analyteChanges.updated++;
         } else {
           const r = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd,
-            acceptable_low, acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation, display_order, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.params.id, name, ...values);
+            acceptable_low, acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation,
+            continuity_tolerance_kind, continuity_tolerance_value, display_order, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.params.id, name, ...values);
           keep.add(Number(r.lastInsertRowid)); analyteChanges.added++;
         }
       });

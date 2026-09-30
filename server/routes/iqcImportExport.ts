@@ -424,6 +424,7 @@ export function iqcImportExportRoutes() {
         const priorStmt = database.prepare(`SELECT res.result_value FROM iqc_results res
           JOIN iqc_runs r ON r.id = res.iqc_run_id
           WHERE res.iqc_analyte_id = ? AND r.status != 'out_of_control' AND r.run_date <= ?
+            AND COALESCE(r.run_kind, 'control') = 'control'
           ORDER BY r.run_date DESC, r.id DESC LIMIT 12`);
         for (const a of analytes) {
           const prior = priorStmt.all(a.id, g.runDate) as { result_value: number }[];

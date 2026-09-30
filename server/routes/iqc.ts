@@ -8,6 +8,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
+import { parseTolerance } from '../../shared/constants/iqc.js';
 
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const IQC_MATERIAL_HEADERS = ['Material name', 'Test', 'Analyte', 'Lot number', 'Manufacturer', 'Expiry date', 'Storage condition', 'Target mean', 'Target SD', 'Acceptable low', 'Acceptable high', 'Section'] as const;
@@ -172,8 +173,9 @@ export function iqcRoutes() {
           acceptable_low, acceptable_high, equipment_id, inventory_batch_id, is_active, created_by, created_at,
           source, control_type, level_label, unit, qc_frequency, rule_profile,
           prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary,
-          stability_period, open_vial_expiry, instructions, expected_organism, cs_scope)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          stability_period, open_vial_expiry, instructions, expected_organism, cs_scope,
+          continuity_tolerance_kind, continuity_tolerance_value)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           materialCode, req.body.materialName, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
           req.body.testName,
@@ -193,6 +195,8 @@ export function iqcRoutes() {
           controlType === 'culture_sensitivity'
             ? (['identification', 'susceptibility', 'both'].includes(req.body.csScope) ? req.body.csScope : 'both')
             : null,
+          req.body.continuityToleranceKind === 'absolute' ? 'absolute' : (n(req.body.continuityToleranceValue) === null ? null : 'percent'),
+          n(req.body.continuityToleranceValue),
         );
       materialId = Number(result.lastInsertRowid);
 
@@ -200,14 +204,17 @@ export function iqcRoutes() {
         ? req.body.analytes
         : [{ analyte: req.body.analyte || req.body.testName, unit: req.body.unit, targetMean: req.body.targetMean, targetSd: req.body.targetSd, acceptableLow: req.body.acceptableLow, acceptableHigh: req.body.acceptableHigh, expectedResult: req.body.expectedResult }];
       const insert = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd,
-          acceptable_low, acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation, display_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+          acceptable_low, acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation,
+          continuity_tolerance_kind, continuity_tolerance_value, display_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       analytes.forEach((a: Record<string, unknown>, i: number) => {
         const name = String(a.analyte ?? '').trim();
         if (!name) return;
+        const tol = parseTolerance(a.continuityTolerance as string);
         insert.run(materialId, name, a.unit ?? null, n(a.targetMean), n(a.targetSd),
           n(a.acceptableLow), n(a.acceptableHigh), n(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null,
-          (a.astMethod as string) || null, (a.expectedInterpretation as string) || null, i);
+          (a.astMethod as string) || null, (a.expectedInterpretation as string) || null,
+          tol?.kind ?? null, tol?.value ?? null, i);
       });
     });
     tx();

@@ -55,6 +55,12 @@ import {
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
 import { effectiveTarget, withEffectiveTarget } from '../services/iqcTargets.js';
 import { chartStatistics } from '../services/iqcEvaluation.js';
+import {
+  findAnalyte, splitPasted, numberFrom, detectOrientation, mapRows, mapColumns,
+  type Mapping,
+} from '../services/iqcAnalyteMatching.js';
+import { currentBridge } from '../services/instrumentBridge/index.js';
+import { linkIsOurs } from '../../shared/constants/instruments.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -625,7 +631,7 @@ export function iqcPortalRoutes() {
       LEFT JOIN iqc_runs r ON r.id = res.iqc_run_id
       LEFT JOIN equipment_items e ON e.id = res.equipment_id
       LEFT JOIN staff s ON s.id = res.entered_by_staff_id
-      WHERE res.iqc_analyte_id = ?
+      WHERE res.iqc_analyte_id = ? AND COALESCE(r.run_kind, 'control') = 'control'
       ORDER BY res.run_date DESC, res.id DESC LIMIT ?`).all(req.params.id, limit) as any[];
     const points = rows.reverse();
     const numeric = points.filter(p => Number(p.is_qualitative) !== 1).map(p => Number(p.result_value)).filter(v => !Number.isNaN(v));
@@ -1005,6 +1011,34 @@ export function iqcPortalRoutes() {
     res.json({ message: { ...message, parsed_values: values }, materialId, ...mapped });
   });
 
+  /**
+   * Ask this control's analyser to look now.
+   *
+   * Everything else here waits to be spoken to. After a night with the host
+   * switched off — or on a link that reads a folder rather than holding a
+   * socket — this is what catches up, and it belongs on the bench screen
+   * rather than only in the settings the bench cannot reach.
+   */
+  router.post('/portal/controls/:id/analyser-fetch', numericOnly, (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'Control not found' });
+    if (!reachableControl(db, req, Number(req.params.id))) {
+      return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
+    }
+    const link = material.equipment_id
+      ? db.prepare('SELECT * FROM instrument_links WHERE equipment_id = ? AND is_active = 1 ORDER BY id LIMIT 1')
+        .get(material.equipment_id) as any
+      : null;
+    if (!link || !linkIsOurs(link.role, link.mode) || !(link.mode === 'file_drop' || link.mode === 'lhims_tap')) {
+      return res.json({ read: 0, note: 'This analyser sends when it is ready; there is nothing here to ask it for.' });
+    }
+    const bridge = currentBridge();
+    if (!bridge) return res.json({ read: 0, note: 'The analyser bridge is not running on this host.' });
+    const outcome = bridge.fetchNow(Number(link.id));
+    res.json({ read: outcome.read, note: outcome.note });
+  });
+
   router.post('/portal/feed-messages/:id/reject', numericOnly, (req, res) => {
     const db = getDb();
     if (!mayPerform(req)) return res.status(403).json({ error: 'Accepting or rejecting a control run needs the technical routine-work tier.' });
@@ -1038,194 +1072,6 @@ export function iqcPortalRoutes() {
    worse than not matching at all. So it goes in stages, strictest first, and
    whatever does not match is reported rather than guessed.
    ========================================================================= */
-
-const SYNONYMS: Record<string, string[]> = {
-  haemoglobin: ['hgb', 'hb', 'hemoglobin', 'haemoglobin'],
-  haematocrit: ['hct', 'pcv', 'hematocrit', 'haematocrit'],
-  wbc: ['wbc', 'leucocytes', 'leukocytes', 'whitecellcount', 'totalwbc'],
-  rbc: ['rbc', 'erythrocytes', 'redcellcount'],
-  platelets: ['plt', 'platelets', 'plateletcount'],
-  neutrophils: ['neut', 'ne', 'neutrophils', 'neu'],
-  lymphocytes: ['lymph', 'ly', 'lymphocytes', 'lym'],
-  monocytes: ['mono', 'mo', 'monocytes'],
-  eosinophils: ['eos', 'eo', 'eosinophils'],
-  basophils: ['baso', 'ba', 'basophils'],
-  glucose: ['glu', 'gluc', 'glucose'],
-  urea: ['urea', 'bun'],
-  creatinine: ['crea', 'creat', 'creatinine'],
-  sodium: ['na', 'sodium'],
-  potassium: ['k', 'potassium'],
-  chloride: ['cl', 'chloride'],
-  calcium: ['ca', 'calcium'],
-  albumin: ['alb', 'albumin'],
-  bilirubin: ['tbil', 'bili', 'bilirubin', 'totalbilirubin'],
-  alt: ['alt', 'sgpt', 'alanineaminotransferase'],
-  ast: ['ast', 'sgot', 'aspartateaminotransferase'],
-  alp: ['alp', 'alkalinephosphatase'],
-};
-
-function normalise(value: unknown): string {
-  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function synonymGroup(name: string): string | null {
-  const key = normalise(name);
-  for (const [group, members] of Object.entries(SYNONYMS)) {
-    if (members.includes(key) || normalise(group) === key) return group;
-  }
-  return null;
-}
-
-/** Find the analyte a label refers to, or nothing. Never a near-miss. */
-function findAnalyte(label: string, analytes: any[]): any | null {
-  const target = normalise(label);
-  if (!target) return null;
-  const exact = analytes.find(a => normalise(a.analyte) === target);
-  if (exact) return exact;
-
-  const group = synonymGroup(label);
-  if (group) {
-    const bySynonym = analytes.find(a => synonymGroup(a.analyte) === group);
-    if (bySynonym) return bySynonym;
-  }
-
-  // A prefix match, but only where it is unambiguous. "MCH" against a control
-  // holding both MCH and MCHC matches nothing, which is the correct answer.
-  const prefix = analytes.filter(a => {
-    const candidate = normalise(a.analyte);
-    return candidate.startsWith(target) || target.startsWith(candidate);
-  });
-  return prefix.length === 1 ? prefix[0] : null;
-}
-
-/** Split pasted text on tabs, then on commas, then on runs of spaces. */
-function splitPasted(text: string): any[][] {
-  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim() !== '');
-  if (!lines.length) return [];
-  const delimiter = lines[0].includes('\t') ? '\t' : lines[0].includes(',') ? ',' : null;
-  return lines.map(line => (delimiter ? line.split(delimiter) : line.trim().split(/\s{2,}/)).map(c => c.trim()));
-}
-
-function numberFrom(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null;
-  // Analysers decorate values: "12.4 H", "*8.9", "< 0.5". Take the number.
-  const match = String(value).replace(/,/g, '.').match(/-?\d+(\.\d+)?/);
-  if (!match) return null;
-  const num = Number(match[0]);
-  return Number.isFinite(num) ? num : null;
-}
-
-/**
- * Which way round is the pasted block?
- *
- * Decided by counting how many of the control's parameters are recognisable
- * down the first column versus across the first row — evidence, rather than a
- * rule about how analysers "usually" print.
- */
-function detectOrientation(grid: any[][], analytes: any[]): 'rows' | 'columns' {
-  const downFirstColumn = grid.filter(row => Array.isArray(row) && findAnalyte(String(row[0] ?? ''), analytes)).length;
-  const acrossFirstRow = (grid[0] ?? []).filter(cell => findAnalyte(String(cell ?? ''), analytes)).length;
-  return acrossFirstRow > downFirstColumn ? 'columns' : 'rows';
-}
-
-interface Mapping {
-  readings: Array<{ analyteId: number; analyte: string; unit: string | null; value: number | null; qualitativeResult?: string | null; raw: string }>;
-  unmatchedLabels: string[];
-  missingAnalytes: Array<{ analyteId: number; analyte: string }>;
-  matched: number;
-}
-
-/** One parameter per row: name in the first column, value in the next usable one. */
-function mapRows(grid: any[][], analytes: any[]): Mapping {
-  const readings: Mapping['readings'] = [];
-  const unmatched: string[] = [];
-  const seen = new Set<number>();
-
-  for (const row of grid) {
-    if (!Array.isArray(row) || !row.length) continue;
-    const label = String(row[0] ?? '').trim();
-    if (!label) continue;
-    const analyte = findAnalyte(label, analytes);
-    if (!analyte) {
-      if (row.slice(1).some(c => numberFrom(c) !== null)) unmatched.push(label);
-      continue;
-    }
-    if (seen.has(Number(analyte.id))) continue;
-    // The first cell after the name that holds a number. Analysers put a unit,
-    // a flag or a blank between the name and the value often enough that
-    // taking column 2 blindly is wrong.
-    let value: number | null = null;
-    let raw = '';
-    for (const cell of row.slice(1)) {
-      const num = numberFrom(cell);
-      if (num !== null) { value = num; raw = String(cell); break; }
-    }
-    const qualitative = value === null ? qualitativeFrom(row.slice(1)) : null;
-    if (value === null && !qualitative) continue;
-    seen.add(Number(analyte.id));
-    readings.push({
-      analyteId: Number(analyte.id), analyte: analyte.analyte, unit: analyte.unit ?? null,
-      value, qualitativeResult: qualitative, raw: raw || qualitative || '',
-    });
-  }
-
-  return {
-    readings, unmatchedLabels: [...new Set(unmatched)].slice(0, 20),
-    missingAnalytes: analytes.filter(a => !seen.has(Number(a.id))).map(a => ({ analyteId: Number(a.id), analyte: a.analyte })),
-    matched: readings.length,
-  };
-}
-
-/** One parameter per column: names across the top, values on the row below. */
-function mapColumns(grid: any[][], analytes: any[]): Mapping {
-  const header = grid[0] ?? [];
-  // The first row under the header that carries numbers is the result row; a
-  // spreadsheet often has a units row in between.
-  const valueRow = grid.slice(1).find(row => Array.isArray(row) && row.some(c => numberFrom(c) !== null)) ?? [];
-
-  const readings: Mapping['readings'] = [];
-  const unmatched: string[] = [];
-  const seen = new Set<number>();
-
-  header.forEach((cell, index) => {
-    const label = String(cell ?? '').trim();
-    if (!label) return;
-    const analyte = findAnalyte(label, analytes);
-    if (!analyte) {
-      if (numberFrom(valueRow[index]) !== null) unmatched.push(label);
-      return;
-    }
-    if (seen.has(Number(analyte.id))) return;
-    const value = numberFrom(valueRow[index]);
-    const qualitative = value === null ? qualitativeFrom([valueRow[index]]) : null;
-    if (value === null && !qualitative) return;
-    seen.add(Number(analyte.id));
-    readings.push({
-      analyteId: Number(analyte.id), analyte: analyte.analyte, unit: analyte.unit ?? null,
-      value, qualitativeResult: qualitative, raw: String(valueRow[index] ?? ''),
-    });
-  });
-
-  return {
-    readings, unmatchedLabels: [...new Set(unmatched)].slice(0, 20),
-    missingAnalytes: analytes.filter(a => !seen.has(Number(a.id))).map(a => ({ analyteId: Number(a.id), analyte: a.analyte })),
-    matched: readings.length,
-  };
-}
-
-/** A reactive/non-reactive style result, for the qualitative controls. */
-function qualitativeFrom(cells: unknown[]): string | null {
-  const words: Record<string, string> = {
-    reactive: 'reactive', nonreactive: 'non_reactive', 'non-reactive': 'non_reactive',
-    positive: 'positive', negative: 'negative', pos: 'positive', neg: 'negative',
-    detected: 'detected', notdetected: 'not_detected', 'not-detected': 'not_detected',
-  };
-  for (const cell of cells) {
-    const key = String(cell ?? '').trim().toLowerCase().replace(/\s+/g, '');
-    if (words[key]) return words[key];
-  }
-  return null;
-}
 
 function largestWordTable(buffer: Buffer): any[][] {
   const zip = new AdmZip(buffer);
