@@ -16,6 +16,7 @@ import {
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS,
 } from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
+import { useAnalyserListen, armAnalyser } from '../../hooks/useAnalyserListen';
 import type {
   IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
 } from '../../../shared/types/api';
@@ -992,8 +993,6 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
 }) {
   const [messages, setMessages] = useState<IqcFeedMessage[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const [fetchNote, setFetchNote] = useState<string | null>(null);
 
   // Both statuses: a message the system matched to this control, and one it
   // recognised as a control but could not place. The second is the one the
@@ -1005,16 +1004,20 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
 
   useEffect(() => { void load(); }, [load]);
 
-  /** Ask the analyser to look now, for the links that can be asked. */
-  const fetchNow = useCallback(async () => {
-    setFetching(true); setFetchNote(null);
-    try {
-      const answer = await api<{ read: number; note: string }>(`/iqc/portal/controls/${control.id}/analyser-fetch`, { method: 'POST' });
-      setFetchNote(answer.note);
-      await load();
-    } catch (e) { onProblem(errorText(e)); }
-    finally { setFetching(false); }
-  }, [control.id, load, onProblem]);
+  const bringIn = useCallback(async (messageId: number) => {
+    setBusy(true);
+    try { onMapped(await api<IqcMapping>(`/iqc/portal/feed-messages/${messageId}/mapping?materialId=${control.id}`)); }
+    catch (e) { onProblem(errorText(e)); }
+    finally { setBusy(false); }
+  }, [control.id, onMapped, onProblem]);
+
+  // Pressing Fetch opens the door and waits, rather than pulling at an analyser
+  // that decides for itself when to transmit.
+  const listen = useAnalyserListen<IqcFeedMessage>({
+    arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`),
+    poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
+    onArrival: async message => { await bringIn(message.id); await load(); },
+  });
 
   const mine = (messages ?? []).filter(m =>
     m.iqc_material_id === control.id || (m.iqc_material_id == null && m.status === 'unmatched'));
@@ -1037,11 +1040,21 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
         <Radio size={12} /> {detail.feed.name}
         {detail.feed.last_message_at ? ` · last heard from at ${String(detail.feed.last_message_at).slice(11, 16)}` : ' · nothing received yet'}
         {detail.feed.last_error && <span className="crit"> · {detail.feed.last_error}</span>}
-        <button type="button" className="pq-link" disabled={fetching} onClick={() => void fetchNow()}>
-          {fetching ? <Loader2 size={11} className="pd-spin" /> : <Download size={11} />} Fetch now
+        <button type="button" className={`iqc-fetch${listen.waiting ? ' is-waiting' : ''}`}
+          onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
+          {listen.waiting
+            ? <><Loader2 size={12} className="pd-spin" /> Waiting… {listen.remaining}s</>
+            : <><Radio size={12} /> Fetch from analyser</>}
         </button>
       </p>
-      {fetchNote && <p className="muted">{fetchNote}</p>}
+      {listen.waiting && (
+        <p className="iqc-listening">
+          <span className="iqc-pulse" />
+          Ready. Run the control on the analyser and its results drop into the boxes below.
+        </p>
+      )}
+      {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}
+      {listen.problem && <p className="iqc-note bad">{listen.problem}</p>}
       {mine.length === 0 ? (
         <p className="muted">
           Nothing is waiting from this instrument. Run the control on the analyser and send it as you would a
@@ -1060,16 +1073,8 @@ function InstrumentPanel({ control, detail, onMapped, onProblem }: {
                   {message.iqc_material_id == null ? ' · not matched to a control' : ''}
                 </span>
               </div>
-              <button type="button" className="pq-link" disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    const next = await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${control.id}`);
-                    onMapped(next);
-                  } catch (e) { onProblem(errorText(e)); }
-                  finally { setBusy(false); }
-                }}>
-                Bring these in <ArrowRight size={11} />
+              <button type="button" className="pq-link" disabled={busy} onClick={() => void bringIn(message.id)}>
+                Use these <ArrowRight size={11} />
               </button>
             </li>
           ))}

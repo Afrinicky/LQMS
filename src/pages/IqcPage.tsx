@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlaskConical, Beaker, CheckCircle2, AlertTriangle, LineChart, Plus, Trash2,
-  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X, Radio, DownloadCloud, Loader2,
+  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X, Radio, Loader2, Check,
 } from 'lucide-react';
 import { api, errorText, apiRead } from '../services/api';
 import { useModules } from '../hooks/useModules';
@@ -11,6 +11,7 @@ import DisabledModule from '../components/DisabledModule';
 import PermissionTabs from '../components/PermissionTabs';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
+import { useAnalyserListen, armAnalyser } from '../hooks/useAnalyserListen';
 import { PageHeader, KpiStrip, ModuleAlerts } from '../components/ui';
 import LeveyJenningsChart, { type ChartData } from '../components/LeveyJenningsChart';
 import {
@@ -1240,22 +1241,11 @@ function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onRea
   onStatus: (s: AnalyserStatus) => void; onMapping: (m: AnalyserMapping | null) => void;
   onReadings: (rows: AnalyserMapping['readings']) => void; onError: (m: string) => void;
 }) {
-  const [busy, setBusy] = useState<number | 'fetch' | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
   const source = status.source!;
   const waiting = status.waiting ?? [];
 
-  async function fetchNow() {
-    setBusy('fetch');
-    try {
-      const answer = await api<{ note: string; waiting: AnalyserWaiting[] }>(
-        `/iqc/materials/${materialId}/analyser/fetch`, { method: 'POST' });
-      onStatus({ ...status, waiting: answer.waiting });
-      if (answer.waiting.length === 0) onError(answer.note);
-    } catch (e) { onError(errorText(e)); }
-    finally { setBusy(null); }
-  }
-
-  async function bringIn(message: AnalyserWaiting) {
+  const bringIn = useCallback(async (message: AnalyserWaiting) => {
     setBusy(message.id);
     try {
       const next = await api<AnalyserMapping>(`/iqc/materials/${materialId}/analyser/messages/${message.id}/map`);
@@ -1263,40 +1253,62 @@ function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onRea
       onReadings(next.readings);
     } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
-  }
+  }, [materialId, onMapping, onReadings, onError]);
+
+  // Pressing Fetch opens the door and waits. An analyser that dials in decides
+  // for itself when to transmit, and a button that pretends otherwise is a
+  // button people stop believing.
+  const listen = useAnalyserListen<AnalyserWaiting>({
+    arm: () => armAnalyser(`/iqc/materials/${materialId}/analyser/listen`),
+    poll: async since => {
+      const next = await api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser?since=${since.control}`);
+      return next.waiting ?? [];
+    },
+    onArrival: async message => {
+      await bringIn(message);
+      try { onStatus(await api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser`)); } catch { /* the reading is in */ }
+    },
+  });
 
   return (
     <div className="iqc-analyser">
       <div className="iqc-analyser-head">
         <span className={`iqc-analyser-dot s-${source.state}`} />
-        <strong><Radio size={13} /> {source.name}</strong>
+        <strong>{source.name}</strong>
         <span className="muted">
-          {LINK_STATE_LABELS[source.state as keyof typeof LINK_STATE_LABELS] ?? source.state}
-          {source.lastMessageAt ? ` · last heard ${String(source.lastMessageAt).slice(0, 16).replace('T', ' ')}` : ' · nothing received yet'}
+          {source.lastMessageAt
+            ? `last heard ${String(source.lastMessageAt).slice(11, 16)}`
+            : 'nothing received yet'}
         </span>
-        {source.canFetch && (
-          <button type="button" className="pq-link" disabled={busy !== null} onClick={() => void fetchNow()}>
-            {busy === 'fetch' ? <Loader2 size={12} className="pd-spin" /> : <DownloadCloud size={12} />} Fetch now
-          </button>
-        )}
+        <button type="button" className={`iqc-fetch${listen.waiting ? ' is-waiting' : ''}`}
+          onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
+          {listen.waiting
+            ? <><Loader2 size={13} className="pd-spin" /> Waiting… {listen.remaining}s</>
+            : <><Radio size={13} /> Fetch from analyser</>}
+        </button>
       </div>
+      {listen.waiting && (
+        <p className="iqc-listening">
+          <span className="iqc-pulse" />
+          Ready. Run the control on the analyser and its results drop straight into the boxes below.
+        </p>
+      )}
+      {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}
+      {listen.problem && <p className="iqc-note bad">{listen.problem}</p>}
 
       {/* A link the bridge deliberately never opens will never deliver
           anything. Saying so is the difference between a bench waiting all
           morning and a bench fixing it in a minute. */}
       {!source.open && (
         <p className="iqc-note warn">
-          <AlertTriangle size={12} /> This link is recorded as one LHIMS owns and is set to bind or dial, so
-          SECHLIMS does not open it and nothing will arrive here. Set it to follow the LHIMS client&rsquo;s log
-          under Analyser Links to take a copy instead.
+          <AlertTriangle size={12} /> Nothing will arrive: this link is one LHIMS owns. Set it to follow the
+          LHIMS client&rsquo;s log under Analyser Links to take a copy.
         </p>
       )}
       {source.lastError && <p className="iqc-note bad">{source.lastError}</p>}
 
       {waiting.length === 0 ? (
-        <p className="muted">
-          Nothing is waiting from this analyser. Run the control on it and send it as you would a patient sample.
-        </p>
+        !listen.waiting && <p className="iqc-hint">Nothing waiting. Press Fetch, then send the control from the analyser.</p>
       ) : (
         <ul className="iqc-analyser-list">
           {waiting.map(message => (
@@ -1304,13 +1316,12 @@ function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onRea
               <div>
                 <strong>{message.sample_id || 'control sample'}</strong>
                 <span className="muted">
-                  {' · '}{String(message.instrument_run_at ?? message.received_at).slice(0, 16).replace('T', ' ')}
+                  {' · '}{String(message.instrument_run_at ?? message.received_at).slice(5, 16).replace('T', ' ')}
                   {' · '}{message.parsed_values?.length ?? 0} parameters
-                  {message.status === 'unmatched' ? ' · not matched to a control' : ''}
                 </span>
               </div>
               <button type="button" className="pq-link" disabled={busy !== null} onClick={() => void bringIn(message)}>
-                {busy === message.id ? <Loader2 size={12} className="pd-spin" /> : <ArrowRight size={12} />} Bring these in
+                {busy === message.id ? <Loader2 size={12} className="pd-spin" /> : <ArrowRight size={12} />} Use these
               </button>
             </li>
           ))}
@@ -1454,6 +1465,9 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
   const [values, setValues] = useState<Record<number, string>>({});
   const [coverage, setCoverage] = useState<CoverageRun[]>([]);
   const [candidates, setCandidates] = useState<FeedCandidate[]>([]);
+  // Where the original result came from. Not a choice the bench makes up front
+  // any more — it is simply what happened, set by whichever way the numbers
+  // actually arrived.
   const [source, setSource] = useState<'entered' | 'instrument'>('entered');
   const [feedMessageId, setFeedMessageId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1466,30 +1480,40 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
       .then(setCoverage).catch(() => setCoverage([]));
   }, [material.id, form.originalRunDate]);
 
-  useEffect(() => {
-    if (source !== 'instrument') return;
+  const loadCandidates = useCallback(() => {
     api<FeedCandidate[]>(`/iqc/materials/${material.id}/analyser/patient-samples`)
       .then(setCandidates).catch(() => setCandidates([]));
-  }, [material.id, source]);
+  }, [material.id]);
+  useEffect(() => { loadCandidates(); }, [loadCandidates]);
 
   /** Fill the sample and its original readings from what the analyser sent. */
-  const takeFromInstrument = (id: string) => {
-    setFeedMessageId(id);
-    const message = candidates.find(c => String(c.id) === id);
-    if (!message) return;
+  const takeFromInstrument = useCallback((message: FeedCandidate) => {
+    setFeedMessageId(String(message.id));
+    setSource('instrument');
     const next: Record<number, string> = {};
     for (const parsed of message.parsed_values ?? []) {
       const match = analytes.find(a => a.analyte.toLowerCase() === String(parsed.analyte ?? '').toLowerCase());
       if (match && parsed.value !== undefined && parsed.value !== null) next[match.id] = String(parsed.value);
     }
     setValues(next);
-    if (message.sample_id) set('sampleReference', message.sample_id);
+    if (message.sample_id) setForm(f => ({ ...f, sampleReference: message.sample_id as string }));
     const at = message.instrument_run_at ?? message.received_at;
     if (at) {
-      set('originalRunDate', String(at).slice(0, 10));
-      set('originalRunTime', String(at).slice(11, 16));
+      setForm(f => ({
+        ...f,
+        originalRunDate: String(at).slice(0, 10),
+        originalRunTime: String(at).slice(11, 16),
+      }));
     }
-  };
+  }, [analytes]);
+
+  // Pressing Fetch opens the door and waits, rather than pulling at an analyser
+  // that decides for itself when to transmit.
+  const listen = useAnalyserListen<FeedCandidate>({
+    arm: () => armAnalyser(`/iqc/materials/${material.id}/analyser/listen`),
+    poll: since => api<FeedCandidate[]>(`/iqc/materials/${material.id}/analyser/patient-samples?since=${since.patient}`),
+    onArrival: message => { takeFromInstrument(message); loadCandidates(); },
+  });
 
   async function save() {
     if (!form.sampleReference.trim()) return onError('Give the laboratory number the sample was reported under.');
@@ -1518,41 +1542,52 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
 
   return (
     <div className="iqc-sample-new">
-      <div className="iqc-choice two">
-        {(['entered', 'instrument'] as const).map(s => (
-          <button key={s} type="button" className={source === s ? 'active' : ''} onClick={() => setSource(s)}>
-            <strong>{s === 'entered' ? 'Enter the original result' : 'Take it from the analyser'}</strong>
-            <span>
-              {s === 'entered'
-                ? 'Type the sample and the result it was reported with.'
-                : 'Pick the sample out of what the analyser has sent and its readings are filled in.'}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {source === 'instrument' && (
-        <label className="stack">Sample sent by the analyser
-          <select value={feedMessageId} onChange={e => takeFromInstrument(e.target.value)}>
-            <option value="">Choose…</option>
+      {/* One way in, not two. The sample number is typed OR the analyser sends
+          it; either way the same boxes fill, so nobody has to decide which kind
+          of person they are before they can start. */}
+      <div className="iqc-source">
+        <label>
+          <span>Sample number</span>
+          <TextField value={form.sampleReference} onValue={v => set('sampleReference', v)}
+            placeholder="the number it was reported under" required />
+        </label>
+        <button type="button" className={`iqc-fetch${listen.waiting ? ' is-waiting' : ''}`}
+          onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
+          {listen.waiting
+            ? <><Loader2 size={13} className="pd-spin" /> Waiting… {listen.remaining}s</>
+            : <><Radio size={13} /> Fetch from analyser</>}
+        </button>
+        {candidates.length > 0 && (
+          <select className="iqc-source-recent" value={feedMessageId}
+            onChange={e => {
+              const message = candidates.find(c => String(c.id) === e.target.value);
+              if (message) takeFromInstrument(message);
+            }}>
+            <option value="">or one it sent earlier…</option>
             {candidates.map(c => (
               <option key={c.id} value={c.id}>
-                {c.sample_id || 'sample'} · {String(c.instrument_run_at ?? c.received_at).slice(0, 16).replace('T', ' ')}
-                {' · '}{c.parsed_values?.length ?? 0} parameters
+                {c.sample_id || 'sample'} · {String(c.instrument_run_at ?? c.received_at).slice(5, 16).replace('T', ' ')}
               </option>
             ))}
           </select>
-          {candidates.length === 0 && <span className="muted">Nothing has arrived from an analyser for this control.</span>}
-        </label>
+        )}
+      </div>
+      {listen.waiting && (
+        <p className="iqc-listening">
+          <span className="iqc-pulse" />
+          Ready. Send the sample from the analyser and its results drop in here.
+        </p>
       )}
+      {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}
+      {listen.problem && <p className="iqc-note bad">{listen.problem}</p>}
+      {source === 'instrument' && <p className="iqc-hint ok"><Check size={12} /> Filled in from the analyser.</p>}
 
-      <div className="form-grid">
-        <label>Sample number<TextField value={form.sampleReference} onValue={v => set('sampleReference', v)} required /></label>
+      <div className="iqc-tight-grid">
         <label>Sample type<TextField value={form.sampleType} onValue={v => set('sampleType', v)} placeholder="e.g. EDTA whole blood" /></label>
-        <label>First tested on<input type="date" value={form.originalRunDate} max={new Date().toISOString().slice(0, 10)} onChange={e => set('originalRunDate', e.target.value)} required /></label>
+        <label>First tested<input type="date" value={form.originalRunDate} max={new Date().toISOString().slice(0, 10)} onChange={e => set('originalRunDate', e.target.value)} required /></label>
         <label>Time<input type="time" value={form.originalRunTime} onChange={e => set('originalRunTime', e.target.value)} /></label>
         <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-        <label>Control run in force then
+        <label className={form.originalIqcRunId ? '' : 'is-needed'}>Control run then
           <select value={form.originalIqcRunId} onChange={e => set('originalIqcRunId', e.target.value)}>
             <option value="">—</option>
             {coverage.map(c => (
@@ -1564,10 +1599,7 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
         </label>
       </div>
       {!form.originalIqcRunId && (
-        <p className="iqc-note warn">
-          Name the control run that was in control when this sample was first tested. Without it the re-read
-          traces back to nothing.
-        </p>
+        <p className="iqc-hint">Name the control run that covered this sample, or the re-read traces back to nothing.</p>
       )}
 
       <table className="data-table compact iqc-entry">
