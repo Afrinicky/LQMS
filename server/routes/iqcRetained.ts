@@ -3,7 +3,7 @@
  * the control material has run out.
  *
  *   GET    /iqc/materials/:id/retained-samples    the samples enrolled for a control
- *   GET    /iqc/materials/:id/retained-candidates what the analyser has sent that could be enrolled
+ *   GET    /iqc/materials/:id/analyser/patient-samples  (in iqcAnalyser) what the analyser has sent
  *   POST   /iqc/retained-samples                  enrol a sample and its original result
  *   GET    /iqc/retained-samples/:id              the sample, its original result and its traceability
  *   DELETE /iqc/retained-samples/:id              take it out of use
@@ -106,29 +106,6 @@ export function iqcRetainedRoutes() {
         ${on ? 'AND run_date <= ?' : ''}
       ORDER BY run_date DESC, id DESC LIMIT 30`).all(...(on ? [req.params.id, on] : [req.params.id]));
     res.json(rows);
-  });
-
-  /**
-   * What the analyser has sent that could be enrolled as a previously run
-   * sample. The same messages the instrument feed parks on the bench: reading
-   * the original result off the analyser is more honest than typing it.
-   */
-  router.get('/materials/:id/retained-candidates', requirePermission('iqc', 'view'), (req, res) => {
-    const db = getDb();
-    const material = db.prepare('SELECT feed_id, equipment_id FROM iqc_materials WHERE id = ?').get(req.params.id) as
-      { feed_id: number | null; equipment_id: number | null } | undefined;
-    if (!material) return res.status(404).json({ error: 'IQC material not found' });
-    const rows = db.prepare(`SELECT msg.id, msg.sample_id, msg.received_at, msg.instrument_run_at, msg.parsed_values,
-        f.name AS feed_name
-      FROM iqc_feed_messages msg
-      LEFT JOIN iqc_instrument_feeds f ON f.id = msg.feed_id
-      WHERE (? IS NULL OR msg.feed_id = ?)
-      ORDER BY msg.received_at DESC LIMIT 40`).all(material.feed_id, material.feed_id) as any[];
-    res.json(rows.map(r => {
-      let parsed: unknown = [];
-      try { parsed = r.parsed_values ? JSON.parse(r.parsed_values) : []; } catch { parsed = []; }
-      return { ...r, parsed_values: parsed };
-    }));
   });
 
   /* ------------------------------------------------------------- enrolment */

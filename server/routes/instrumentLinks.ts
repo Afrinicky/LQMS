@@ -14,12 +14,19 @@
  *   POST   /instrument-links/fetch-all       look on every link that can be looked at
  *   GET    /instrument-links/overview        is analyser transmission working?
  *   GET    /instrument-links/:id/files       which files this link has read
+ *   GET    /instrument-links/host            the addresses to set the analyser to
+ *   GET    /instrument-links/:id/checks      what is left before this link transmits
+ *   POST   /instrument-links/:id/self-test   is the port actually open and reachable
+ *   GET    /instrument-links/:id/activity    what has arrived, by kind, over time
  *
  * The whole surface is administrative — connecting an analyser is not bench
  * work — so it takes the IQC module's own edit right, and the safety rules the
  * bridge enforces are stated back to the caller rather than left implicit.
  */
 import { Router } from 'express';
+import net from 'node:net';
+import os from 'node:os';
+import fs from 'node:fs';
 import { getDb } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -30,6 +37,7 @@ import { parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
   DEFAULT_CONTROL_PATTERNS, looksLikeControl, mapAnalyte, modeIsPassive, profileByKey,
+  linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
 import {
   LHIMS_MEASURE_MAPS, LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS,
@@ -42,6 +50,12 @@ const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params
 function json<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string' || !value.trim()) return fallback;
   try { return (JSON.parse(value) ?? fallback) as T; } catch { return fallback; }
+}
+
+/** Can this host see the path at all? A share that has gone is the usual answer. */
+function fs_exists(target?: string | null): boolean {
+  if (!target) return false;
+  try { fs.accessSync(target, fs.constants.R_OK); return true; } catch { return false; }
 }
 
 export function instrumentLinkRoutes() {
@@ -391,6 +405,265 @@ export function instrumentLinkRoutes() {
         ? 'No link on this system is set up to be fetched. A watched folder or the LHIMS client\'s log can be; an analyser that connects to SECHLIMS sends when it is ready.'
         : read ? `${read} new item(s) read across ${links.length} link(s).` : `Nothing new on any of the ${links.length} link(s) checked.`,
       results,
+    });
+  });
+
+  /* ======================================================================
+     Getting a link to transmit
+     ----------------------------------------------------------------------
+     Everything below answers the question somebody actually has in front of
+     this screen: I set a link up and nothing arrives — why, and what do I do
+     about it. Before this, the state said "listening" and the analyser said
+     nothing, and there was nowhere to look.
+     ==================================================================== */
+
+  /**
+   * What to type into the analyser.
+   *
+   * An analyser is configured by walking to it and entering a host address and
+   * a port. The address is this machine's, and nobody should have to find it
+   * from a command prompt in another room.
+   */
+  router.get('/host', requirePermission(MODULE, 'view'), (_req, res) => {
+    const addresses: Array<{ name: string; address: string }> = [];
+    const interfaces = os.networkInterfaces();
+    for (const [name, list] of Object.entries(interfaces)) {
+      for (const entry of list ?? []) {
+        // IPv4 only, and not the loopback: an analyser on the bench cannot
+        // reach 127.0.0.1, and offering it is how an afternoon is lost.
+        if (entry.family !== 'IPv4' || entry.internal) continue;
+        addresses.push({ name, address: entry.address });
+      }
+    }
+    res.json({ hostname: os.hostname(), addresses });
+  });
+
+  /**
+   * What is left before this link transmits.
+   *
+   * A checklist rather than a state word, because "listening" and "nothing has
+   * ever arrived" are both true at the same time and only the second one is
+   * actionable. Each check says what it found and, where there is one, the
+   * thing to change.
+   */
+  router.get('/:id/checks', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+
+    const checks: Array<{ key: string; label: string; status: 'ok' | 'todo' | 'warn' | 'info'; detail: string; fix?: string }> = [];
+    const add = (key: string, label: string, status: 'ok' | 'todo' | 'warn' | 'info', detail: string, fix?: string) =>
+      checks.push({ key, label, status, detail, ...(fix ? { fix } : {}) });
+
+    /* 1 — will the bridge open it at all? The one that catches most people. */
+    const opens = linkIsOurs(link.role, link.mode);
+    if (!opens) {
+      add('opens', 'SECHLIMS will open this link', 'todo',
+        'This link is recorded as one LHIMS owns and is set to bind or dial, so SECHLIMS deliberately never opens it. '
+        + 'Nothing will ever arrive here while that is true — which is the safety rule working, not a fault.',
+        'Set "How it is reached" to follow the LHIMS client\'s log. That reads a file rather than touching the '
+        + 'connection, so the transmission LHIMS owns is untouched and SECHLIMS gets a copy of everything it receives.');
+    } else {
+      add('opens', 'SECHLIMS will open this link', 'ok',
+        link.role === 'lhims_owned'
+          ? 'It reads the LHIMS client\'s own log, which touches nothing.'
+          : 'This analyser is not transmitting anywhere else, so SECHLIMS takes it.');
+    }
+
+    /* 2 — is it actually up right now? */
+    const running = bridge.isRunning(link.id);
+    if (!opens) add('running', 'It is running', 'info', 'Not applicable while the link is left alone.');
+    else if (running) add('running', 'It is running', 'ok', link.state_detail || LINK_STATE_LABELS[link.state as never] || link.state);
+    else {
+      add('running', 'It is running', 'todo',
+        link.last_error ? `It is not running. ${link.last_error}` : 'It is not running.',
+        link.is_active ? 'Press Start on the link.' : 'The link is retired. Switch it back on first.');
+    }
+
+    /* 3 — what the analyser has to be pointed at */
+    if (link.mode === 'server') {
+      add('address', 'The analyser is pointed here', link.messages_received > 0 ? 'ok' : 'todo',
+        link.listen_port
+          ? `Set the analyser's host communication to this machine's address, port ${link.listen_port}.`
+          : 'No port is set, so there is nothing for the analyser to send to.',
+        link.listen_port ? undefined : 'Give the link the port the analyser transmits on.');
+    } else if (link.mode === 'client') {
+      add('address', 'SECHLIMS can reach the analyser', link.messages_received > 0 ? 'ok' : 'todo',
+        link.remote_host ? `It dials ${link.remote_host}:${link.remote_port ?? '—'}.` : 'No analyser address is set.',
+        link.remote_host ? undefined : 'Give the link the analyser\'s address and port.');
+    } else if (link.mode === 'file_drop') {
+      add('address', 'The folder exists', link.watch_path ? (fs_exists(link.watch_path) ? 'ok' : 'todo') : 'todo',
+        link.watch_path
+          ? (fs_exists(link.watch_path) ? `Watching ${link.watch_path}.` : `${link.watch_path} cannot be reached from this host.`)
+          : 'No folder is set.',
+        link.watch_path && fs_exists(link.watch_path) ? undefined : 'Point the link at the folder the analyser exports into.');
+    } else {
+      add('address', 'The LHIMS log can be read', link.tap_path ? (fs_exists(link.tap_path) ? 'ok' : 'todo') : 'todo',
+        link.tap_path
+          ? (fs_exists(link.tap_path) ? `Following ${link.tap_path}.` : `${link.tap_path} cannot be reached from this host.`)
+          : `No path to ${LHIMS_TAP_FILENAME} is set.`,
+        link.tap_path && fs_exists(link.tap_path) ? undefined
+          : `Switch WRITE_TO_FILE on in the LHIMS client and point the link at its ${LHIMS_TAP_FILENAME}.`);
+    }
+
+    /* 4 — has anything ever actually arrived? */
+    const counts = db.prepare(`SELECT
+        COUNT(*) AS total,
+        SUM(kind = 'control') AS controls,
+        SUM(kind = 'patient') AS patients,
+        SUM(kind = 'unknown') AS unknown,
+        MAX(received_at) AS last_at
+      FROM instrument_messages WHERE link_id = ?`).get(link.id) as any;
+    add('received', 'The analyser has reached it', Number(counts?.total ?? 0) > 0 ? 'ok' : 'todo',
+      Number(counts?.total ?? 0) > 0
+        ? `${counts.total} message(s) received, the last at ${String(counts.last_at ?? '').slice(0, 16).replace('T', ' ')}.`
+        : 'Nothing has ever arrived on this link.',
+      Number(counts?.total ?? 0) > 0 ? undefined
+        : 'Run a sample on the analyser and transmit it as you normally would. If nothing appears, check the address and port above on the analyser itself.');
+
+    /* 5 — is what arrived being understood? */
+    const linkMap = json<Record<string, string>>(link.analyte_map, {});
+    const recent = db.prepare(`SELECT parsed_values FROM instrument_messages
+        WHERE link_id = ? AND result_count > 0 ORDER BY id DESC LIMIT 20`).all(link.id) as any[];
+    const unmapped = new Set<string>();
+    for (const row of recent) {
+      for (const value of json<any[]>(row.parsed_values, [])) {
+        const code = String(value.code ?? value.analyte ?? '');
+        if (!code) continue;
+        if (mapAnalyte(code, linkMap, link.profile_key) === code && !linkMap[code]) unmapped.add(code);
+      }
+    }
+    if (recent.length === 0) {
+      add('mapping', 'Its parameters are recognised', 'info', 'Nothing has arrived to check yet.');
+    } else if (unmapped.size === 0) {
+      add('mapping', 'Its parameters are recognised', 'ok', 'Every parameter in the recent messages has a name this system uses.');
+    } else {
+      add('mapping', 'Its parameters are recognised', 'warn',
+        `${[...unmapped].slice(0, 12).join(', ')} came through under the analyser's own name and matched nothing.`,
+        'Choose the right analyser under "Which analyser it is", or add these to the link\'s own parameter map.');
+    }
+
+    /* 6 — are controls being told apart from patients? */
+    add('kinds', 'Controls are told apart from patients',
+      Number(counts?.total ?? 0) === 0 ? 'info' : Number(counts?.unknown ?? 0) > 0 ? 'warn' : 'ok',
+      Number(counts?.total ?? 0) === 0
+        ? 'Nothing has arrived to sort yet.'
+        : `${Number(counts?.controls ?? 0)} control run(s), ${Number(counts?.patients ?? 0)} patient result(s)`
+          + (Number(counts?.unknown ?? 0) ? `, and ${counts.unknown} message(s) with nothing readable in them.` : '.'),
+      Number(counts?.unknown ?? 0) > 0
+        ? 'Open Messages and look at one. A message with no results in it usually means the protocol is set to the wrong one.'
+        : undefined);
+
+    /* 7 — where patient results go */
+    if (link.forward_enabled) {
+      const ready = link.forward_target === 'tcp'
+        ? Boolean(link.forward_host && link.forward_port)
+        : Boolean(link.lhims_url && link.lhims_username && link.lhims_map_key);
+      add('patients', 'Patient results are carried onward', ready ? 'ok' : 'todo',
+        ready
+          ? (link.forward_target === 'tcp'
+            ? `Handed to ${link.forward_host}:${link.forward_port}.`
+            : 'Posted to LHIMS as the middleware does. Control runs are never sent.')
+          : 'Carrying patient results onward is switched on but not fully set up, so nothing is being sent.',
+        ready ? undefined : 'Fill in the address, the sign-in and the parameter map under Settings.');
+    } else {
+      add('patients', 'Patient results are kept here', Number(counts?.patients ?? 0) > 0 ? 'ok' : 'info',
+        Number(counts?.patients ?? 0) > 0
+          ? `${counts.patients} patient result(s) held on this link. They can be enrolled as previously run samples for QC when a control lot runs out.`
+          : 'Patient results this analyser sends are kept on the link, and can be enrolled as previously run samples for QC.');
+    }
+
+    const pending = db.prepare(`SELECT COUNT(*) AS n FROM instrument_messages
+        WHERE link_id = ? AND forward_status = 'failed'`).get(link.id) as any;
+    if (Number(pending?.n ?? 0) > 0) {
+      add('forward_failed', 'Everything sent onward was accepted', 'warn',
+        `${pending.n} result(s) were refused by the far end.`,
+        'Open Messages and read the refusal on one of them.');
+    }
+
+    const outstanding = checks.filter(c => c.status === 'todo').length;
+    res.json({
+      linkId: link.id,
+      transmitting: outstanding === 0 && Number(counts?.total ?? 0) > 0,
+      outstanding,
+      counts: {
+        total: Number(counts?.total ?? 0), controls: Number(counts?.controls ?? 0),
+        patients: Number(counts?.patients ?? 0), unknown: Number(counts?.unknown ?? 0),
+        lastAt: counts?.last_at ?? null,
+      },
+      checks,
+    });
+  });
+
+  /**
+   * Is the port actually open?
+   *
+   * The bridge saying "listening" is the bridge's own opinion. This opens a
+   * connection to the port from this host and closes it again without sending
+   * anything, which settles whether a listener is really there — and separates
+   * "the port is not open" from "the analyser is not sending", which are two
+   * completely different afternoons.
+   */
+  router.post('/:id/self-test', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+
+    if (link.mode === 'file_drop' || link.mode === 'lhims_tap') {
+      const target = link.mode === 'file_drop' ? link.watch_path : link.tap_path;
+      if (!target) return res.json({ ok: false, note: 'No path is set on this link yet.' });
+      return res.json(fs_exists(target)
+        ? { ok: true, note: `${target} is readable from this host.` }
+        : { ok: false, note: `${target} cannot be reached from this host. Check the share, the spelling and this machine's permissions on it.` });
+    }
+
+    const host = link.mode === 'client' ? link.remote_host : (link.listen_host || '127.0.0.1');
+    const port = link.mode === 'client' ? link.remote_port : link.listen_port;
+    if (!port) return res.json({ ok: false, note: 'No port is set on this link yet.' });
+    if (link.mode === 'client' && !host) return res.json({ ok: false, note: 'No analyser address is set on this link yet.' });
+
+    const socket = new net.Socket();
+    let answered = false;
+    const answer = (ok: boolean, note: string) => {
+      if (answered) return;
+      answered = true;
+      socket.destroy();
+      res.json({ ok, note });
+    };
+    socket.setTimeout(3000);
+    socket.once('connect', () => answer(true, link.mode === 'client'
+      ? `The analyser answered on ${host}:${port}.`
+      : `The port is open on this host: ${port} is accepting connections.`));
+    socket.once('timeout', () => answer(false, `Nothing answered on ${host}:${port} within three seconds.`));
+    socket.once('error', (error: Error) => answer(false, link.mode === 'client'
+      ? `Could not reach the analyser on ${host}:${port} — ${error.message}`
+      : `Port ${port} is not open on this host — ${error.message}. Start the link, and check nothing else is using the port.`));
+    socket.connect(Number(port), String(host));
+  });
+
+  /**
+   * What has arrived, so somebody can watch it arriving.
+   *
+   * The counts by kind and the last few messages, refreshed by the screen.
+   * "Is it transmitting?" answered by watching it transmit is worth more than
+   * any status word.
+   */
+  router.get('/:id/activity', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT id, name, state, last_message_at FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+    const byKind = db.prepare(`SELECT kind, COUNT(*) AS n FROM instrument_messages
+        WHERE link_id = ? GROUP BY kind`).all(link.id) as any[];
+    const today = db.prepare(`SELECT COUNT(*) AS n FROM instrument_messages
+        WHERE link_id = ? AND date(received_at) = date('now')`).get(link.id) as any;
+    const recent = db.prepare(`SELECT id, received_at, sample_id, lot_number, kind, result_count,
+          forward_status, forward_error
+        FROM instrument_messages WHERE link_id = ? ORDER BY id DESC LIMIT 30`).all(link.id);
+    res.json({
+      link,
+      today: Number(today?.n ?? 0),
+      byKind: Object.fromEntries(byKind.map(r => [r.kind, Number(r.n)])),
+      recent,
     });
   });
 

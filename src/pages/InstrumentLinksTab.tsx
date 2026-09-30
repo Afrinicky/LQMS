@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertTriangle, Check, Cable, DownloadCloud, FolderOpen, Loader2, Play, Plus, Radio,
-  ShieldCheck, Square, TestTube2, Trash2, X,
+  Activity, AlertTriangle, Check, Cable, CheckCircle2, CircleDot, DownloadCloud, FolderOpen,
+  Loader2, Play, Plug, Plus, Radio, ShieldCheck, Square, TestTube2, Trash2, Wifi, X,
 } from 'lucide-react';
 import { api, errorText } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
@@ -75,6 +75,26 @@ type Overview = {
   controlsWaiting: number; forwardPending: number; forwardFailed: number;
 };
 
+type HostInfo = { hostname: string; addresses: Array<{ name: string; address: string }> };
+
+type LinkCheck = { key: string; label: string; status: 'ok' | 'todo' | 'warn' | 'info'; detail: string; fix?: string };
+
+type Checks = {
+  linkId: number; transmitting: boolean; outstanding: number;
+  counts: { total: number; controls: number; patients: number; unknown: number; lastAt: string | null };
+  checks: LinkCheck[];
+};
+
+type Activity = {
+  link: { id: number; name: string; state: string; last_message_at: string | null };
+  today: number;
+  byKind: Record<string, number>;
+  recent: Array<{
+    id: number; received_at: string; sample_id: string | null; lot_number: string | null;
+    kind: string; result_count: number; forward_status: string; forward_error: string | null;
+  }>;
+};
+
 type Profile = { key: string; label: string; vendor: string; discipline: string; protocol: string; notes: string | null; analyteCount: number };
 type LhimsMap = { key: string; label: string; vendor: string; sourceConfig: string; measureCount: number };
 
@@ -121,6 +141,9 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
   const [trying, setTrying] = useState<Link | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [fetching, setFetching] = useState<number | 'all' | null>(null);
+  const [transmission, setTransmission] = useState<Link | null>(null);
+  const [host, setHost] = useState<HostInfo | null>(null);
+  const [showHost, setShowHost] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -147,6 +170,9 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
         ]);
         setProfiles(p.profiles); setLhimsMaps(p.lhimsMaps ?? []); setEquipment(e); setSections(s);
       } catch { /* the pickers are a convenience */ }
+      // What to type into the analyser. Nobody should have to find this
+      // machine's address from a command prompt in another room.
+      try { setHost(await api<HostInfo>('/instrument-links/host')); } catch { /* shown only when known */ }
     })();
   }, []);
 
@@ -275,6 +301,9 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
           <div className="il-head-actions">
             {/* Fetching exists because everything else here waits to be spoken
                 to. After a night with the host switched off, this is the button. */}
+            <button type="button" className="secondary" onClick={() => setShowHost(v => !v)}>
+              <Wifi size={13} /> {showHost ? 'Hide the address' : 'Point an analyser here'}
+            </button>
             <button type="button" className="secondary" disabled={fetching !== null} onClick={() => void fetchAll()}>
               {fetching === 'all' ? <Loader2 size={13} className="pd-spin" /> : <DownloadCloud size={13} />} Fetch now
             </button>
@@ -296,6 +325,8 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
           </div>
         </div>
 
+        {showHost && <HostPanel host={host} links={links ?? []} />}
+
         {!links ? <p className="muted">Loading…</p> : (
           <>
             {ours.length === 0 && theirs.length === 0 && (
@@ -310,7 +341,8 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
                     onStart={() => void act(link, 'start')} onStop={() => void act(link, 'stop')}
                     onEdit={() => { setEditing(link); setForm(formFrom(link)); setShowForm(true); }}
                     onMessages={() => setOpenMessages(link)} onFiles={() => setOpenFiles(link)}
-                    onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)} />
+                    onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)}
+                    onTransmission={() => setTransmission(link)} />
                 ))}
               </ul>
             )}
@@ -325,7 +357,8 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
                       onStart={() => void act(link, 'start')} onStop={() => void act(link, 'stop')}
                       onEdit={() => { setEditing(link); setForm(formFrom(link)); setShowForm(true); }}
                       onMessages={() => setOpenMessages(link)} onFiles={() => setOpenFiles(link)}
-                      onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)} />
+                      onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)}
+                      onTransmission={() => setTransmission(link)} />
                   ))}
                 </ul>
               </>
@@ -343,6 +376,22 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
       {openFiles && <FilesDialog link={openFiles} onClose={() => setOpenFiles(null)} />}
       {trying && <TryDialog link={trying} onClose={() => setTrying(null)} />}
+      {transmission && (
+        <TransmissionDialog
+          link={transmission} host={host} canEdit={canEdit}
+          onClose={() => setTransmission(null)}
+          onSettings={() => {
+            const link = transmission;
+            setTransmission(null);
+            setEditing(link); setForm(formFrom(link)); setShowForm(true);
+          }}
+          onTakeCopy={() => {
+            const link = transmission;
+            setTransmission(null);
+            setEditing(link); setForm({ ...formFrom(link), mode: 'lhims_tap' }); setShowForm(true);
+          }}
+          onChanged={load} />
+      )}
     </div>
   );
 }
@@ -388,11 +437,17 @@ function OverviewStat({ label, value, note, tone }: {
 /* ----------------------------------------------------------------------------
    One link
    ------------------------------------------------------------------------- */
-function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMessages, onFiles, onFetch, onTry }: {
+function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMessages, onFiles, onFetch, onTry, onTransmission }: {
   link: Link; canEdit: boolean; busy: boolean; fetching: boolean;
   onStart: () => void; onStop: () => void; onEdit: () => void;
   onMessages: () => void; onFiles: () => void; onFetch: () => void; onTry: () => void;
+  onTransmission: () => void;
 }) {
+  // A link the bridge will never open cannot transmit, however healthy its
+  // settings look. Saying it on the row itself is the difference between a
+  // bench waiting all morning and a bench fixing it in a minute.
+  const willNeverOpen = link.role === 'lhims_owned' && !modeIsPassive(link.mode);
+  const silent = !willNeverOpen && link.message_count === 0;
   const tone = link.state === 'connected' ? 'ok'
     : link.state === 'listening' || link.state === 'following' ? 'ok'
     : link.state === 'blocked' ? 'lhims'
@@ -436,6 +491,22 @@ function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMes
             the button does nothing. */}
         {link.last_fetch_note && <p className="il-detail is-fetch">{link.last_fetch_note}</p>}
         {link.state_detail && <p className={`il-detail${link.state === 'error' ? ' is-error' : ''}`}>{link.state_detail}</p>}
+        {willNeverOpen && (
+          <p className="il-blocked">
+            <AlertTriangle size={12} />
+            <span>
+              Nothing will arrive on this link. It is recorded as one LHIMS owns and set to bind or dial, so
+              SECHLIMS never opens it.
+              {' '}<button type="button" className="pq-link" onClick={onTransmission}>See what to do</button>
+            </span>
+          </p>
+        )}
+        {silent && (
+          <p className="il-detail is-quiet">
+            Nothing has arrived on this link yet.
+            {' '}<button type="button" className="pq-link" onClick={onTransmission}>Check why</button>
+          </p>
+        )}
       </div>
       <div className="il-side">
         {canEdit && (link.role !== 'lhims_owned' || modeIsPassive(link.mode)) && (
@@ -450,12 +521,212 @@ function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMes
             {fetching ? <Loader2 size={12} className="pd-spin" /> : <DownloadCloud size={12} />} Fetch
           </button>
         )}
+        <button type="button" className="pq-link" onClick={onTransmission}><Activity size={12} /> Transmission</button>
         <button type="button" className="pq-link" onClick={onMessages}>Messages</button>
         {link.mode === 'file_drop' && <button type="button" className="pq-link" onClick={onFiles}><FolderOpen size={12} /> Files</button>}
         <button type="button" className="pq-link" onClick={onTry}><TestTube2 size={12} /> Try one</button>
         {canEdit && <button type="button" className="pq-link" onClick={onEdit}>Settings</button>}
       </div>
     </li>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   What to type into the analyser
+   ----------------------------------------------------------------------------
+   Setting an analyser up means walking to it and entering a host address and a
+   port. Both are known here, and neither was shown, so the last step of every
+   installation was somebody finding this machine's address from a command
+   prompt in another room.
+   ------------------------------------------------------------------------- */
+function HostPanel({ host, links }: { host: HostInfo | null; links: Link[] }) {
+  const listening = links.filter(l => l.mode === 'server' && l.listen_port);
+  return (
+    <div className="il-host">
+      <div className="il-host-head"><Wifi size={14} /> <strong>Point an analyser at this machine</strong></div>
+      {!host || host.addresses.length === 0 ? (
+        <p className="muted">
+          This host has no network address other than its own loopback, so an analyser on the bench cannot
+          reach it. Connect it to the laboratory network first.
+        </p>
+      ) : (
+        <>
+          <p className="muted">
+            On the analyser&rsquo;s host-communication screen, set the address to one of these and the port to the
+            one on the link it should reach.
+          </p>
+          <ul className="il-host-addr">
+            {host.addresses.map(a => (
+              <li key={a.address}><code>{a.address}</code><span className="muted">{a.name}</span></li>
+            ))}
+          </ul>
+          {listening.length > 0 && (
+            <ul className="il-host-ports">
+              {listening.map(l => (
+                <li key={l.id}><strong>{l.name}</strong><code>port {l.listen_port}</code></li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   Is it transmitting, and if not, why not
+   ----------------------------------------------------------------------------
+   One place that answers the question people actually arrive with. A checklist
+   that names what is left to do rather than a status word; a port test that
+   separates "the port is not open" from "the analyser is not sending"; and the
+   messages arriving, watched live, because seeing a transmission land settles
+   the question better than any label.
+   ------------------------------------------------------------------------- */
+function TransmissionDialog({ link, host, canEdit, onClose, onSettings, onTakeCopy, onChanged }: {
+  link: Link; host: HostInfo | null; canEdit: boolean;
+  onClose: () => void; onSettings: () => void; onTakeCopy: () => void; onChanged: () => void;
+}) {
+  const [checks, setChecks] = useState<Checks | null>(null);
+  const [activity, setActivity] = useState<Activity | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [test, setTest] = useState<{ ok: boolean; note: string } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [c, a] = await Promise.all([
+        api<Checks>(`/instrument-links/${link.id}/checks`),
+        api<Activity>(`/instrument-links/${link.id}/activity`),
+      ]);
+      setChecks(c); setActivity(a); setProblem(null);
+    } catch (e) { setProblem(errorText(e)); }
+  }, [link.id]);
+
+  useEffect(() => { void load(); }, [load]);
+  // Watched live, so a transmission arriving while somebody is looking at this
+  // screen appears on it. That is the answer to "is it working", not a label.
+  useEffect(() => {
+    const timer = setInterval(() => { void load(); }, 5_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const willNeverOpen = link.role === 'lhims_owned' && !modeIsPassive(link.mode);
+
+  async function selfTest() {
+    setTesting(true); setTest(null);
+    try { setTest(await api<{ ok: boolean; note: string }>(`/instrument-links/${link.id}/self-test`, { method: 'POST' })); }
+    catch (e) { setProblem(errorText(e)); }
+    finally { setTesting(false); onChanged(); }
+  }
+
+  return (
+    <div className="ls-modal-back" onClick={onClose}>
+      <div className="ls-modal is-wide" onClick={e => e.stopPropagation()}>
+        <header>
+          <h4><Activity size={15} /> {link.name} — transmission</h4>
+          <button type="button" className="pq-link" onClick={onClose}><X size={14} /></button>
+        </header>
+
+        {problem && <Notice kind="error">{problem}</Notice>}
+
+        {/* The verdict, in one line, before any detail. */}
+        {checks && (
+          <div className={`il-verdict ${checks.transmitting ? 'ok' : willNeverOpen ? 'crit' : 'todo'}`}>
+            {checks.transmitting ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+            <div>
+              <strong>
+                {checks.transmitting
+                  ? 'This analyser is transmitting.'
+                  : willNeverOpen
+                    ? 'Nothing will ever arrive on this link as it stands.'
+                    : `${checks.outstanding} thing${checks.outstanding === 1 ? '' : 's'} left before this transmits.`}
+              </strong>
+              <span>
+                {checks.counts.total > 0
+                  ? `${checks.counts.total} message(s) received — ${checks.counts.controls} control run(s), ${checks.counts.patients} patient result(s).`
+                  : 'Nothing has arrived here yet.'}
+              </span>
+            </div>
+            {willNeverOpen && canEdit && (
+              <button type="button" onClick={onTakeCopy}>Take a copy instead</button>
+            )}
+          </div>
+        )}
+
+        {/* The checklist. Each line says what it found and what to change. */}
+        {!checks ? <p className="muted"><Loader2 size={13} className="pd-spin" /> Looking…</p> : (
+          <ul className="il-checks">
+            {checks.checks.map(check => (
+              <li key={check.key} className={`s-${check.status}`}>
+                <span className="il-check-mark">
+                  {check.status === 'ok' ? <CheckCircle2 size={13} />
+                    : check.status === 'info' ? <CircleDot size={13} />
+                    : <AlertTriangle size={13} />}
+                </span>
+                <div>
+                  <strong>{check.label}</strong>
+                  <p>{check.detail}</p>
+                  {check.fix && <p className="il-check-fix">{check.fix}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* The address, right where somebody is about to walk to the analyser. */}
+        {link.mode === 'server' && host && host.addresses.length > 0 && (
+          <div className="il-host inline">
+            <div className="il-host-head"><Wifi size={13} /> <strong>On the analyser, set</strong></div>
+            <ul className="il-host-addr">
+              {host.addresses.map(a => <li key={a.address}><code>{a.address}</code><span className="muted">{a.name}</span></li>)}
+              <li><code>port {link.listen_port ?? '—'}</code><span className="muted">this link</span></li>
+            </ul>
+          </div>
+        )}
+
+        <div className="il-trans-acts">
+          <button type="button" className="secondary" disabled={testing} onClick={() => void selfTest()}>
+            {testing ? <Loader2 size={13} className="pd-spin" /> : <Plug size={13} />} Test the connection
+          </button>
+          {canEdit && <button type="button" className="secondary" onClick={onSettings}>Open its settings</button>}
+          <button type="button" className="secondary" onClick={() => void load()}>Refresh</button>
+        </div>
+        {test && <Notice kind={test.ok ? 'success' : 'error'}>{test.note}</Notice>}
+
+        {/* Watching it arrive. */}
+        <h5 className="il-sub">What has arrived</h5>
+        {!activity ? <p className="muted">…</p> : (
+          <>
+            <div className="il-kinds">
+              <span className="k-control">{activity.byKind.control ?? 0} control</span>
+              <span className="k-patient">{activity.byKind.patient ?? 0} patient</span>
+              <span className="k-unknown">{activity.byKind.unknown ?? 0} unreadable</span>
+              <span className="muted">{activity.today} today</span>
+            </div>
+            {activity.recent.length === 0 ? (
+              <p className="muted">Nothing yet. This list fills itself while it is open.</p>
+            ) : (
+              <ul className="il-stream">
+                {activity.recent.map(row => (
+                  <li key={row.id} className={`k-${row.kind}`}>
+                    <span className="il-stream-time">{String(row.received_at).slice(11, 19)}</span>
+                    <span className={`badge ${row.kind === 'control' ? 'done' : row.kind === 'unknown' ? 'warning' : ''}`}>{row.kind}</span>
+                    <strong>{row.sample_id || '(no sample id)'}</strong>
+                    <span className="muted">
+                      {row.result_count} result{row.result_count === 1 ? '' : 's'}
+                      {row.lot_number ? ` · lot ${row.lot_number}` : ''}
+                    </span>
+                    {row.forward_status === 'failed' && <span className="badge failed">{row.forward_error || 'refused'}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+
+        <div className="pr-btns"><button type="button" className="secondary" onClick={onClose}>Close</button></div>
+      </div>
+    </div>
   );
 }
 
@@ -728,13 +999,19 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
 function MessagesDialog({ link, onClose }: { link: Link; onClose: () => void }) {
   const [rows, setRows] = useState<any[] | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  // Control runs, patient results and messages nothing could be read out of are
+  // three different questions asked of the same list. Patient results in
+  // particular were buried: they are what a previously run sample is enrolled
+  // from, so they have to be findable.
+  const [kind, setKind] = useState<'' | 'control' | 'patient' | 'unknown'>('');
 
   useEffect(() => {
+    setRows(null);
     void (async () => {
-      try { setRows(await api<any[]>(`/instrument-links/${link.id}/messages`)); }
+      try { setRows(await api<any[]>(`/instrument-links/${link.id}/messages${kind ? `?kind=${kind}` : ''}`)); }
       catch { setRows([]); }
     })();
-  }, [link.id]);
+  }, [link.id, kind]);
 
   return (
     <div className="ls-modal-back" onClick={onClose}>
@@ -747,6 +1024,12 @@ function MessagesDialog({ link, onClose }: { link: Link; onClose: () => void }) 
           Everything received, verbatim, whether or not it could be understood — a message nobody could map is
           exactly what is needed in order to map it.
         </p>
+        <div className="tabs inline">
+          {([['', 'Everything'], ['control', 'Control runs'], ['patient', 'Patient results'], ['unknown', 'Unreadable']] as const)
+            .map(([key, label]) => (
+              <button key={key} type="button" className={kind === key ? 'active' : ''} onClick={() => setKind(key)}>{label}</button>
+            ))}
+        </div>
         {!rows ? <p className="muted">Loading…</p> : rows.length === 0 ? (
           <p className="muted">Nothing yet.</p>
         ) : (

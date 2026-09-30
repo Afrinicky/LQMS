@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlaskConical, Beaker, CheckCircle2, AlertTriangle, LineChart, Plus, Trash2,
-  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X,
+  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X, Radio, DownloadCloud, Loader2,
 } from 'lucide-react';
 import { api, errorText, apiRead } from '../services/api';
 import { useModules } from '../hooks/useModules';
@@ -26,6 +26,7 @@ import {
   effectiveTolerance, formatTolerance,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome, type IqcRunKind,
 } from '../../shared/constants/iqc';
+import { LINK_STATE_LABELS } from '../../shared/constants/instruments';
 import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import TextField from '../components/ui/TextField';
@@ -106,6 +107,30 @@ type CoverageRun = { id: number; run_number: string; run_date: string; run_time:
 type FeedCandidate = {
   id: number; sample_id: string | null; received_at: string; instrument_run_at: string | null;
   feed_name: string | null; parsed_values: { analyte?: string; value?: number | string }[];
+};
+
+type AnalyserWaiting = {
+  id: number; sample_id: string | null; lot_number: string | null;
+  received_at: string; instrument_run_at: string | null;
+  parsed_values: { analyte?: string; value?: number | string }[];
+  status: string; status_note: string | null; source_name: string | null;
+};
+
+type AnalyserStatus = {
+  linked: boolean; why?: string;
+  source?: {
+    kind: string; id: number; name: string; mode?: string; role?: string; protocol?: string;
+    state: string; stateDetail: string | null; lastError: string | null; lastMessageAt: string | null;
+    canFetch: boolean; open: boolean;
+  };
+  waiting: AnalyserWaiting[];
+};
+
+type AnalyserMapping = {
+  readings: { analyteId: number; analyte: string; value: number | null; qualitativeResult?: string | null }[];
+  unmatchedLabels: string[];
+  missingAnalytes: { analyteId: number; analyte: string }[];
+  matched: number;
 };
 
 type RunOutcome = {
@@ -845,6 +870,11 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
 
+  // What the analyser is offering for this control, and what the last thing
+  // brought in from it lined up against.
+  const [analyser, setAnalyser] = useState<AnalyserStatus | null>(null);
+  const [mapping, setMapping] = useState<AnalyserMapping | null>(null);
+
   // Previously run samples: the register for this control, which one is being
   // re-read, and whether the form for enrolling a new one is open.
   const [samples, setSamples] = useState<RetainedSample[]>([]);
@@ -874,10 +904,13 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
 
   useEffect(() => {
     setOutcome(null); setValues({}); setSampleId(''); setEnrolling(false); setSamples([]);
+    setAnalyser(null); setMapping(null);
     if (!materialId) { setAnalytes([]); return; }
     api<Analyte[]>(`/iqc/materials/${materialId}/analytes`)
       .then(rows => setAnalytes(rows.filter(a => a.is_active)))
       .catch(() => setAnalytes([]));
+    api<AnalyserStatus>(`/iqc/materials/${materialId}/analyser`)
+      .then(setAnalyser).catch(() => setAnalyser(null));
   }, [materialId]);
 
   const loadSamples = useCallback(async () => {
@@ -1075,6 +1108,24 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
             </div>
           )}
 
+          {/* The analyser, where one is attached to this control. Typing a
+              twenty-three parameter FBC off a printout is not a workflow; it
+              is a reason to stop keeping the record. */}
+          {analyser?.linked && analyser.source && (
+            <AnalyserPanel
+              materialId={Number(materialId)} status={analyser} mapping={mapping}
+              onStatus={setAnalyser} onMapping={setMapping}
+              onReadings={rows => setValues(v => {
+                const next = { ...v };
+                for (const r of rows) {
+                  next[r.analyteId] = r.value !== null && r.value !== undefined
+                    ? String(r.value) : String(r.qualitativeResult ?? '');
+                }
+                return next;
+              })}
+              onError={onError} />
+          )}
+
           {material && analytes.length > 0 && (
             <table className="data-table compact iqc-entry">
               <thead><tr>
@@ -1170,6 +1221,114 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
       {outcome && <RunOutcomePanel outcome={outcome} retained={retained} />}
     </form>}
     </>
+  );
+}
+
+/* ------------------------------------------------------- from the analyser */
+
+/**
+ * Taking the control's results off the analyser instead of typing them.
+ *
+ * It appears only where an analyser is actually attached to the control. What
+ * arrived is shown lined up against the control's own parameters BEFORE
+ * anything is filled in, and what could not be matched is named rather than
+ * quietly dropped — a system that decides column four is MCHC and is wrong has
+ * written a false control record with a real name on it.
+ */
+function AnalyserPanel({ materialId, status, mapping, onStatus, onMapping, onReadings, onError }: {
+  materialId: number; status: AnalyserStatus; mapping: AnalyserMapping | null;
+  onStatus: (s: AnalyserStatus) => void; onMapping: (m: AnalyserMapping | null) => void;
+  onReadings: (rows: AnalyserMapping['readings']) => void; onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState<number | 'fetch' | null>(null);
+  const source = status.source!;
+  const waiting = status.waiting ?? [];
+
+  async function fetchNow() {
+    setBusy('fetch');
+    try {
+      const answer = await api<{ note: string; waiting: AnalyserWaiting[] }>(
+        `/iqc/materials/${materialId}/analyser/fetch`, { method: 'POST' });
+      onStatus({ ...status, waiting: answer.waiting });
+      if (answer.waiting.length === 0) onError(answer.note);
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function bringIn(message: AnalyserWaiting) {
+    setBusy(message.id);
+    try {
+      const next = await api<AnalyserMapping>(`/iqc/materials/${materialId}/analyser/messages/${message.id}/map`);
+      onMapping(next);
+      onReadings(next.readings);
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  return (
+    <div className="iqc-analyser">
+      <div className="iqc-analyser-head">
+        <span className={`iqc-analyser-dot s-${source.state}`} />
+        <strong><Radio size={13} /> {source.name}</strong>
+        <span className="muted">
+          {LINK_STATE_LABELS[source.state as keyof typeof LINK_STATE_LABELS] ?? source.state}
+          {source.lastMessageAt ? ` · last heard ${String(source.lastMessageAt).slice(0, 16).replace('T', ' ')}` : ' · nothing received yet'}
+        </span>
+        {source.canFetch && (
+          <button type="button" className="pq-link" disabled={busy !== null} onClick={() => void fetchNow()}>
+            {busy === 'fetch' ? <Loader2 size={12} className="pd-spin" /> : <DownloadCloud size={12} />} Fetch now
+          </button>
+        )}
+      </div>
+
+      {/* A link the bridge deliberately never opens will never deliver
+          anything. Saying so is the difference between a bench waiting all
+          morning and a bench fixing it in a minute. */}
+      {!source.open && (
+        <p className="iqc-note warn">
+          <AlertTriangle size={12} /> This link is recorded as one LHIMS owns and is set to bind or dial, so
+          SECHLIMS does not open it and nothing will arrive here. Set it to follow the LHIMS client&rsquo;s log
+          under Analyser Links to take a copy instead.
+        </p>
+      )}
+      {source.lastError && <p className="iqc-note bad">{source.lastError}</p>}
+
+      {waiting.length === 0 ? (
+        <p className="muted">
+          Nothing is waiting from this analyser. Run the control on it and send it as you would a patient sample.
+        </p>
+      ) : (
+        <ul className="iqc-analyser-list">
+          {waiting.map(message => (
+            <li key={message.id}>
+              <div>
+                <strong>{message.sample_id || 'control sample'}</strong>
+                <span className="muted">
+                  {' · '}{String(message.instrument_run_at ?? message.received_at).slice(0, 16).replace('T', ' ')}
+                  {' · '}{message.parsed_values?.length ?? 0} parameters
+                  {message.status === 'unmatched' ? ' · not matched to a control' : ''}
+                </span>
+              </div>
+              <button type="button" className="pq-link" disabled={busy !== null} onClick={() => void bringIn(message)}>
+                {busy === message.id ? <Loader2 size={12} className="pd-spin" /> : <ArrowRight size={12} />} Bring these in
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {mapping && (
+        <div className="iqc-analyser-map">
+          <strong>{mapping.matched} of {mapping.matched + mapping.missingAnalytes.length} parameters filled in.</strong>
+          {mapping.unmatchedLabels.length > 0 && (
+            <span> The analyser also sent {mapping.unmatchedLabels.join(', ')}, which this control does not measure.</span>
+          )}
+          {mapping.missingAnalytes.length > 0 && (
+            <span> Still to enter: {mapping.missingAnalytes.map(a => a.analyte).join(', ')}.</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1309,7 +1468,7 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
 
   useEffect(() => {
     if (source !== 'instrument') return;
-    api<FeedCandidate[]>(`/iqc/materials/${material.id}/retained-candidates`)
+    api<FeedCandidate[]>(`/iqc/materials/${material.id}/analyser/patient-samples`)
       .then(setCandidates).catch(() => setCandidates([]));
   }, [material.id, source]);
 
