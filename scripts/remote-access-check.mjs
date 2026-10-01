@@ -53,6 +53,8 @@ const RUNNING = JSON.stringify({
   BackendState: 'Running',
   Self: { DNSName: 'lab-host.tail1a2b.ts.net.', TailscaleIPs: ['100.93.142.70', 'fd7a::1'] },
 });
+/** Installed, but nobody has signed this machine in to a tailnet. */
+const NEEDS_LOGIN = JSON.stringify({ BackendState: 'NeedsLogin', Self: {} });
 const SERVING = JSON.stringify({
   Web: { 'lab-host.tail1a2b.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:4317' } } } },
 });
@@ -119,11 +121,23 @@ check('and the command is still offered', /serve --bg 4317/.test(r.advice ?? '')
 /* --------------------------------------------------- 6. the LAN-bound case */
 console.log('\n[6] A host open to the whole network is reachable, and told the cost');
 
+// Tailscale signed in but not publishing, on a host open to every interface:
+// the tailnet address answers as it stands, and saying only "open to this
+// network" hid the address somebody was already using.
 stubCli({ statusJson: RUNNING, serveJson: '{}' });
 r = await ts.reachability({ host: '0.0.0.0', port: 4317, lanExposed: true });
 check('it is reachable', r.reachable === true);
 check('over the LAN', r.route === 'lan', r.route);
-check('and it says what that means', /whole network/i.test(r.advice ?? ''), r.advice);
+check('the tailnet address is handed over, unpublished or not',
+  r.url === 'http://100.93.142.70:4317/', r.url);
+check('and publishing is offered as the better arrangement, not the only one',
+  /publish/i.test(r.advice ?? ''), r.advice);
+
+// Without Tailscale there is no second address, and the cost is named instead.
+stubCli({ statusJson: NEEDS_LOGIN, serveJson: '{}' });
+r = await ts.reachability({ host: '0.0.0.0', port: 4317, lanExposed: true });
+check('with no tailnet, no address is invented', r.url === null, r.url);
+check('and it says what open to the network means', /whole network/i.test(r.advice ?? ''), r.advice);
 
 /* ------------------------------------------------------- 7. it never hangs */
 console.log('\n[7] A Tailscale that has stopped answering does not hold the screen');

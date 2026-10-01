@@ -147,19 +147,40 @@ const refused = await j('/iqc/retained-samples', { token: A, method: 'POST', bod
 } });
 check('a sample with no original result is refused', refused.status === 400, JSON.stringify(refused.json));
 
-/* ================================================= 5. the laboratory's theme */
-console.log('\n[5] The theme this laboratory opens on');
+/* ============================================ 5. what the laboratory looks like */
+console.log('\n[5] How this laboratory\'s screens are set up');
 const before = (await j('/system/appearance', { token: A })).json;
-check('a laboratory that has never chosen opens light', before?.defaultTheme === 'light', JSON.stringify(before));
-const setDark = await j('/system/appearance', { token: A, method: 'PUT', body: { defaultTheme: 'dark' } });
-check('an administrator can set it', setDark.json?.defaultTheme === 'dark', JSON.stringify(setDark.json));
-check('and it is stamped, so devices know to adopt it', Boolean(setDark.json?.setAt), JSON.stringify(setDark.json?.setAt));
-const setLight = await j('/system/appearance', { token: A, method: 'PUT', body: { defaultTheme: 'light' } });
-check('and set back', setLight.json?.defaultTheme === 'light', JSON.stringify(setLight.json));
-const nonsense = await j('/system/appearance', { token: A, method: 'PUT', body: { defaultTheme: 'purple' } });
-check('anything else is refused', nonsense.status === 400, JSON.stringify(nonsense.json));
+check('a laboratory that has never chosen opens light', before?.theme === 'light', JSON.stringify(before));
+check('on the default accent, comfortable, unscaled, menu open',
+  before?.accent === 'blue' && before?.density === 'comfortable' && before?.scale === '100' && before?.sidebar === 'expanded',
+  JSON.stringify(before));
+
+const set = await j('/system/appearance', { token: A, method: 'PUT', body: {
+  theme: 'dark', accent: 'teal', density: 'compact', scale: '125', sidebar: 'collapsed',
+} });
+check('an administrator can set all of it at once',
+  set.json?.theme === 'dark' && set.json?.accent === 'teal' && set.json?.density === 'compact'
+    && set.json?.scale === '125' && set.json?.sidebar === 'collapsed', JSON.stringify(set.json));
+check('and it is stamped, so devices know to adopt it', Boolean(set.json?.setAt), JSON.stringify(set.json?.setAt));
+
+const one = await j('/system/appearance', { token: A, method: 'PUT', body: { accent: 'green' } });
+check('one part can be changed without resetting the rest',
+  one.json?.accent === 'green' && one.json?.theme === 'dark' && one.json?.scale === '125', JSON.stringify(one.json));
+
+const legacy = await j('/system/appearance', { token: A, method: 'PUT', body: { defaultTheme: 'light' } });
+check('the field this endpoint first had still works', legacy.json?.theme === 'light', JSON.stringify(legacy.json));
+
+const nonsense = await j('/system/appearance', { token: A, method: 'PUT', body: { accent: 'purple' } });
+check('a value this build does not know is refused', nonsense.status === 400, JSON.stringify(nonsense.json));
+const nothing = await j('/system/appearance', { token: A, method: 'PUT', body: {} });
+check('and so is a change that changes nothing', nothing.status === 400, JSON.stringify(nothing.json));
 const anon = await j('/system/appearance');
-check('and it is not readable without signing in', anon.status === 401 || anon.status === 403, String(anon.status));
+check('it is not readable without signing in', anon.status === 401 || anon.status === 403, String(anon.status));
+
+// Put it back, so a suite run does not leave the next person on a dark screen.
+await j('/system/appearance', { token: A, method: 'PUT', body: {
+  theme: 'light', accent: 'blue', density: 'comfortable', scale: '100', sidebar: 'expanded',
+} });
 
 /* ================================================ 6. every address, reachable or not */
 console.log('\n[6] The addresses this host answers on');
@@ -171,6 +192,36 @@ check('each one says whether it is answering',
 check('and a Tailscale address is named as one',
   (conn?.hostAddresses ?? []).every(a => !a.url.includes('://100.') || /tailscale/i.test(a.label)),
   JSON.stringify((conn?.hostAddresses ?? []).map(a => a.label)));
+
+/* ========================================================== 7. the port is a setting */
+console.log('\n[7] Which port this host answers on');
+const port = conn?.portSetting;
+check('the port is reported as something the laboratory owns', Boolean(port), JSON.stringify(port));
+check('and it is not flagged as having moved when it has not',
+  conn?.lan?.portMoved === false, JSON.stringify({ asked: port?.asked, bound: port?.bound, moved: conn?.lan?.portMoved }));
+
+if (port?.lockedToEnvironment) {
+  const refused = await j('/system/port', { token: A, method: 'PUT', body: { port: 4400 } });
+  check('a port set in the environment is not overruled from here', refused.status === 400, JSON.stringify(refused.json));
+} else {
+  const chosen = await j('/system/port', { token: A, method: 'PUT', body: { port: 4400 } });
+  check('an administrator can choose the port', chosen.status === 200, JSON.stringify(chosen.json));
+  check('and is told it waits for a restart', chosen.json?.appliesAtRestart === true, JSON.stringify(chosen.json));
+
+  const after = (await j('/system/connectivity', { token: A })).json;
+  check('the choice is remembered as the next port', after?.portSetting?.next === 4400, JSON.stringify(after?.portSetting));
+  check('while the running host keeps the port it actually bound',
+    after?.portSetting?.bound === port.bound, JSON.stringify(after?.portSetting));
+  // The bug this replaced: choosing a port made the host claim the port it was
+  // running on "was already in use when it started". It had not been.
+  check('and choosing a port is not reported as a port conflict',
+    after?.lan?.portMoved === false, JSON.stringify({ moved: after?.lan?.portMoved, asked: after?.portSetting?.asked }));
+
+  const silly = await j('/system/port', { token: A, method: 'PUT', body: { port: 80 } });
+  check('a privileged or impossible port is refused', silly.status === 400, JSON.stringify(silly.json));
+
+  await j('/system/port', { token: A, method: 'PUT', body: { port: port.bound } });
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

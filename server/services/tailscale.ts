@@ -79,11 +79,11 @@ export function __setCliForTests(binary: string | null): void { cachedCli = bina
 
 type RunResult = { ok: true; stdout: string } | { ok: false; error: string; missing?: boolean };
 
-function run(args: string[]): Promise<RunResult> {
+function run(args: string[], timeoutMs = CLI_TIMEOUT_MS): Promise<RunResult> {
   const cli = findCli();
   if (!cli) return Promise.resolve({ ok: false, error: 'Tailscale is not installed on this computer.', missing: true });
   return new Promise(resolve => {
-    execFile(cli, args, { timeout: CLI_TIMEOUT_MS, windowsHide: true }, (err, stdout) => {
+    execFile(cli, args, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
       if (!err) return resolve({ ok: true, stdout });
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') {
@@ -179,6 +179,27 @@ export async function serveStatus(port: number): Promise<ServeStatus> {
   return { serving: true, url: host ? `https://${host}/` : null };
 }
 
+/**
+ * Publish this laboratory's port on the tailnet.
+ *
+ * `tailscale serve --bg <port>` is the whole job, and it is one command — but
+ * it is one command on a machine the person asking is usually not sitting at,
+ * typed into a shell they may never have opened, and it does not survive every
+ * way a Windows host gets reinstalled or upgraded. A laboratory that loses it
+ * finds the address it has always used simply stops, with everything else
+ * reporting healthy. So the host offers to run it.
+ *
+ * Nothing here decides on its own: it runs when somebody presses the button,
+ * and what comes back is whatever Tailscale said.
+ */
+export async function publish(port: number): Promise<{ ok: boolean; error: string | null }> {
+  // Serving can take a moment longer than a status read: the daemon may have to
+  // fetch a certificate for the tailnet name the first time.
+  const result = await run(['serve', '--bg', String(port)], 15_000);
+  if (result.ok === true) return { ok: true, error: null };
+  return { ok: false, error: result.error };
+}
+
 export type Reachability = {
   /** True when a device that is not this one can open the laboratory. */
   reachable: boolean;
@@ -208,10 +229,17 @@ export async function reachability(opts: { host: string; port: number; lanExpose
     };
   }
   if (opts.lanExposed) {
+    // The tailnet address is a real interface on this machine, so while the
+    // host listens on every interface it answers there too — published or not.
+    // Reporting only "open to this network" hid the address somebody was
+    // already using and left them with nothing to test.
+    const direct = ts.running && ts.ip ? `http://${ts.ip}:${opts.port}/` : null;
     return {
       reachable: true, route: 'lan',
-      advice: 'The port is open to this whole network. If only named devices should reach the laboratory, publish it over Tailscale instead and bind back to 127.0.0.1.',
-      url: null, tailscale,
+      advice: direct
+        ? 'Devices on your tailnet can use the Tailscale address below as it stands. Publishing it gives a name instead of a number, and lets the port be closed to this network.'
+        : 'The port is open to this whole network. If only named devices should reach the laboratory, publish it over Tailscale instead and bind back to 127.0.0.1.',
+      url: direct, tailscale,
     };
   }
 

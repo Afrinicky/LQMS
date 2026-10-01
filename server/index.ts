@@ -76,7 +76,7 @@ import { ensureDataDirs, getDb } from './db/database.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
 import { seedDefaults } from './db/seed.js';
 import { config } from './config/index.js';
-import { resolveBindHost, recordBinding, hostIsLan } from './services/hostBinding.js';
+import { resolveBindHost, resolvePort, recordBinding, hostIsLan } from './services/hostBinding.js';
 
 /**
  * Resolve the directory that holds the built renderer (dist/index.html).
@@ -246,13 +246,13 @@ export function createApiServer() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = config.api.port;
-  // Loopback unless the laboratory has said otherwise — and that choice is a
-  // stored setting, not an environment variable, so it survives the restart
-  // that used to quietly put the host back on 127.0.0.1 and take the LAN down.
+  // Both the address and the port are stored settings rather than environment
+  // variables, so they survive the restart that used to quietly put the host
+  // back on 127.0.0.1 and take the network down with it.
+  const port = resolvePort(getDb);
   const host = resolveBindHost(getDb);
   createApiServer().listen(port, host, () => {
-    recordBinding(host, port);
+    recordBinding(host, port, port);
     console.log(`SECH_LIMS host API listening on http://${host}:${port}`
       + (hostIsLan(host) ? ' (reachable from the network)' : ' (this computer only)'));
     // The same jobs the packaged desktop application starts — see

@@ -8,8 +8,9 @@ import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, dbPath, confi
 import { backupFolder } from '../services/backupDestinations.js';
 import { config, type AppMode } from '../config/index.js';
 import {
-  boundHost, boundPort, boundToLan, portMovedFromConfigured,
+  boundHost, boundPort, boundToLan, portMovedFromConfigured, askedPort,
   storedLanChoice, setStoredLanChoice, hostSetInEnvironment,
+  storedPort, setStoredPort, resolvePort, portSetInEnvironment,
 } from '../services/hostBinding.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -3521,6 +3522,18 @@ export function commonRoutes() {
         configuredPort: config.api.port,
         portMoved: portMovedFromConfigured(),
       },
+      // The port as a thing the laboratory owns, rather than something only the
+      // machine it was installed on knows.
+      portSetting: {
+        // What it asked for when it started, and what it will ask for next
+        // time — which differ the moment somebody chooses a new one here.
+        asked: askedPort(),
+        next: resolvePort(getDb),
+        bound: boundPort(),
+        chosen: storedPort(getDb()),
+        lockedToEnvironment: portSetInEnvironment(),
+        envDefault: config.api.port,
+      },
       lanReady: true,
       lanUrls: lanUrls(),
       hostAddresses: hostAddresses(),
@@ -3535,49 +3548,78 @@ export function commonRoutes() {
      Appearance
      ----------------------------------------------------------------------- */
 
+  /* --------------------------------------------------------------------------
+     Appearance
+     ----------------------------------------------------------------------- */
+
   /**
-   * The light or dark theme this laboratory starts people on.
+   * How this laboratory's screens look, for a device that has never been told.
    *
-   * A theme is a per-device choice — one person works a night shift on a dim
-   * screen, another is under a window — so the personal toggle stays. What was
-   * missing is the laboratory's own answer for a device that has never chosen,
-   * which left every new machine on whatever the build happened to default to
-   * with nobody able to say otherwise.
+   * These are per-device preferences by nature — one person works a night shift
+   * on a dim screen, another is under a window, a third is on a bench monitor
+   * two metres away — so every one of them can still be overridden on the
+   * device. What was missing is the laboratory's own answer, which left every
+   * new machine on whatever the build happened to default to with nobody able
+   * to say otherwise.
    *
    * The timestamp is what makes a change reach devices that HAVE chosen: a
-   * device adopts the default whenever it was set more recently than that
-   * device last picked for itself. So an administrator who sets the laboratory
-   * to light moves everybody to light, and anyone who still wants dark toggles
-   * it back and keeps it.
+   * device adopts the laboratory's answer whenever it was set more recently
+   * than that device last chose for itself. So setting the laboratory to light
+   * moves everybody to light, and anyone who still wants dark sets it back and
+   * keeps it.
    */
+  const APPEARANCE: Record<string, { values: string[]; fallback: string }> = {
+    theme: { values: ['light', 'dark'], fallback: 'light' },
+    accent: { values: ['blue', 'teal', 'indigo', 'green', 'slate'], fallback: 'blue' },
+    density: { values: ['comfortable', 'compact'], fallback: 'comfortable' },
+    scale: { values: ['100', '110', '125'], fallback: '100' },
+    sidebar: { values: ['expanded', 'collapsed'], fallback: 'expanded' },
+  };
+
   function appearance() {
     const db = getDb();
     const read = (key: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
       { value?: string } | undefined)?.value ?? null;
-    const stored = read('defaultTheme');
-    return {
-      defaultTheme: stored === 'dark' ? 'dark' : 'light',
-      setAt: read('defaultThemeSetAt'),
-    };
+    const out: Record<string, string> = {};
+    for (const [name, spec] of Object.entries(APPEARANCE)) {
+      const stored = read(`appearance.${name}`);
+      out[name] = stored && spec.values.includes(stored) ? stored : spec.fallback;
+    }
+    return { ...out, setAt: read('appearance.setAt') };
   }
 
   router.get('/system/appearance', requireAuth, (_req, res) => res.json(appearance()));
 
   router.put('/system/appearance', requirePermission('settings', 'edit'), (req, res) => {
-    const requested = req.body?.defaultTheme;
-    if (requested !== 'light' && requested !== 'dark') {
-      return res.status(400).json({ error: 'defaultTheme must be "light" or "dark".' });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    // "defaultTheme" was this endpoint's first and only field. Accepting it
+    // still means a host updated before its browser does not lose its theme.
+    if (typeof body.defaultTheme === 'string') body.theme = body.defaultTheme;
+
+    const changes: Array<[string, string]> = [];
+    for (const [name, spec] of Object.entries(APPEARANCE)) {
+      const asked = body[name];
+      if (asked === undefined) continue;
+      const value = String(asked);
+      if (!spec.values.includes(value)) {
+        return res.status(400).json({ error: `${name} must be one of: ${spec.values.join(', ')}.` });
+      }
+      changes.push([`appearance.${name}`, value]);
     }
+    if (!changes.length) return res.status(400).json({ error: 'Nothing to change.' });
+
     const db = getDb();
     const before = appearance();
     const write = db.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`);
-    write.run('defaultTheme', requested);
-    write.run('defaultThemeSetAt', new Date().toISOString());
-    audit(req, { action: 'edit', entity: 'system_appearance', entityId: 'defaultTheme', oldValue: before.defaultTheme, newValue: requested });
-    res.json({ ...appearance(), note: requested === 'light'
-      ? 'Every device now opens in the light theme. Anyone who prefers dark can switch it back for themselves.'
-      : 'Every device now opens in the dark theme. Anyone who prefers light can switch it back for themselves.' });
+    const tx = db.transaction(() => {
+      for (const [key, value] of changes) write.run(key, value);
+      write.run('appearance.setAt', new Date().toISOString());
+    });
+    tx();
+    const after = appearance();
+    audit(req, { action: 'edit', entity: 'system_appearance', entityId: 'appearance', oldValue: before, newValue: after });
+    res.json({ ...after, note: 'Every device opens on this from now on. Anyone can still set their own.' });
   });
 
   router.put('/system/mode', requirePermission('settings', 'edit'), (req, res) => {
@@ -3625,6 +3667,55 @@ export function commonRoutes() {
         ? 'Other devices on this network will be able to open the laboratory once the host is restarted.'
         : 'Only this computer will be able to open the laboratory once the host is restarted.',
     });
+  });
+
+  /**
+   * Publish this laboratory over Tailscale.
+   *
+   * One command on the host, run from the screen that already knows the port —
+   * because the person who needs it is usually not sitting at that machine, and
+   * because a serve configuration that gets lost in an upgrade looks exactly
+   * like a healthy host whose address has stopped working.
+   */
+  /**
+   * Which port this host answers on.
+   *
+   * It takes effect at the next restart, like the bind address: rebinding a
+   * live listener drops every bench mid-request. Saying so and leaving the
+   * restart to a person is better than doing it to them.
+   */
+  router.put('/system/port', requirePermission('settings', 'edit'), (req, res) => {
+    if (portSetInEnvironment()) {
+      return res.status(400).json({
+        error: 'This host\'s port is set in its environment (API_PORT), which takes precedence. '
+          + 'Change it there, or clear it to manage the port from here.',
+      });
+    }
+    const asked = Number(req.body?.port);
+    if (!Number.isInteger(asked) || asked < 1024 || asked > 65535) {
+      return res.status(400).json({ error: 'Choose a port between 1024 and 65535.' });
+    }
+    const before = storedPort(getDb());
+    setStoredPort(getDb(), asked);
+    audit(req, { action: 'edit', entity: 'system_port', entityId: 'apiPort', oldValue: before, newValue: asked });
+    res.json({
+      ok: true,
+      port: asked,
+      appliesAtRestart: asked !== boundPort(),
+      note: asked === boundPort()
+        ? 'The host is already on this port.'
+        : `The host moves to port ${asked} when it is next restarted. Devices set up with the old address will `
+          + 'need the new one, and a laboratory published over Tailscale has to be published again on the new port.',
+    });
+  });
+
+  router.post('/system/tailscale/publish', requirePermission('settings', 'edit'), async (req, res) => {
+    const port = boundPort();
+    const result = await tailscale.publish(port);
+    if (!result.ok) return res.status(400).json({ error: result.error ?? 'Tailscale could not publish this laboratory.' });
+    audit(req, { action: 'edit', entity: 'system_tailscale', entityId: 'serve', newValue: { port } });
+    const reach = await tailscale.reachability({ host: boundHost(), port, lanExposed: boundToLan() });
+    res.json({ ok: true, url: reach.url, tailscale: reach.tailscale });
   });
 
   router.get('/dashboard/system-health-summary', requirePermission('settings', 'view'), (_req, res) => {

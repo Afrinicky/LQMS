@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useTheme } from '../hooks/useTheme';
 import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, FlaskConical, KeyRound, PenLine } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
@@ -33,7 +34,13 @@ export default function AppLayout() {
   const { can, canView } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
+  // Where the sidebar starts is the laboratory's to set: a bench terminal that
+  // only ever opens two screens wants the room back, a supervisor's desktop
+  // does not. Collapsing it by hand still wins for the rest of the session.
+  const { appearance } = useTheme();
+  const [collapsed, setCollapsed] = useState(appearance.sidebar === 'collapsed');
+  const sidebarDefault = appearance.sidebar;
+  useEffect(() => { setCollapsed(sidebarDefault === 'collapsed'); }, [sidebarDefault]);
   const [unread, setUnread] = useState<number | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showSignature, setShowSignature] = useState(false);
