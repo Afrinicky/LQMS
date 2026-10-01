@@ -1,5 +1,5 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useTheme } from '../hooks/useTheme';
+import { useTheme, type Appearance, type Accent } from '../hooks/useTheme';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
@@ -3047,7 +3047,10 @@ export function RemoteStaffAccess() {
 // ---------------------------------------------------------------------------
 // System  (system-level settings: modules, backups, devices)
 // ---------------------------------------------------------------------------
-const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'Remote Staff Access', 'Quality Workflow', 'Risk Criteria', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
+// Networking is one subject and now lives under one tab: remote staff accounts
+// and paired devices are ways in to this laboratory, and splitting them across
+// three tabs meant nobody could see the whole answer at once.
+const SYSTEM_TABS = ['Overview', 'Connectivity', 'Appearance', 'Quality Workflow', 'Risk Criteria', 'System Modules', 'Backup & Restore'] as const;
 type SystemTab = typeof SYSTEM_TABS[number];
 
 export function SystemSettings() {
@@ -3059,13 +3062,12 @@ export function SystemSettings() {
     <div className="tabs">{SYSTEM_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
       {tab === 'Overview' && <SystemOverview />}
-      {tab === 'Connectivity & Mode' && <ConnectivityMode />}
-      {tab === 'Remote Staff Access' && <RemoteStaffAccess />}
+      {tab === 'Connectivity' && <ConnectivityMode />}
+      {tab === 'Appearance' && <AppearanceSettings />}
       {tab === 'Quality Workflow' && <QualityWorkflowSettings />}
       {tab === 'Risk Criteria' && <RiskCriteriaSettings />}
       {tab === 'System Modules' && <ModuleToggles />}
       {tab === 'Backup & Restore' && <BackupRestore />}
-      {tab === 'Device Access / Pairing' && <Devices />}
     </div>
   </div>;
 }
@@ -3172,90 +3174,287 @@ function QualityWorkflowSettings() {
  * — so the one thing this card owes anybody is a plain yes or no, and the next
  * step when the answer is no.
  */
+/* ============================================================================
+   Appearance — what this laboratory's screens look like
+   ========================================================================= */
+
 /**
- * Which theme this laboratory opens on.
- *
- * The toggle in the header is a personal, per-device thing and stays that way —
- * a night shift on a dim screen is a different problem from a bench under a
- * window. What was missing is the laboratory's own answer, so a new machine,
- * or one somebody toggled months ago, has something to be told.
+ * Every one of these is a per-device preference by nature: a night shift on a
+ * dim screen, a bench monitor two metres away, a 1366×768 laptop where the
+ * table has to fit. So each stays changeable on the device, and what this
+ * screen sets is the answer a device gets when nobody has told it otherwise —
+ * and when the laboratory has decided more recently than that device did.
  */
-function AppearanceCard({ canEdit }: { canEdit: boolean }) {
-  const { theme, setTheme } = useTheme();
-  const [chosen, setChosen] = useState<'light' | 'dark' | null>(null);
-  const [busy, setBusy] = useState(false);
+function Choice<T extends string>({ value, current, onPick, disabled, children }: {
+  value: T; current: T; onPick: (v: T) => void; disabled?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <button type="button" disabled={disabled}
+      className={`ap-choice${current === value ? ' is-on' : ''}`}
+      aria-pressed={current === value}
+      onClick={() => onPick(value)}>
+      {children}
+    </button>
+  );
+}
+
+export function AppearanceSettings() {
+  const { can } = usePermissions();
+  const canEdit = can('settings', 'edit');
+  const { appearance, setAppearance } = useTheme();
+  const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  useEffect(() => {
-    api<{ defaultTheme: 'light' | 'dark' }>('/system/appearance')
-      .then(r => setChosen(r.defaultTheme)).catch(() => setChosen('light'));
-  }, []);
+  /**
+   * Set it here and on this screen at once.
+   *
+   * An administrator who presses Dark and watches their own screen stay light
+   * has been told nothing about whether it worked.
+   */
+  async function choose(change: Partial<Appearance>) {
+    setAppearance(change);
+    setSaving(true); setProblem(null); setNote(null);
+    try {
+      await api('/system/appearance', { method: 'PUT', body: JSON.stringify(change) });
+      setNote('Saved. Every device opens on this from now on.');
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setSaving(false); }
+  }
 
-  async function save(next: 'light' | 'dark') {
+  const ACCENTS: Array<{ value: Accent; label: string }> = [
+    { value: 'blue', label: 'Blue' },
+    { value: 'teal', label: 'Teal' },
+    { value: 'indigo', label: 'Indigo' },
+    { value: 'green', label: 'Green' },
+    { value: 'slate', label: 'Slate' },
+  ];
+
+  return <div>
+    <div className="card">
+      <div className="section-head"><h3>Appearance</h3></div>
+      <p className="hint" style={{ marginTop: 0 }}>
+        What a screen looks like when nobody has set it. Anyone can still change their own, from the header or
+        from here, and that choice is kept until this page is changed again.
+      </p>
+
+      <div className="ap-group">
+        <strong>Theme</strong>
+        <div className="ap-choices">
+          <Choice value="light" current={appearance.theme} disabled={!canEdit || saving} onPick={v => void choose({ theme: v })}>Light</Choice>
+          <Choice value="dark" current={appearance.theme} disabled={!canEdit || saving} onPick={v => void choose({ theme: v })}>Dark</Choice>
+        </div>
+      </div>
+
+      <div className="ap-group">
+        <strong>Accent colour</strong>
+        <div className="ap-choices">
+          {ACCENTS.map(a => (
+            <Choice key={a.value} value={a.value} current={appearance.accent}
+              disabled={!canEdit || saving} onPick={v => void choose({ accent: v })}>
+              <span className={`ap-dot ap-swatch-${a.value}`} />{a.label}
+            </Choice>
+          ))}
+        </div>
+        <span className="hint">Buttons, links, selected tabs and focus rings. Five, each checked for readability in both themes.</span>
+      </div>
+
+      <div className="ap-group">
+        <strong>Interface size</strong>
+        <div className="ap-choices">
+          <Choice value="100" current={appearance.scale} disabled={!canEdit || saving} onPick={v => void choose({ scale: v })}>Standard</Choice>
+          <Choice value="110" current={appearance.scale} disabled={!canEdit || saving} onPick={v => void choose({ scale: v })}>Large</Choice>
+          <Choice value="125" current={appearance.scale} disabled={!canEdit || saving} onPick={v => void choose({ scale: v })}>Largest</Choice>
+        </div>
+        <span className="hint">Scales the whole screen, not the text alone — for a bench monitor read from a distance.</span>
+      </div>
+
+      <div className="ap-group">
+        <strong>Density</strong>
+        <div className="ap-choices">
+          <Choice value="comfortable" current={appearance.density} disabled={!canEdit || saving} onPick={v => void choose({ density: v })}>Comfortable</Choice>
+          <Choice value="compact" current={appearance.density} disabled={!canEdit || saving} onPick={v => void choose({ density: v })}>Compact</Choice>
+        </div>
+        <span className="hint">Compact tightens cards and table rows without shrinking any text, for long registers on a small screen.</span>
+      </div>
+
+      <div className="ap-group">
+        <strong>Sidebar</strong>
+        <div className="ap-choices">
+          <Choice value="expanded" current={appearance.sidebar} disabled={!canEdit || saving} onPick={v => void choose({ sidebar: v })}>Open</Choice>
+          <Choice value="collapsed" current={appearance.sidebar} disabled={!canEdit || saving} onPick={v => void choose({ sidebar: v })}>Collapsed</Choice>
+        </div>
+        <span className="hint">Where the menu starts. It can still be collapsed or opened by hand at any time.</span>
+      </div>
+
+      {!canEdit && <p className="hint">You can change this device&rsquo;s own appearance from the header. Setting it for the laboratory needs the edit right on Settings.</p>}
+      {note && <Notice kind="success">{note}</Notice>}
+      {problem && <Notice kind="error">{problem}</Notice>}
+    </div>
+  </div>;
+}
+
+/* ============================================================================
+   Connectivity — every way in to this laboratory, in one place
+   ----------------------------------------------------------------------------
+   It was three screens and a table: a bind switch here, staff accounts under
+   their own tab, paired devices under another, and the one question anybody
+   actually asks — "can the bench next door open this, and at what address?" —
+   answered nowhere in particular. The port was not a question at all; it lived
+   in an environment variable on the machine, so a laboratory that had to move
+   off 4317 could not say so.
+   ========================================================================= */
+
+/** One line of state. Flat rows read faster than a table on a settings page. */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="cx-row"><span>{label}</span><span>{children}</span></div>;
+}
+
+/**
+ * This host: what it listens on, and what that means for everybody else.
+ *
+ * Both halves of "where do I find it" are settings the laboratory owns now, and
+ * both take effect at the next restart on purpose — rebinding a live listener
+ * drops every bench mid-request to save one person a restart.
+ */
+function HostCard({ info, canEdit, onChanged }: {
+  info: SystemConnectivity; canEdit: boolean; onChanged: () => void;
+}) {
+  const lan = info.lan;
+  const portSetting = info.portSetting;
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [port, setPort] = useState(String(portSetting?.next ?? info.api.port));
+
+  async function setLan(enabled: boolean) {
     setBusy(true); setProblem(null); setNote(null);
     try {
-      const r = await api<{ defaultTheme: 'light' | 'dark'; note: string }>('/system/appearance', {
-        method: 'PUT', body: JSON.stringify({ defaultTheme: next }),
-      });
-      setChosen(r.defaultTheme);
+      const r = await api<{ note: string }>('/system/lan', { method: 'PUT', body: JSON.stringify({ enabled }) });
       setNote(r.note);
-      // This device included — an administrator who sets the laboratory to
-      // light and watches their own screen stay dark has been told nothing.
-      setTheme(next);
+      onChanged();
     } catch (e) { setProblem(errorText(e)); }
     finally { setBusy(false); }
   }
 
+  async function savePort() {
+    setBusy(true); setProblem(null); setNote(null);
+    try {
+      const r = await api<{ note: string }>('/system/port', { method: 'PUT', body: JSON.stringify({ port: Number(port) }) });
+      setNote(r.note);
+      onChanged();
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  const portChanged = String(portSetting?.next ?? info.api.port) !== port.trim();
+  // Chosen here, not yet in force — the host picks it up at the next restart.
+  const portPending = Boolean(portSetting && portSetting.next !== portSetting.bound);
+
   return (
     <div className="card">
-      <div className="section-head"><h3>Appearance</h3></div>
-      <div className="tabs inline" style={{ marginTop: 4 }}>
-        <button type="button" disabled={!canEdit || busy} className={chosen === 'light' ? 'active' : ''}
-          onClick={() => void save('light')}>Light</button>
-        <button type="button" disabled={!canEdit || busy} className={chosen === 'dark' ? 'active' : ''}
-          onClick={() => void save('dark')}>Dark</button>
+      <div className="section-head"><h3>This host</h3></div>
+
+      <div className="ap-group">
+        <strong>Who may reach it</strong>
+        {lan?.lockedToEnvironment ? (
+          <span className="chip">Set in this host&rsquo;s environment (SECH_LIMS_API_HOST)</span>
+        ) : (
+          <div className="ap-choices">
+            <button type="button" disabled={!canEdit || busy}
+              className={`ap-choice${lan?.choice === true ? ' is-on' : ''}`}
+              onClick={() => void setLan(true)}>Every device on this network</button>
+            <button type="button" disabled={!canEdit || busy}
+              className={`ap-choice${lan?.choice !== true ? ' is-on' : ''}`}
+              onClick={() => void setLan(false)}>This computer only</button>
+          </div>
+        )}
+        <span className="hint">
+          {lan?.exposed
+            ? 'The host is listening on every interface, so any device on this network can open it.'
+            : 'The host is listening on this computer only. A device on the network gets no answer at all — which is '
+              + 'why a laboratory published over Tailscale keeps working while its plain network address stops: '
+              + 'Tailscale reaches the host over loopback, and the network does not.'}
+          {lan?.choice === true && !lan.exposed && ' It is switched on and takes effect when the host is next restarted.'}
+          {lan?.choice === false && lan.exposed && ' It is switched off and takes effect when the host is next restarted.'}
+        </span>
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>
-        Every device opens on this theme. Anyone can still switch their own screen from the header, and that
-        choice is kept until this is changed again. This device is currently on <strong>{theme}</strong>.
-      </p>
+
+      <div className="ap-group">
+        <strong>Port</strong>
+        {portSetting?.lockedToEnvironment ? (
+          <span className="chip">Set in this host&rsquo;s environment (API_PORT)</span>
+        ) : (
+          <div className="cx-actions" style={{ marginTop: 0 }}>
+            <input className="cx-port" type="number" min={1024} max={65535} value={port}
+              disabled={!canEdit || busy} onChange={e => setPort(e.target.value)} />
+            <button type="button" disabled={!canEdit || busy || !portChanged} onClick={() => void savePort()}>
+              {busy ? 'Saving…' : 'Change port'}
+            </button>
+          </div>
+        )}
+        <span className="hint">
+          The host answers on <code>{info.api.port}</code> now.
+          {portPending && <> It moves to <code>{portSetting!.next}</code> when it is next restarted.</>}
+          {' '}Every device set up with the old address needs the new one, and a laboratory published over Tailscale
+          has to be published again on the new port.
+        </span>
+      </div>
+
+      <div className="cx-rows">
+        <Row label="Listening on">
+          <code>{info.api.host}</code>{info.api.host === '127.0.0.1' && <span className="hint"> — this computer only</span>}
+        </Row>
+        {(info.hostAddresses ?? []).map(a => (
+          <Row key={a.url} label={a.label}>
+            <code>{a.url}</code>{' '}
+            <span className={a.reachable ? 'ok' : 'bad'}>{a.reachable ? 'answering' : 'not answering'}</span>
+          </Row>
+        ))}
+        {info.api.publicUrl && <Row label="Public URL"><code>{info.api.publicUrl}</code></Row>}
+      </div>
+
+      {lan?.portMoved && (
+        <Notice kind="warn" silent>
+          This host is on port <code>{info.api.port}</code>, not the <code>{portSetting?.asked ?? lan.configuredPort}</code> it
+          asked for when it started — that port was already in use. Devices set up with the old address will not reach it.
+        </Notice>
+      )}
       {note && <Notice kind="success">{note}</Notice>}
       {problem && <Notice kind="error">{problem}</Notice>}
     </div>
   );
 }
 
-function RemoteAccessCard({ info, canEdit, onChanged }: {
+/**
+ * Tailscale: the usual answer for a laboratory without a network engineer.
+ *
+ * Publishing is one command, on a machine the person reading this is usually
+ * not sitting at, and a serve configuration that goes missing in an upgrade
+ * looks exactly like a healthy host whose address has stopped working. So the
+ * host offers to run it rather than describing it.
+ */
+function TailscaleCard({ info, canEdit, onChanged }: {
   info: SystemConnectivity; canEdit: boolean; onChanged: () => void;
 }) {
   const reach = info.reach;
   const ts = reach?.tailscale;
-  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [lanNote, setLanNote] = useState<string | null>(null);
-  const [lanError, setLanError] = useState<string | null>(null);
-  const lan = info.lan;
+  const [copied, setCopied] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const command = `tailscale serve --bg ${info.api.port}`;
 
-  /**
-   * Switch the network on or off for this host.
-   *
-   * It takes effect at the next restart on purpose: rebinding a live listener
-   * would drop every bench mid-request to save one person a restart.
-   */
-  async function setLan(enabled: boolean) {
-    setBusy(true); setLanError(null); setLanNote(null);
+  async function publish() {
+    setBusy(true); setProblem(null); setNote(null);
     try {
-      const r = await api<{ note: string; appliesAtRestart: boolean }>('/system/lan', {
-        method: 'PUT', body: JSON.stringify({ enabled }),
-      });
-      setLanNote(r.note);
+      const r = await api<{ url: string | null }>('/system/tailscale/publish', { method: 'POST' });
+      setNote(r.url ? `Published. Other devices on your tailnet can open ${r.url}` : 'Published over Tailscale.');
       onChanged();
-    } catch (e) { setLanError(errorText(e)); }
+    } catch (e) { setProblem(errorText(e)); }
     finally { setBusy(false); }
   }
 
-  const command = `tailscale serve --bg ${info.api.port}`;
   async function copyCommand() {
     try {
       await navigator.clipboard.writeText(command);
@@ -3266,108 +3465,68 @@ function RemoteAccessCard({ info, canEdit, onChanged }: {
 
   return (
     <div className="card">
-      <div className="section-head"><h3>Access from other devices</h3></div>
+      <div className="section-head"><h3>Tailscale</h3></div>
+      <p className="hint" style={{ marginTop: 0 }}>
+        Reaches this laboratory from named devices only — a laptop at home, a phone on the ward — with no port open to
+        the wider network and no firewall rule to write.
+      </p>
 
-      {!reach ? (
-        <p className="muted">This host has not reported its reachability.</p>
-      ) : reach.reachable ? (
-        <>
-          <Notice kind="success" silent>
-            {reach.route === 'tailscale'
-              ? 'The laboratory is published over Tailscale. Any device signed in to the same tailnet can open it — nothing is exposed to the wider network.'
-              : 'The laboratory is open to every device on this network.'}
-          </Notice>
-          {reach.url && (
-            <p className="bk-folder-path">
-              <code><PathText value={reach.url} /></code>
-              <span className="chip">Open this from other devices</span>
-            </p>
-          )}
-          {reach.advice && <p className="hint">{reach.advice}</p>}
-        </>
-      ) : (
-        <>
-          <Notice kind="warn" silent>Only this computer can open the laboratory.</Notice>
-          <p className="hint">{reach.advice}</p>
-          {ts?.installed && ts.running && (
-            <div className="bk-folder-path">
-              <code>{command}</code>
-              <button type="button" className="tiny secondary" onClick={copyCommand}>
-                {copied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          )}
-        </>
-      )}
+      <div className="cx-rows">
+        <Row label="On this machine">
+          {!ts?.installed ? <span className="bad">Not installed</span>
+            : !ts.running ? <span className="bad">{ts.error ?? 'Installed, not running'}</span>
+            : <>Signed in{ts.dnsName ? <> as <code>{ts.dnsName}</code></> : null}</>}
+        </Row>
+        <Row label="Publishing">
+          {ts?.serving
+            ? <span className="ok">Yes — this laboratory is served on the tailnet</span>
+            : <span className="bad">Not yet</span>}
+        </Row>
+        {ts?.ip && <Row label="Tailnet address"><code>{`http://${ts.ip}:${info.api.port}/`}</code></Row>}
+        {ts?.serving && ts.dnsName && <Row label="Published at"><code>{`https://${ts.dnsName}/`}</code></Row>}
+      </div>
 
-      {/* Whether this network may reach the laboratory at all. This used to be
-          an environment variable, which meant it did not survive a restart: the
-          host came back on loopback, a Tailscale route kept working because it
-          proxies to loopback, and the plain network address simply stopped. */}
-      {lan && (
-        <div className="sp-lan">
-          <div className="sp-lan-head">
-            <strong>Other devices on this network</strong>
-            {lan.lockedToEnvironment ? (
-              <span className="chip">Set in this host&rsquo;s environment</span>
-            ) : (
-              <div className="tabs inline">
-                <button type="button" disabled={!canEdit || busy} className={lan.choice === true ? 'active' : ''}
-                  onClick={() => void setLan(true)}>Allowed</button>
-                <button type="button" disabled={!canEdit || busy} className={lan.choice !== true ? 'active' : ''}
-                  onClick={() => void setLan(false)}>This computer only</button>
-              </div>
-            )}
-          </div>
-          <p className="hint">
-            {lan.exposed
-              ? 'The host is listening on every interface, so any device on this network can open it.'
-              : 'The host is listening on this computer only. A device on the network gets no answer at all — '
-                + 'which is why a laboratory published over Tailscale keeps working while its plain network '
-                + 'address stops: Tailscale reaches the host over loopback, and the network does not.'}
-            {lan.choice === true && !lan.exposed && ' It is switched on and takes effect when the host is next restarted.'}
-            {lan.choice === false && lan.exposed && ' It is switched off and takes effect when the host is next restarted.'}
-          </p>
-          {lan.portMoved && (
-            <Notice kind="warn" silent>
-              This host is on port <code>{info.api.port}</code>, not the <code>{lan.configuredPort}</code> it was
-              configured for — that port was already in use when it started. Devices set up with the old address
-              will not reach it.
-            </Notice>
-          )}
-          {lanNote && <Notice kind="success">{lanNote}</Notice>}
-          {lanError && <Notice kind="error">{lanError}</Notice>}
+      {ts?.installed && ts.running && !ts.serving && (
+        <div className="cx-actions">
+          <button type="button" disabled={!canEdit || busy} onClick={() => void publish()}>
+            {busy ? 'Publishing…' : 'Publish over Tailscale'}
+          </button>
+          <span className="hint">Runs <code>{command}</code> on the host.</span>
+          <button type="button" className="tiny secondary" onClick={copyCommand}>{copied ? 'Copied' : 'Copy command'}</button>
         </div>
       )}
+      {!ts?.installed && (
+        <p className="hint">Install Tailscale on this machine and on the devices that need access, then sign both in to the same tailnet.</p>
+      )}
+      {ts?.installed && !ts.running && (
+        <p className="hint">Sign Tailscale in on this computer, then come back and publish.</p>
+      )}
+      {note && <Notice kind="success">{note}</Notice>}
+      {problem && <Notice kind="error">{problem}</Notice>}
+    </div>
+  );
+}
 
-      <table className="table" style={{ maxWidth: 640, marginTop: 12 }}><tbody>
-        <tr><td>Listening on</td><td><code>{info.api.host}</code>{info.api.host === '127.0.0.1' && <span className="hint"> — this computer only</span>}</td></tr>
-        <tr><td>Port</td><td><code>{info.api.port}</code></td></tr>
-        <tr>
-          <td>Tailscale</td>
-          <td>
-            {!ts?.installed ? <span className="muted">Not installed</span>
-              : !ts.running ? <span className="bad">{ts.error ?? 'Installed, not running'}</span>
-              : <>Signed in{ts.dnsName ? <> as <code>{ts.dnsName}</code></> : null}{ts.serving ? ' · publishing this laboratory' : ' · not publishing this laboratory yet'}</>}
-          </td>
-        </tr>
-        {(info.hostAddresses ?? []).length > 0 && (
-          <tr>
-            <td>Addresses</td>
-            <td>
-              {(info.hostAddresses ?? []).map(a => (
-                <div key={a.url}>
-                  <code>{a.url}</code>{' '}
-                  <span className={a.reachable ? 'hint' : 'bad'}>
-                    {a.label}{a.reachable ? '' : ' — not answering, the host is on this computer only'}
-                  </span>
-                </div>
-              ))}
-            </td>
-          </tr>
-        )}
-        {info.api.publicUrl && <tr><td>Public URL (remote)</td><td><code>{info.api.publicUrl}</code></td></tr>}
-      </tbody></table>
+/** The one question the screen exists to answer, before any of the detail. */
+function ReachCard({ info }: { info: SystemConnectivity }) {
+  const reach = info.reach;
+  if (!reach) return <div className="card"><p className="muted">This host has not reported its reachability.</p></div>;
+  return (
+    <div className="card">
+      {reach.reachable
+        ? <Notice kind="success" silent>
+            {reach.route === 'tailscale'
+              ? 'Published over Tailscale. Any device signed in to the same tailnet can open it — nothing is exposed to the wider network.'
+              : 'Open to every device on this network.'}
+          </Notice>
+        : <Notice kind="warn" silent>Only this computer can open the laboratory.</Notice>}
+      {reach.url && (
+        <p className="bk-folder-path">
+          <code><PathText value={reach.url} /></code>
+          <span className="chip">Open this from other devices</span>
+        </p>
+      )}
+      {reach.advice && <p className="hint">{reach.advice}</p>}
     </div>
   );
 }
@@ -3381,6 +3540,7 @@ export function ConnectivityMode() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [section, setSection] = useState<'host' | 'tailscale' | 'staff' | 'devices' | 'advanced'>('host');
 
   const load = () => {
     api<SystemConnectivity>('/system/connectivity').then(setInfo).catch(e => setError(errorText(e)));
@@ -3417,47 +3577,74 @@ export function ConnectivityMode() {
     }
   }
 
-  if (!info) return <div className="card"><h3>Connectivity &amp; Mode</h3>{error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}</div>;
+  if (!info) {
+    return <div className="card"><h3>Connectivity</h3>{error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}</div>;
+  }
+
+  // Grouped rather than stacked: five cards in a column is a page nobody reads
+  // to the bottom, and the host's own settings have nothing to do with a staff
+  // member's remote account beyond both being "networking".
+  const SECTIONS = [
+    { key: 'host', label: 'This host' },
+    { key: 'tailscale', label: 'Tailscale' },
+    { key: 'staff', label: 'Remote staff' },
+    { key: 'devices', label: 'Devices' },
+    { key: 'advanced', label: 'Mode & sync' },
+  ] as const;
 
   return <div>
-    <div className="card">
-      <h3>Deployment mode</h3>
-      <div className="tabs" style={{ marginTop: 8 }}>
-        <button disabled={!canEdit || busy} className={info.mode === 'local' ? 'active' : ''} onClick={() => setMode('local')}>Local Mode</button>
-        <button disabled={!canEdit || busy} className={info.mode === 'hybrid' ? 'active' : ''} onClick={() => setMode('hybrid')}>Hybrid Mode</button>
+    <ReachCard info={info} />
+
+    <div className="cx-sub">
+      {SECTIONS.map(s => (
+        <button key={s.key} type="button" className={section === s.key ? 'is-on' : ''}
+          onClick={() => setSection(s.key)}>{s.label}</button>
+      ))}
+    </div>
+
+    {section === 'host' && <HostCard info={info} canEdit={canEdit} onChanged={load} />}
+    {section === 'tailscale' && <TailscaleCard info={info} canEdit={canEdit} onChanged={load} />}
+    {section === 'staff' && <RemoteStaffAccess />}
+    {section === 'devices' && <Devices />}
+
+    {section === 'advanced' && <>
+      <div className="card">
+        <div className="section-head"><h3>Deployment mode</h3></div>
+        <div className="ap-choices">
+          <button type="button" disabled={!canEdit || busy} className={`ap-choice${info.mode === 'local' ? ' is-on' : ''}`}
+            onClick={() => setMode('local')}>Local — single PC, fully offline</button>
+          <button type="button" disabled={!canEdit || busy} className={`ap-choice${info.mode === 'hybrid' ? ' is-on' : ''}`}
+            onClick={() => setMode('hybrid')}>Hybrid — benches on the network</button>
+        </div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          Currently <strong>{info.mode === 'hybrid' ? 'Hybrid' : 'Local'}</strong>{' '}
+          ({info.modeSource === 'override' ? 'set here' : `default from this host's environment (${info.envDefaultMode})`}).
+          Neither mode affects instruments, monitoring, printers or workflows — those always run.
+        </p>
+        {message && <Notice kind="success">{message}</Notice>}
+        {error && <Notice kind="error">{error}</Notice>}
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>
-        Current: <strong>{info.mode === 'hybrid' ? 'Hybrid' : 'Local'}</strong>{' '}
-        ({info.modeSource === 'override' ? 'set here' : `default from environment (${info.envDefaultMode})`}).
-        {' '}<em>Local</em> = single-PC offline. <em>Hybrid</em> = LAN clients now, secure remote access later.
-      </p>
-      {message && <Notice kind="success">{message}</Notice>}
-      {error && <Notice kind="error">{error}</Notice>}
-    </div>
 
-    <AppearanceCard canEdit={canEdit} />
-
-    <RemoteAccessCard info={info} canEdit={canEdit} onChanged={load} />
-
-    <div className="card">
-      <h3>Cloud synchronization</h3>
-      <p className="hint">
-        Status: <strong>{sync ? (sync.enabled ? sync.state : 'Planned (not yet available)') : (info.sync.status === 'planned' ? 'Planned (not yet available)' : info.sync.status)}</strong>.
-        The architecture is prepared for a future cloud database and web frontend, but no synchronization runs today.
-        The active data store is <code>{info.database.driver}</code> on this host.
-      </p>
-      {sync && <table className="table" style={{ maxWidth: 640 }}><tbody>
-        <tr><td>This host node id</td><td><code>{sync.nodeId ?? '—'}</code></td></tr>
-        <tr><td>Cloud endpoint configured</td><td>{sync.cloudConfigured ? 'Yes' : 'No'}</td></tr>
-        <tr><td>Pending changes (outbox)</td><td>{sync.pendingOutbox}</td></tr>
-        <tr><td>Last synchronized</td><td>{sync.lastSyncAt ?? 'Never'}</td></tr>
-      </tbody></table>}
-      {sync?.enabled && sync?.cloudConfigured && <div style={{ marginTop: 12 }}>
-        <button className="primary" disabled={!canEdit || busy} onClick={() => void forceResync()}>
-          {busy ? 'Re-syncing…' : 'Force full re-sync to cloud'}
-        </button>
-      </div>}
-    </div>
+      <div className="card">
+        <div className="section-head"><h3>Cloud synchronization</h3></div>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Status: <strong>{sync ? (sync.enabled ? sync.state : 'Planned (not yet available)') : (info.sync.status === 'planned' ? 'Planned (not yet available)' : info.sync.status)}</strong>.
+          The architecture is prepared for a future cloud database, but no synchronization runs today.
+          The active data store is <code>{info.database.driver}</code> on this host.
+        </p>
+        {sync && <div className="cx-rows">
+          <Row label="This host node id"><code>{sync.nodeId ?? '—'}</code></Row>
+          <Row label="Cloud endpoint">{sync.cloudConfigured ? 'Configured' : 'Not configured'}</Row>
+          <Row label="Pending changes">{sync.pendingOutbox}</Row>
+          <Row label="Last synchronized">{sync.lastSyncAt ?? 'Never'}</Row>
+        </div>}
+        {sync?.enabled && sync?.cloudConfigured && <div className="cx-actions">
+          <button className="primary" disabled={!canEdit || busy} onClick={() => void forceResync()}>
+            {busy ? 'Re-syncing…' : 'Force full re-sync to cloud'}
+          </button>
+        </div>}
+      </div>
+    </>}
   </div>;
 }
 

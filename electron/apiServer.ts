@@ -3,7 +3,7 @@ import { createApiServer } from '../server/index.js';
 import { getDb } from '../server/db/database.js';
 import { startBackgroundServices } from '../server/services/backgroundJobs.js';
 import { config } from '../server/config/index.js';
-import { resolveBindHost, recordBinding, hostIsLan } from '../server/services/hostBinding.js';
+import { resolveBindHost, resolvePort, recordBinding, hostIsLan } from '../server/services/hostBinding.js';
 
 export type ApiState = { host: string; port: number; baseUrl: string; reused: boolean };
 
@@ -61,7 +61,7 @@ export function startLocalApi(): Promise<ApiState> {
   }
 
   console.log('[boot] startLocalApi called');
-  const requestedPort = config.api.port;
+  const requestedPort = resolvePort(getDb);
   // The bind host may be 0.0.0.0 (or ::) to expose the API to the LAN, but that
   // is NOT a connectable address — the local Electron window and preload must
   // reach the API over loopback. The API listening on 0.0.0.0 also answers on
@@ -86,7 +86,7 @@ export function startLocalApi(): Promise<ApiState> {
         // What was really bound, which is not always what was asked for: the
         // port walks on when its own is taken, and telling somebody to type the
         // configured port into another machine would send them nowhere.
-        recordBinding(host, port);
+        recordBinding(host, port, requestedPort);
         resolved = { host: clientHost, port, baseUrl: `http://${clientHost}:${port}/api`, reused: false };
         process.env.SECH_LIMS_API_URL = resolved.baseUrl;
         process.env.SECH_LIMS_API_PORT = String(port);
@@ -105,7 +105,7 @@ export function startLocalApi(): Promise<ApiState> {
         if (code === 'EADDRINUSE') {
           const isSechLims = await pingSechLimsHealth(clientHost, port);
           if (isSechLims) {
-            recordBinding(host, port);
+            recordBinding(host, port, requestedPort);
             resolved = { host: clientHost, port, baseUrl: `http://${clientHost}:${port}/api`, reused: true };
             process.env.SECH_LIMS_API_URL = resolved.baseUrl;
             process.env.SECH_LIMS_API_PORT = String(port);

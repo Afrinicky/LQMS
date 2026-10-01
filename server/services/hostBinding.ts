@@ -31,10 +31,18 @@ type Db = { prepare: (sql: string) => { get: (...args: unknown[]) => unknown; ru
 
 /** The key the laboratory's choice is stored under. */
 export const LAN_SETTING_KEY = 'lanExposed';
+/** The port the laboratory has chosen for itself, if it has chosen one. */
+export const PORT_SETTING_KEY = 'apiPort';
 
 /** Did somebody set the bind address in the environment deliberately? */
 export function hostSetInEnvironment(): boolean {
   const raw = process.env.SECH_LIMS_API_HOST;
+  return typeof raw === 'string' && raw.trim() !== '';
+}
+
+/** And the port? Same rule: a deployment that says so means it. */
+export function portSetInEnvironment(): boolean {
+  const raw = process.env.API_PORT;
   return typeof raw === 'string' && raw.trim() !== '';
 }
 
@@ -88,14 +96,58 @@ export function resolveBindHost(getDb?: () => Db): string {
   }
 }
 
+/**
+ * The port the laboratory asked for.
+ *
+ * Which port the host answers on was reachable only by editing an environment
+ * variable on the machine — which is the same problem the bind address had, and
+ * it matters more: a laboratory that has to move off 4317 because something
+ * else took it has no way to say so, and every device set up against the old
+ * number quietly stops.
+ */
+export function storedPort(db: Db): number | null {
+  try {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(PORT_SETTING_KEY) as
+      { value?: string } | undefined;
+    const value = Number(row?.value);
+    return Number.isInteger(value) && value >= 1024 && value <= 65535 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredPort(db: Db, port: number): void {
+  db.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`)
+    .run(PORT_SETTING_KEY, String(port));
+}
+
+/** The port to listen on, deciding between the environment and the choice. */
+export function resolvePort(getDb?: () => Db): number {
+  if (portSetInEnvironment() || !getDb) return config.api.port;
+  try {
+    return storedPort(getDb()) ?? config.api.port;
+  } catch {
+    return config.api.port;
+  }
+}
+
 /* ----------------------------------------------------------------------------
    What was actually bound
    ------------------------------------------------------------------------- */
-let bound: { host: string; port: number } | null = null;
+let bound: { host: string; port: number; asked: number } | null = null;
 
-/** Called once the listener is up, with what it really got. */
-export function recordBinding(host: string, port: number): void {
-  bound = { host, port };
+/**
+ * Called once the listener is up, with what it really got — and what it had
+ * asked for, which is not the same thing and cannot be recomputed later.
+ *
+ * Recomputing it was a real bug: choosing a new port from the settings screen
+ * made the host compare today's binding against tomorrow's choice and announce
+ * that the port "was already in use when it started". It had not been. The only
+ * honest source for what was asked is the moment it was asked.
+ */
+export function recordBinding(host: string, port: number, asked?: number): void {
+  bound = { host, port, asked: asked ?? port };
 }
 
 export function boundHost(): string { return bound?.host ?? config.api.host; }
@@ -104,7 +156,16 @@ export function boundPort(): number { return bound?.port ?? config.api.port; }
 /** Can anything other than this machine reach the API at all? */
 export function boundToLan(): boolean { return hostIsLan(boundHost()); }
 
-/** True when the host ended up somewhere other than the port it was asked for. */
+/**
+ * True when the host ended up somewhere other than the port it was asked for.
+ *
+ * Asked for, not configured: a laboratory that has chosen its own port is not
+ * surprised to be on it, and warning about that would be noise. The warning is
+ * for the host whose port was taken and walked on to the next one.
+ */
 export function portMovedFromConfigured(): boolean {
-  return bound !== null && bound.port !== config.api.port;
+  return bound !== null && bound.port !== bound.asked;
 }
+
+/** The port this host asked for when it started. */
+export function askedPort(): number { return bound?.asked ?? config.api.port; }

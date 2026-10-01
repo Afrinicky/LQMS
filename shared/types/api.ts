@@ -37,6 +37,15 @@ export type SystemConnectivity = {
   lanUrls: string[];
   /** Every address this machine has, and whether the host answers on it. */
   hostAddresses?: Array<{ label: string; url: string; reachable: boolean }>;
+  /** The port as a thing the laboratory owns, not only the machine it runs on. */
+  portSetting?: {
+    /** What it asked for when it started. */
+    asked: number;
+    /** What it will ask for next time, once a new choice is saved. */
+    next: number;
+    bound: number; chosen: number | null;
+    lockedToEnvironment: boolean; envDefault: number;
+  };
   /** Whether anybody other than this computer can open the laboratory. */
   reach: {
     reachable: boolean;
