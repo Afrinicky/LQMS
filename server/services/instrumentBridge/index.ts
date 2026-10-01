@@ -37,16 +37,125 @@
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {
-  framerFor, parseFor, splitTransmissions, type Framer, type AnalyserMessage,
+  detectProtocol, effectiveProtocol, framerFor, parseFor, splitTransmissions,
+  type Framer, type AnalyserMessage,
 } from './protocols.js';
 import {
-  LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, linkIsOurs, looksLikeControl, mapAnalyte, modeIsPassive,
+  LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, classifyMessage, linkIsOurs, mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
 import {
-  LHIMS_MAX_ATTEMPTS, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
+  LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
+
+/* ============================================================================
+   Where the client's log actually is
+   ----------------------------------------------------------------------------
+   Somebody setting a link up types where the LHIMS client lives — `C:\Sysmex`.
+   That is a folder, and it is the honest answer to "where is the client": the
+   log is the file inside it. Refusing it, or worse, accepting it and then
+   silently following a folder as though it were a file, costs an afternoon and
+   explains nothing. A folder is read as "the log in here"; a file is read as
+   itself.
+   ========================================================================= */
+
+/** Names a client's append log goes by, best first. */
+const LOG_NAMES = [LHIMS_TAP_FILENAME, 'LHIMSDataOutput.txt', 'DataInput.txt', 'data.txt'];
+
+export interface TapTarget {
+  /** The file to follow, once a folder has been resolved to what is in it. */
+  file: string | null;
+  /** What was decided, in words, for the screen and the link's state. */
+  note: string;
+  /** True when the path given was a folder and a file inside it was chosen. */
+  resolvedFromFolder: boolean;
+}
+
+export function resolveTapTarget(target?: string | null): TapTarget {
+  const given = String(target ?? '').trim();
+  if (!given) return { file: null, note: `No path to the client's ${LHIMS_TAP_FILENAME} is set.`, resolvedFromFolder: false };
+
+  let stat: fs.Stats;
+  try { stat = fs.statSync(given); }
+  catch { return { file: null, note: `${given} cannot be reached from this host.`, resolvedFromFolder: false }; }
+
+  if (stat.isFile()) return { file: given, note: `Following ${given}.`, resolvedFromFolder: false };
+  if (!stat.isDirectory()) return { file: null, note: `${given} is not a file this host can read.`, resolvedFromFolder: false };
+
+  let names: string[] = [];
+  try { names = fs.readdirSync(given); } catch {
+    return { file: null, note: `${given} is a folder this host cannot list.`, resolvedFromFolder: true };
+  }
+
+  // The client's own log, by name, whatever case the file system uses.
+  for (const wanted of LOG_NAMES) {
+    const found = names.find(n => n.toLowerCase() === wanted.toLowerCase());
+    if (found) {
+      return {
+        file: path.join(given, found),
+        note: `${given} is a folder, so its ${found} is being followed.`,
+        resolvedFromFolder: true,
+      };
+    }
+  }
+
+  // Nothing named like a client log. The most recently written text file in the
+  // folder is the next best answer, and saying which one was chosen matters
+  // more than choosing it.
+  const candidates = names
+    .filter(n => /\.(txt|log|dat)$/i.test(n))
+    .map(n => {
+      const full = path.join(given, n);
+      try { const st = fs.statSync(full); return st.isFile() ? { full, n, at: st.mtimeMs } : null; }
+      catch { return null; }
+    })
+    .filter(Boolean) as Array<{ full: string; n: string; at: number }>;
+  candidates.sort((a, b) => b.at - a.at);
+
+  if (candidates.length) {
+    return {
+      file: candidates[0].full,
+      note: `${given} is a folder with no ${LHIMS_TAP_FILENAME} in it, so its most recent log, ${candidates[0].n}, is being followed.`,
+      resolvedFromFolder: true,
+    };
+  }
+
+  return {
+    file: null,
+    note: `${given} is a folder, and there is no ${LHIMS_TAP_FILENAME} in it. Switch WRITE_TO_FILE on in the client, or point this link straight at the file it writes.`,
+    resolvedFromFolder: true,
+  };
+}
+
+/* ============================================================================
+   What the bridge has just done
+   ----------------------------------------------------------------------------
+   A transmission is a conversation, and until now the only trace of one was a
+   row appearing in a table some seconds later. The LHIMS client puts the
+   conversation on the screen as it happens — connected, message received,
+   message sent, result transmitted — and a laboratory watching a sample run
+   can see whether it worked without waiting or guessing.
+
+   This is the same thing: a ring of the last few hundred events, in memory,
+   that the screen reads from a cursor. In memory on purpose — it is a window
+   onto what is happening now, not a record. The record is `instrument_messages`
+   and it is written first, before any of this.
+   ========================================================================= */
+export type BridgeEventLevel = 'info' | 'in' | 'out' | 'ok' | 'warn' | 'error';
+
+export interface BridgeEvent {
+  id: number;
+  at: string;
+  linkId: number;
+  level: BridgeEventLevel;
+  text: string;
+  /** The transmission itself, where there is one, trimmed for a screen. */
+  detail?: string | null;
+}
+
+const EVENT_RING = 400;
 
 type DB = any;
 type DbGetter = () => DB;
@@ -81,6 +190,7 @@ function json<T>(value: unknown, fallback: T): T {
 class Link {
   readonly id: number;
   private getDb: DbGetter;
+  private emit: (level: BridgeEventLevel, text: string, detail?: string | null) => void;
   private row: LinkRow;
   private server: net.Server | null = null;
   private socket: net.Socket | null = null;
@@ -101,18 +211,42 @@ class Link {
    */
   private opened = false;
 
-  constructor(getDb: DbGetter, row: LinkRow) {
+  /** The file actually being followed, once a folder has been resolved. */
+  private tapFile: string | null = null;
+  /** The last state written, so the live log carries changes rather than noise. */
+  private lastState = '';
+  /** How many transmissions this link has taken in since it started. */
+  private ingested = 0;
+
+  constructor(getDb: DbGetter, row: LinkRow, emit: (linkId: number, level: BridgeEventLevel, text: string, detail?: string | null) => void) {
     this.getDb = getDb;
     this.row = row;
     this.id = row.id;
+    this.emit = (level, text, detail) => emit(row.id, level, text, detail);
   }
 
   private setState(state: string, detail?: string | null, error?: string | null) {
+    const signature = `${state}|${detail ?? ''}`;
+    if (signature !== this.lastState) {
+      this.lastState = signature;
+      this.emit(state === 'error' ? 'error' : state === 'blocked' ? 'warn' : 'info', detail || state);
+    }
     try {
       this.getDb().prepare(`UPDATE instrument_links SET state = ?, state_detail = ?,
           last_error = COALESCE(?, last_error), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(state, detail ?? null, error ?? null, this.id);
     } catch { /* a state note must never take the link down */ }
+  }
+
+  /** What this link is set to, for the screen that shows it beside the log. */
+  snapshot(): Record<string, unknown> {
+    return {
+      id: this.id, name: this.row.name, mode: this.row.mode, role: this.row.role,
+      protocol: this.row.protocol, listenHost: this.row.listen_host, listenPort: this.row.listen_port,
+      remoteHost: this.row.remote_host, remotePort: this.row.remote_port,
+      watchPath: this.row.watch_path, tapPath: this.row.tap_path,
+      followingFile: this.tapFile, offset: this.tapOffset,
+    };
   }
 
   start(): void {
@@ -246,34 +380,77 @@ class Link {
    * that loses a result.
    */
   private startTap(): void {
-    const file = this.row.tap_path?.trim();
-    if (!file) {
+    const given = this.row.tap_path?.trim();
+    if (!given) {
       this.setState('error', 'No path set to the LHIMS client\'s log file.', 'No path set');
       this.opened = false;
       return;
     }
+
+    // A folder is the answer most people give to "where is the client", so a
+    // folder is resolved to the log inside it rather than followed as though a
+    // directory had bytes to read. Following a folder is how a link reports
+    // "following, from byte 0" for ever while nothing arrives.
+    const target = resolveTapTarget(given);
+    this.tapFile = target.file;
+    if (!target.file) {
+      this.setState('error', target.note, target.note);
+      this.opened = false;
+      return;
+    }
+    if (target.resolvedFromFolder) this.emit('info', target.note);
 
     // Where to begin. Stored per link so a restart resumes rather than
     // re-reading a year of history, and the first start begins at the end
     // because the point is to follow what happens from now on.
     const stored = Number(this.row.tap_offset ?? 0);
     try {
-      const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+      const size = fs.existsSync(target.file) ? fs.statSync(target.file).size : 0;
       this.tapOffset = stored > 0 ? Math.min(stored, size) : (LHIMS_TAP_START_AT_END ? size : 0);
     } catch { this.tapOffset = 0; }
 
     const poll = () => {
       if (this.stopping) return;
-      try { this.readTap(file); }
-      catch (error) { this.setState('error', `Reading ${file}: ${(error as Error).message}`, (error as Error).message); }
+      try { this.readTap(); }
+      catch (error) { this.setState('error', `Reading ${this.tapFile}: ${(error as Error).message}`, (error as Error).message); }
     };
     this.tapTimer = setInterval(poll, LHIMS_TAP_POLL_MS);
     poll();
     this.setState('following',
-      `Following ${file} from byte ${this.tapOffset}. Read-only — the LHIMS client's own transmission is untouched.`);
+      `Following ${target.file} from byte ${this.tapOffset}. Read-only — the LHIMS client's own transmission is untouched.`);
   }
 
-  private readTap(file: string): void {
+  /**
+   * Begin again from the start of the log.
+   *
+   * Following a file starts at its end, because the point is to follow what
+   * happens from now on — but a laboratory that has just connected a link, or
+   * has just had one fixed, quite reasonably wants what the client already
+   * wrote. Nothing is duplicated by doing it: every transmission is fingerprinted
+   * as it is recorded, so a message that has been read once is recognised and
+   * skipped however many times the log is read again.
+   */
+  rewind(): { ok: boolean; read: number; note: string } {
+    if (this.row.mode !== 'lhims_tap') {
+      return { ok: false, read: 0, note: 'Only a link following a client\'s log can be read again from the beginning.' };
+    }
+    const target = resolveTapTarget(this.row.tap_path);
+    if (!target.file) return { ok: false, read: 0, note: target.note };
+    this.tapFile = target.file;
+    this.tapOffset = 0;
+    this.tapCarry = '';
+    try { this.getDb().prepare('UPDATE instrument_links SET tap_offset = 0 WHERE id = ?').run(this.id); } catch { /* best effort */ }
+    this.emit('info', `Reading ${target.file} again from the beginning. Anything already recorded is recognised and skipped.`);
+    const before = this.ingested;
+    try { this.readTap(); }
+    catch (error) { return { ok: false, read: 0, note: (error as Error).message }; }
+    const read = this.ingested - before;
+    return { ok: true, read, note: read ? `${read} message(s) read from the log.` : 'Nothing in the log that had not already been recorded.' };
+  }
+
+  private readTap(): void {
+    const file = this.tapFile;
+    if (!file) return;
     if (!fs.existsSync(file)) {
       this.setState('error', `${file} is not there. Check WRITE_TO_FILE is set to Yes in the LHIMS client, and that the share is reachable.`);
       return;
@@ -301,10 +478,19 @@ class Link {
     }
 
     // The client appends whole transmissions, each ending in its ASTM
-    // terminator record. Split on that, and hold anything after the last one in
-    // case we caught the file mid-append.
+    // terminator record — wrapped in the protocol's own framing, because what
+    // the client writes down is what it received off the wire. The splitter
+    // takes that framing off before looking for the terminator; without that,
+    // every transmission reads as unfinished and is held back for ever.
     const { complete, remainder } = splitTransmissions(this.tapCarry, this.row.protocol);
-    this.tapCarry = remainder.length > LINK_MAX_FRAME_BYTES ? '' : remainder;
+    if (remainder.length > LINK_MAX_FRAME_BYTES) {
+      // Held text this large is not one transmission. Say so rather than
+      // dropping it in silence, which is how this failed before.
+      this.emit('warn', `Held ${remainder.length} bytes from the log without finding the end of a transmission. Starting again from here — check the link's protocol matches what the client writes.`);
+      this.tapCarry = '';
+    } else {
+      this.tapCarry = remainder;
+    }
     for (const text of complete) {
       if (text.trim()) this.ingest(text, 'lhims-client-log');
     }
@@ -425,15 +611,11 @@ class Link {
         if (text.trim()) {
           // One file may hold several transmissions, exactly as the tap's log
           // does, so it is split the same way rather than parsed as one.
-          const { complete, remainder } = splitTransmissions(text, this.row.protocol);
+          // A file has ended: it will not grow, so an export whose last
+          // transmission carries no terminator is a whole one, not half of one.
+          const { complete } = splitTransmissions(text, this.row.protocol, { final: true });
           const chunks = complete.length ? complete : [text];
           for (const chunk of chunks) if (chunk.trim()) messages += this.ingest(chunk, `file:${name}`);
-          if (complete.length && remainder.trim()) {
-            // Something after the last terminator. Recorded rather than
-            // dropped: an analyser whose export is not framed as expected
-            // should leave evidence of it.
-            messages += this.ingest(remainder, `file:${name}`);
-          }
         } else {
           outcome = 'empty';
           note = 'The file held nothing.';
@@ -514,13 +696,22 @@ class Link {
       return stamp(read ? `${read} new file(s) read from the folder.` : 'Nothing new in the folder.', read);
     }
     if (this.row.mode === 'lhims_tap') {
-      const file = this.row.tap_path?.trim();
-      if (!file) return { ok: false, read: 0, note: 'No path is set to the LHIMS client\'s log file.' };
+      if (!this.tapFile) {
+        const target = resolveTapTarget(this.row.tap_path);
+        if (!target.file) return { ok: false, read: 0, note: target.note };
+        this.tapFile = target.file;
+      }
       const before = this.tapOffset;
-      try { this.readTap(file); }
+      const read = this.ingested;
+      try { this.readTap(); }
       catch (error) { return { ok: false, read: 0, note: (error as Error).message }; }
       const gained = this.tapOffset - before;
-      return stamp(gained > 0 ? `Read ${gained} new byte(s) from the LHIMS client's log.` : 'Nothing new in the log.', gained > 0 ? 1 : 0);
+      const messages = this.ingested - read;
+      return stamp(
+        messages > 0 ? `${messages} message(s) read from the client's log.`
+          : gained > 0 ? `Read ${gained} new byte(s) from the client's log; no complete transmission in them yet.`
+          : 'Nothing new in the log.',
+        messages);
     }
     if (this.row.mode === 'client') {
       // Dialling out IS the fetch, so the honest answer is whether the
@@ -539,6 +730,7 @@ class Link {
     const framer: Framer = framerFor(this.row.protocol, LINK_MAX_FRAME_BYTES);
     socket.setKeepAlive(true, 30_000);
 
+    this.emit('info', `${peer} connected`);
     if (this.row.mode === 'server') {
       this.setState('connected', `${this.row.name} connected from ${peer}`);
       try {
@@ -553,6 +745,7 @@ class Link {
         // and every millisecond spent parsing before replying is a millisecond
         // it spends waiting.
         for (const reply of replies) { if (!socket.destroyed) socket.write(reply); }
+        if (replies.length) this.emit('out', `${replies.length} acknowledgement(s) sent back to ${peer}`);
         for (const message of messages) this.ingest(message, peer);
       } catch (error) {
         this.setState('error', `Reading from ${peer}: ${(error as Error).message}`, (error as Error).message);
@@ -568,6 +761,7 @@ class Link {
         const remainder = framer.flush();
         if (remainder && remainder.trim()) this.ingest(remainder, peer);
       } catch { /* nothing more can be done for it */ }
+      this.emit('info', `${peer} disconnected`);
       if (this.row.mode === 'server' && !this.stopping) {
         this.setState('listening', `${peer} disconnected; still listening`);
       }
@@ -608,18 +802,45 @@ class Link {
    */
   private ingest(text: string, peer: string): number {
     const db = this.getDb();
+    this.ingested++;
+    this.emit('in', `New message received from ${peer}`, text.slice(0, 2_000));
+
+    // What the message actually is, rather than what the link was told it
+    // would be. A configured protocol is honoured; it is only when it yields
+    // nothing that the message is re-read as the shape it really has — which
+    // is the difference between an analyser nobody has set up correctly
+    // transmitting anyway, and a link that receives messages and understands
+    // none of them.
+    let protocol = effectiveProtocol(this.row.protocol, text);
     let parsed: AnalyserMessage[] = [];
-    try { parsed = parseFor(this.row.protocol, text); }
+    try { parsed = parseFor(protocol, text); }
     catch (error) { this.setState('error', `Could not read a message from ${peer}: ${(error as Error).message}`); }
+
+    if (!parsed.some(m => m.results.length)) {
+      const detected = detectProtocol(text);
+      if (detected && detected !== protocol) {
+        try {
+          const retry = parseFor(detected, text);
+          if (retry.some(m => m.results.length)) {
+            this.emit('warn', `This link is set to ${protocol.toUpperCase()}, but the message is ${detected.toUpperCase()}. It has been read as ${detected.toUpperCase()}; set the link's protocol to match, or to "work it out".`);
+            parsed = retry;
+            protocol = detected;
+          }
+        } catch { /* the first reading stands */ }
+      }
+    }
 
     const linkMap = json<Record<string, string>>(this.row.analyte_map, {});
     const patterns = json<string[]>(this.row.control_patterns, []);
+    // Every control material this laboratory has registered, so a run named
+    // only by its own lot is recognised without anybody configuring a pattern.
+    const known = this.knownControlIds(db);
 
     // A transmission with nothing parseable in it is still recorded, so the
     // bench can look at what actually arrived.
     let recorded = 0;
     const toStore = parsed.length ? parsed : [{
-      sampleId: null, lotNumber: null, instrument: null, runAt: null, results: [], raw: text,
+      sampleId: null, lotNumber: null, instrument: null, runAt: null, results: [], controlHint: null, raw: text,
     } as AnalyserMessage];
 
     for (const message of toStore) {
@@ -631,19 +852,40 @@ class Link {
         flag: result.flag,
       }));
 
-      const isControl = looksLikeControl(message.sampleId, patterns)
-        || looksLikeControl(message.lotNumber, patterns);
-      const kind = message.results.length === 0 ? 'unknown' : isControl ? 'control' : 'patient';
+      const verdict = classifyMessage({
+        sampleId: message.sampleId,
+        lotNumber: message.lotNumber,
+        controlHint: message.controlHint,
+        knownControlIds: known,
+      }, patterns);
+      const kind = message.results.length === 0 ? 'unknown' : verdict.control ? 'control' : 'patient';
+
+      // The same transmission read twice is not two runs. A log followed from
+      // the beginning, a folder swept again, a client that re-wrote its file —
+      // all of them would otherwise put a point on a Levey-Jennings chart that
+      // never happened. Only file-borne messages are checked: over a socket,
+      // two identical transmissions are two genuine runs.
+      const fingerprint = this.fingerprint(message, text);
+      if (this.fromAFile() && fingerprint) {
+        try {
+          const seen = db.prepare('SELECT id FROM instrument_messages WHERE link_id = ? AND message_hash = ?')
+            .get(this.id, fingerprint) as any;
+          if (seen) {
+            this.emit('info', `Already recorded — ${message.sampleId ?? 'this transmission'} was read before, so it has not been stored again.`);
+            continue;
+          }
+        } catch { /* without the column, store it; a duplicate is visible, a lost result is not */ }
+      }
 
       let messageId = 0;
       try {
         const inserted = db.prepare(`INSERT INTO instrument_messages
             (link_id, peer, raw_message, sample_id, lot_number, instrument_name, instrument_run_at,
-             result_count, parsed_values, kind, forward_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+             result_count, parsed_values, kind, forward_status, message_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(this.id, peer, text.slice(0, 60_000), message.sampleId, message.lotNumber,
             message.instrument, message.runAt, values.length, JSON.stringify(values), kind,
-            this.row.forward_enabled ? 'pending' : 'not_required');
+            this.row.forward_enabled ? 'pending' : 'not_required', fingerprint);
         messageId = Number(inserted.lastInsertRowid);
 
         db.prepare(`UPDATE instrument_links SET last_message_at = CURRENT_TIMESTAMP,
@@ -652,13 +894,56 @@ class Link {
         // Losing the database is not a reason to drop the connection; the next
         // message may well land.
         this.setState('error', `Could not record a message: ${(error as Error).message}`);
+        this.emit('error', `Could not record the message: ${(error as Error).message}`);
         continue;
+      }
+
+      if (kind === 'unknown') {
+        this.emit('warn', `Nothing readable in this message — it was read as ${protocol.toUpperCase()} and no result came out of it. It is kept in full under Messages.`);
+      } else {
+        this.emit('ok',
+          `${kind === 'control' ? 'Control run' : 'Patient result'} ${message.sampleId ?? '(no sample id)'} — `
+          + `${values.length} parameter${values.length === 1 ? '' : 's'} read (${verdict.because})`);
       }
 
       if (kind === 'control') this.routeControl(db, messageId, message, values);
       recorded++;
     }
     return recorded;
+  }
+
+  /** Is this link reading something somebody else wrote down, rather than a socket? */
+  private fromAFile(): boolean {
+    return this.row.mode === 'lhims_tap' || this.row.mode === 'file_drop';
+  }
+
+  /**
+   * What makes this transmission itself.
+   *
+   * The analyser's own words for the run — which sample, from which machine, at
+   * which moment, with which values — rather than the raw bytes, so a client
+   * that re-wrote its log with the framing changed is still recognised as having
+   * said the same thing twice.
+   */
+  private fingerprint(message: AnalyserMessage, text: string): string {
+    const parts = message.results.length
+      ? [message.sampleId ?? '', message.lotNumber ?? '', message.instrument ?? '', message.runAt ?? '',
+         message.results.map(r => `${r.code}=${r.value}@${r.completedAt ?? ''}`).join(';')]
+      : [text.trim()];
+    return crypto.createHash('sha1').update(parts.join('|'), 'utf8').digest('hex');
+  }
+
+  /**
+   * The identifiers of every control material this laboratory has registered.
+   *
+   * Read fresh rather than cached: a lot added this morning should be
+   * recognised this morning, and the query is a handful of rows.
+   */
+  private knownControlIds(db: DB): string[] {
+    try {
+      const rows = db.prepare(`SELECT lot_number, material_code FROM iqc_materials WHERE is_active = 1`).all() as any[];
+      return rows.flatMap(r => [r.lot_number, r.material_code]).filter(Boolean).map(String);
+    } catch { return []; }
   }
 
   /**
@@ -700,8 +985,12 @@ class Link {
             : `Recognised as a control from "${message.sampleId ?? message.lotNumber ?? 'the sample identifier'}", but no active control material matched it. Match it by hand on the bench, or add its lot to the control.`);
       db.prepare('UPDATE instrument_messages SET iqc_feed_message_id = ? WHERE id = ?').run(Number(feed.lastInsertRowid), messageId);
       db.prepare('UPDATE instrument_links SET controls_matched = controls_matched + ? WHERE id = ?').run(material ? 1 : 0, this.id);
+      this.emit(material ? 'ok' : 'warn', material
+        ? `Waiting on the IQC bench as ${material.material_name ?? material.material_code ?? 'a registered control'} — nothing is accepted until somebody accepts it.`
+        : `No registered control material matched "${message.sampleId ?? message.lotNumber ?? 'this run'}". It is waiting on the IQC bench to be matched by hand.`);
     } catch (error) {
       this.setState('error', `Could not park a control run: ${(error as Error).message}`);
+      this.emit('error', `Could not park the control run: ${(error as Error).message}`);
     }
   }
 
@@ -731,8 +1020,46 @@ export class InstrumentBridge {
   private forwardTimer: NodeJS.Timeout | null = null;
   private fetchTimer: NodeJS.Timeout | null = null;
   private started = false;
+  /** The last few hundred things that happened, for the screen watching them. */
+  private ring: BridgeEvent[] = [];
+  private nextEventId = 1;
 
   constructor(getDb: DbGetter) { this.getDb = getDb; }
+
+  /** Write one line into the live log. Never throws; it is a window, not a record. */
+  private record(linkId: number, level: BridgeEventLevel, text: string, detail?: string | null): void {
+    this.ring.push({
+      id: this.nextEventId++,
+      at: new Date().toISOString(),
+      linkId, level, text,
+      detail: detail ? String(detail).slice(0, 4_000) : null,
+    });
+    if (this.ring.length > EVENT_RING) this.ring.splice(0, this.ring.length - EVENT_RING);
+  }
+
+  /**
+   * What has happened since the screen last looked.
+   *
+   * A cursor rather than a window of time, so a browser that was asleep for a
+   * minute catches up rather than missing the transmission it was waiting for.
+   */
+  events(linkId: number | null, after = 0): { events: BridgeEvent[]; cursor: number; configuration: Record<string, unknown> | null } {
+    const since = Number.isFinite(after) ? Number(after) : 0;
+    const events = this.ring.filter(e => e.id > since && (linkId == null || e.linkId === linkId));
+    const link = linkId == null ? null : this.links.get(linkId);
+    return {
+      events,
+      cursor: this.ring.length ? this.ring[this.ring.length - 1].id : since,
+      configuration: link ? link.snapshot() : null,
+    };
+  }
+
+  /** Read a followed log again from its beginning. */
+  rewind(linkId: number): { ok: boolean; read: number; note: string } {
+    const link = this.links.get(linkId);
+    if (!link) return { ok: false, read: 0, note: 'That link is not running. Start it first.' };
+    return link.rewind();
+  }
 
   /** Start every active link the laboratory has asked to run on its own. */
   start(): void {
@@ -774,9 +1101,13 @@ export class InstrumentBridge {
   private runDueFetches(): void {
     let rows: Array<{ id: number; fetch_interval_seconds: number | null; last_fetch_at: string | null }> = [];
     try {
+      // Following a client's log is allowed on an LHIMS-owned analyser — it is
+      // the one arrangement that touches nothing — so it must be allowed to be
+      // looked at too. Excluding it by role alone left the one link that most
+      // needs catching up as the only one that never was.
       rows = this.getDb().prepare(`SELECT id, fetch_interval_seconds, last_fetch_at FROM instrument_links
           WHERE is_active = 1 AND fetch_enabled = 1 AND mode IN ('file_drop', 'lhims_tap')
-            AND role != 'lhims_owned'`).all() as any[];
+            AND (role != 'lhims_owned' OR mode = 'lhims_tap')`).all() as any[];
     } catch { return; }
 
     const now = Date.now();
@@ -808,7 +1139,7 @@ export class InstrumentBridge {
       catch { return { ok: false, read: 0, note: 'That link could not be read.' }; }
       if (!row) return { ok: false, read: 0, note: 'That link no longer exists.' };
       if (!row.is_active) return { ok: false, read: 0, note: 'This link is switched off.' };
-      link = new Link(this.getDb, row);
+      link = new Link(this.getDb, row, (id, level, text, detail) => this.record(id, level, text, detail));
       this.links.set(linkId, link);
     }
     return link.fetchNow();
@@ -853,7 +1184,7 @@ export class InstrumentBridge {
   private startLink(row: LinkRow): void {
     const existing = this.links.get(row.id);
     if (existing) existing.stop();
-    const link = new Link(this.getDb, row);
+    const link = new Link(this.getDb, row, (id, level, text, detail) => this.record(id, level, text, detail));
     this.links.set(row.id, link);
     try { link.start(); }
     catch (error) {

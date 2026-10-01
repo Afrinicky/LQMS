@@ -32,11 +32,11 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable } from './routeHelpers.js';
-import { getBridge } from '../services/instrumentBridge/index.js';
-import { parseFor } from '../services/instrumentBridge/protocols.js';
+import { getBridge, resolveTapTarget } from '../services/instrumentBridge/index.js';
+import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, looksLikeControl, mapAnalyte, modeIsPassive, profileByKey,
+  DEFAULT_CONTROL_PATTERNS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
   linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
 import {
@@ -186,7 +186,7 @@ export function instrumentLinkRoutes() {
     if (v.mode === 'client' && (!v.remoteHost || !v.remotePort)) return 'A dialling link needs the analyser\'s address and port.';
     if (v.mode === 'file_drop' && !v.watchPath) return 'A watched link needs the folder the analyser writes into.';
     if (v.mode === 'lhims_tap' && !v.tapPath) {
-      return `Following the LHIMS client needs the path to its ${LHIMS_TAP_FILENAME}. Set WRITE_TO_FILE = Yes in the client first, then point this at the file it writes.`;
+      return `Following the LHIMS client needs the path to its ${LHIMS_TAP_FILENAME}, or to the folder holding it. Set WRITE_TO_FILE = Yes in the client first, then point this at the file it writes.`;
     }
 
     // Delivering to LHIMS needs somewhere to deliver to, and a way to name each
@@ -388,8 +388,13 @@ export function instrumentLinkRoutes() {
    */
   router.post('/fetch-all', requirePermission(MODULE, 'view'), (req, res) => {
     const db = getDb();
+    // A link following a client's log is included even when the analyser is
+    // LHIMS's: reading that file is the one thing that touches nothing, and it
+    // is the link most likely to need catching up after a host has been off.
+    // Anything that would BIND or DIAL an LHIMS-owned analyser is still skipped.
     const links = db.prepare(`SELECT id, name FROM instrument_links
-        WHERE is_active = 1 AND mode IN ('file_drop', 'lhims_tap') AND role != 'lhims_owned'
+        WHERE is_active = 1 AND mode IN ('file_drop', 'lhims_tap')
+          AND (role != 'lhims_owned' OR mode = 'lhims_tap')
         ORDER BY name`).all() as any[];
     const results = links.map(link => {
       // One link's folder being unreachable must not stop the rest being read.
@@ -498,12 +503,15 @@ export function instrumentLinkRoutes() {
           : 'No folder is set.',
         link.watch_path && fs_exists(link.watch_path) ? undefined : 'Point the link at the folder the analyser exports into.');
     } else {
-      add('address', 'The LHIMS log can be read', link.tap_path ? (fs_exists(link.tap_path) ? 'ok' : 'todo') : 'todo',
-        link.tap_path
-          ? (fs_exists(link.tap_path) ? `Following ${link.tap_path}.` : `${link.tap_path} cannot be reached from this host.`)
-          : `No path to ${LHIMS_TAP_FILENAME} is set.`,
-        link.tap_path && fs_exists(link.tap_path) ? undefined
-          : `Switch WRITE_TO_FILE on in the LHIMS client and point the link at its ${LHIMS_TAP_FILENAME}.`);
+      // A folder is the answer most people give to "where is the client", so a
+      // folder is resolved to the log inside it rather than reported as fine
+      // and then followed as though a directory had bytes in it. That was the
+      // silent failure: a readable path, a running link, and nothing to read.
+      const target = resolveTapTarget(link.tap_path);
+      add('address', 'The client\'s log can be read', target.file ? 'ok' : 'todo',
+        link.tap_path ? target.note : `No path to ${LHIMS_TAP_FILENAME} is set.`,
+        target.file ? undefined
+          : `Switch WRITE_TO_FILE on in the client and point the link at the ${LHIMS_TAP_FILENAME} it writes, or at the folder holding it.`);
     }
 
     /* 4 — has anything ever actually arrived? */
@@ -541,6 +549,26 @@ export function instrumentLinkRoutes() {
       add('mapping', 'Its parameters are recognised', 'warn',
         `${[...unmapped].slice(0, 12).join(', ')} came through under the analyser's own name and matched nothing.`,
         'Choose the right analyser under "Which analyser it is", or add these to the link\'s own parameter map.');
+    }
+
+    /* 5b — is the protocol the right one? A link reading messages it cannot
+       understand looks exactly like a link reading nothing. */
+    {
+      const sample = db.prepare(`SELECT raw_message, result_count FROM instrument_messages
+          WHERE link_id = ? ORDER BY id DESC LIMIT 5`).all(link.id) as any[];
+      if (sample.length) {
+        const barren = sample.filter(r => Number(r.result_count ?? 0) === 0);
+        const detected = detectProtocol(String(sample[0].raw_message ?? ''));
+        const configured = String(link.protocol ?? 'astm');
+        if (barren.length === sample.length && detected && detected !== configured && configured !== 'auto') {
+          add('protocol', 'It is being read as the right protocol', 'warn',
+            `This link is set to ${configured.toUpperCase()}, but what arrived looks like ${detected.toUpperCase()}, and no result came out of it.`,
+            `Set "What it speaks" to ${detected.toUpperCase()}, or to "work it out from what arrives".`);
+        } else if (configured === 'auto') {
+          add('protocol', 'It is being read as the right protocol', 'ok',
+            detected ? `Read as ${detected.toUpperCase()}, worked out from what the analyser actually sends.` : 'Worked out from each message as it arrives.');
+        }
+      }
     }
 
     /* 6 — are controls being told apart from patients? */
@@ -609,8 +637,19 @@ export function instrumentLinkRoutes() {
     const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
     if (!link) return res.status(404).json({ error: 'Link not found' });
 
-    if (link.mode === 'file_drop' || link.mode === 'lhims_tap') {
-      const target = link.mode === 'file_drop' ? link.watch_path : link.tap_path;
+    if (link.mode === 'lhims_tap') {
+      if (!link.tap_path) return res.json({ ok: false, note: 'No path is set on this link yet.' });
+      // Readable is not the same as followable: a folder is readable and has
+      // nothing to read. Settle which file this link is actually on.
+      const target = resolveTapTarget(link.tap_path);
+      if (!target.file) return res.json({ ok: false, note: target.note });
+      let size = 0;
+      try { size = fs.statSync(target.file).size; } catch { /* reported as unknown below */ }
+      return res.json({ ok: true, note: `${target.note} It holds ${size.toLocaleString()} byte(s) at the moment.` });
+    }
+
+    if (link.mode === 'file_drop') {
+      const target = link.watch_path;
       if (!target) return res.json({ ok: false, note: 'No path is set on this link yet.' });
       return res.json(fs_exists(target)
         ? { ok: true, note: `${target} is readable from this host.` }
@@ -665,6 +704,60 @@ export function instrumentLinkRoutes() {
       byKind: Object.fromEntries(byKind.map(r => [r.kind, Number(r.n)])),
       recent,
     });
+  });
+
+  /**
+   * The transmission as it happens.
+   *
+   * The LHIMS client puts the conversation on its own screen — connected,
+   * message received, message sent, results transmitted — and a laboratory
+   * running a sample can see whether it worked without waiting, refreshing or
+   * guessing. This is the same thing for SECHLIMS: every step the bridge takes
+   * with a message, in order, read from a cursor so a screen that was away for
+   * a minute catches up rather than missing the transmission it was waiting for.
+   *
+   * It is a window, not a record. The record is written first, in full, and is
+   * under Messages; this is what is happening right now.
+   */
+  router.get('/:id/events', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare(`SELECT id, name, mode, role, protocol, state, state_detail, listen_host, listen_port,
+          remote_host, remote_port, watch_path, tap_path, tap_offset, last_message_at, messages_received
+        FROM instrument_links WHERE id = ?`).get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+    const after = Number(req.query.after ?? 0);
+    const feed = bridge.events(Number(req.params.id), Number.isFinite(after) ? after : 0);
+    res.json({
+      link,
+      // Which file is actually being followed, which is not always the path
+      // that was typed — a folder resolves to the log inside it.
+      following: link.mode === 'lhims_tap' ? resolveTapTarget(link.tap_path) : null,
+      running: bridge.isRunning(link.id),
+      ...feed,
+    });
+  });
+
+  /**
+   * Read a followed log again, from its beginning.
+   *
+   * Following a file starts at its end, because the point is to follow what
+   * happens from now on. A laboratory that has just connected a link — or has
+   * just had one put right — quite reasonably wants what the client already
+   * wrote, and had no way to ask for it. Nothing is duplicated by asking:
+   * every transmission is fingerprinted as it is recorded, so one that has
+   * been read before is recognised and skipped.
+   */
+  router.post('/:id/rewind', numericOnly, requirePermission(MODULE, 'edit'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+    if (link.mode !== 'lhims_tap') {
+      return res.status(400).json({ error: 'Only a link following a client\'s log can be read again from the beginning.' });
+    }
+    if (!bridge.isRunning(link.id)) bridge.restart(link.id);
+    const outcome = bridge.rewind(link.id);
+    audit(req, { action: 'edit', entity: 'instrument_links', entityId: req.params.id, newValue: { rewound: true, read: outcome.read } });
+    res.json({ ...outcome, link: currentState(db, Number(req.params.id)) });
   });
 
   /**
@@ -729,22 +822,41 @@ export function instrumentLinkRoutes() {
     const linkMap = json<Record<string, string>>(link.analyte_map, {});
     const patterns = json<string[]>(link.control_patterns, []);
     const measureOverrides = json<Record<string, number>>(link.measure_map, {});
+    // Exactly what the bridge would do with it, including working out the
+    // protocol from the text when the link is set to. A screen that promises
+    // one thing and a bridge that does another is worse than no screen.
+    const protocol = effectiveProtocol(link.protocol, text);
     let parsed;
-    try { parsed = parseFor(link.protocol, text); }
-    catch (error) { return res.status(400).json({ error: `That could not be read as ${link.protocol}: ${(error as Error).message}` }); }
+    try { parsed = parseFor(protocol, text); }
+    catch (error) { return res.status(400).json({ error: `That could not be read as ${protocol}: ${(error as Error).message}` }); }
+
+    // The same control materials the bridge checks against, so a run named by
+    // its own lot is recognised here too.
+    const known = (() => {
+      try {
+        return (db.prepare('SELECT lot_number, material_code FROM iqc_materials WHERE is_active = 1').all() as any[])
+          .flatMap(r => [r.lot_number, r.material_code]).filter(Boolean).map(String);
+      } catch { return []; }
+    })();
 
     const carriesToLhims = Boolean(link.forward_enabled) && link.forward_target !== 'tcp';
     const unmapped = new Set<string>();
 
     const messages = parsed.map(message => {
-      const kind = message.results.length === 0 ? 'unknown'
-        : (looksLikeControl(message.sampleId, patterns) || looksLikeControl(message.lotNumber, patterns)) ? 'control' : 'patient';
+      const verdict = classifyMessage({
+        sampleId: message.sampleId, lotNumber: message.lotNumber,
+        controlHint: message.controlHint, knownControlIds: known,
+      }, patterns);
+      const kind = message.results.length === 0 ? 'unknown' : verdict.control ? 'control' : 'patient';
       return {
         sampleId: message.sampleId,
         lotNumber: message.lotNumber,
         instrument: message.instrument,
         runAt: message.runAt,
         wouldBeTreatedAs: kind,
+        // Why, in the same words the live log uses, so somebody proving a link
+        // can see the reasoning rather than only the verdict.
+        because: verdict.because,
         // Only a patient result goes to LHIMS; a control belongs on the IQC
         // board and has no patient record to be filed under.
         wouldGoToLhims: carriesToLhims && kind === 'patient',
@@ -764,7 +876,15 @@ export function instrumentLinkRoutes() {
     });
 
     res.json({
-      protocol: link.protocol,
+      protocol,
+      // What the text itself looks like, which is how somebody finds out the
+      // link is set to the wrong protocol.
+      detectedProtocol: detectProtocol(text),
+      configuredProtocol: link.protocol,
+      // The transmission with its framing taken off, which is what the parser
+      // actually reads. Pasting a capture straight out of a client's log and
+      // seeing the records come out of it settles a great many arguments.
+      clean: cleanTransmission(text).slice(0, 8_000),
       carriesToLhims,
       lhimsMap: link.lhims_map_key ? (lhimsMapByKey(link.lhims_map_key)?.label ?? link.lhims_map_key) : null,
       // Named rather than counted: these are the parameters LHIMS would not

@@ -7102,6 +7102,108 @@ button.cell-mark:disabled { cursor: default; }
 .il-stream-time { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 11.5px; }
 .il-stream li.k-unknown { border-color: var(--warning-line); }
 
+/* ============================================================
+   The transmission, as it happens
+   ------------------------------------------------------------
+   Two columns: what this link is set to, in the analyser's own
+   terms, and the conversation itself. The log is monospaced and
+   colour-coded because it is read by scanning rather than by
+   reading, and a received message, a result read and a failure
+   must be tellable apart at a glance from across a bench.
+   ============================================================ */
+.il-live-body { display: grid; grid-template-columns: 268px minmax(0, 1fr); gap: 12px; margin-bottom: 12px; }
+
+.il-live-config {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel); padding: 12px 13px; min-width: 0;
+}
+.il-live-config h5 {
+  margin: 0 0 9px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+}
+.il-live-config h6 {
+  margin: 13px 0 6px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+}
+.il-live-config dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 10px; margin: 0; }
+.il-live-config dt { font-size: 11.5px; color: var(--muted); }
+.il-live-config dd { margin: 0; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.il-live-config dd { display: flex; align-items: center; gap: 6px; }
+
+.il-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+.il-live-dot.s-listening, .il-live-dot.s-connected, .il-live-dot.s-following { background: var(--success); }
+.il-live-dot.s-error { background: var(--danger); }
+.il-live-dot.s-blocked { background: var(--warning); }
+
+/* The source setup, kept as the plain text somebody would type. */
+.il-live-setup {
+  margin: 0; padding: 9px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--warning-line); background: var(--warning-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text);
+}
+.il-live-hint { margin: 9px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--muted); }
+.il-live-hint.is-note { color: var(--text); }
+.il-live-acts { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.il-live-acts button { width: 100%; justify-content: center; }
+
+.il-live-log {
+  display: flex; flex-direction: column; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden;
+}
+.il-live-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 11px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 11.5px;
+}
+.il-live-bar strong { font-size: 12px; }
+.il-live-bar > .muted { margin-right: auto; }
+.il-live-toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+.il-live-toggle input { margin: 0; }
+
+.il-live-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.il-live-pulse.is-live { background: var(--success); animation: il-live-beat 1.8s ease-in-out infinite; }
+@keyframes il-live-beat { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .il-live-pulse.is-live { animation: none; } }
+
+.il-live-lines {
+  flex: 1; min-height: 300px; max-height: 420px; overflow-y: auto; padding: 8px 4px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px;
+}
+.il-live-lines > .muted {
+  margin: 0; padding: 12px 12px 0; font-family: var(--font); font-size: 12px; line-height: 1.6;
+}
+.il-live-line {
+  display: flex; gap: 9px; padding: 3px 9px; border-left: 2px solid transparent; line-height: 1.6;
+}
+.il-live-time { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
+.il-live-tag {
+  flex: none; width: 58px; text-align: right; font-size: 10.5px;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
+}
+.il-live-text { min-width: 0; overflow-wrap: anywhere; }
+
+.il-live-line.l-in { border-left-color: var(--info); }
+.il-live-line.l-in .il-live-tag, .il-live-line.l-in .il-live-text { color: var(--info); }
+.il-live-line.l-out .il-live-tag { color: var(--muted); }
+.il-live-line.l-ok { border-left-color: var(--success); }
+.il-live-line.l-ok .il-live-tag, .il-live-line.l-ok .il-live-text { color: var(--success); }
+.il-live-line.l-warn { border-left-color: var(--warning); background: var(--warning-bg); }
+.il-live-line.l-warn .il-live-tag, .il-live-line.l-warn .il-live-text { color: var(--warning); }
+.il-live-line.l-error { border-left-color: var(--danger); background: var(--danger-bg); }
+.il-live-line.l-error .il-live-tag, .il-live-line.l-error .il-live-text { color: var(--danger); }
+
+/* The transmission itself, when somebody asks to see it. */
+.il-live-raw {
+  margin: 5px 0 3px; padding: 7px 9px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+  font-size: 10.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 180px; overflow-y: auto;
+}
+
+@media (max-width: 760px) {
+  .il-live-body { grid-template-columns: minmax(0, 1fr); }
+  .il-live-lines { min-height: 220px; max-height: 300px; }
+  .il-live-tag { display: none; }
+}
+
 /* The analyser, on the screen where a control is run. A quiet card with one
    blue thing on it — the button — rather than a tinted block competing with
    the readings underneath it. */

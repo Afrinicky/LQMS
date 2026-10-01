@@ -115,19 +115,25 @@ export function linkIsOurs(role?: string | null, mode?: string | null): boolean 
 /* ============================================================================
    What it says on the wire
    ========================================================================= */
-export const LINK_PROTOCOLS = ['astm', 'hl7', 'delimited'] as const;
+export const LINK_PROTOCOLS = ['astm', 'hl7', 'delimited', 'auto'] as const;
 export type LinkProtocol = (typeof LINK_PROTOCOLS)[number];
 
 export const LINK_PROTOCOL_LABELS: Record<LinkProtocol, string> = {
   astm: 'ASTM E1394 (most haematology and chemistry analysers)',
   hl7: 'HL7 v2 ORU^R01 over MLLP',
   delimited: 'Plain delimited text, one result per line',
+  auto: 'Work it out from what arrives',
 };
 
 export const LINK_PROTOCOL_HINTS: Record<LinkProtocol, string> = {
   astm: 'Framed records with ENQ/ACK handshaking and a checksum. Sysmex, Mindray BC-3600, ABX Pentra, BT-3000, Selectra and DIRUI all speak it.',
   hl7: 'Message framed between 0x0B and 0x1C 0x0D. Mindray BC-5800 and newer analysers use it.',
   delimited: 'A fallback for an analyser with a simple text output. The layout is mapped by hand.',
+  auto:
+    'For an analyser whose protocol nobody has written down. The first message is read for its shape — ASTM records, '
+    + 'HL7 segments or delimited lines — and read as whatever it actually is. Choosing the wrong protocol by hand '
+    + 'produces a link that receives messages and understands none of them, which looks exactly like a link that '
+    + 'receives nothing; this cannot.',
 };
 
 /** How long to wait for the rest of a message before giving up on it. */
@@ -171,25 +177,156 @@ export const DEFAULT_CONTROL_PATTERNS = [
 ];
 
 /**
+ * One pattern, compiled.
+ *
+ * A laboratory's own naming is not something this system can anticipate, and
+ * the answer to that is not a longer built-in list — it is letting the
+ * laboratory say what it means, here, without anybody changing code:
+ *
+ *   QC, CTRL            a token: matches when the identifier IS it, or carries
+ *                       it whole at a separator. The plain case, unchanged.
+ *   QC-*, *CONTROL*     a wildcard: `*` is any run of characters, `?` is one.
+ *   /^C\d{4}-/i         a regular expression, between slashes, for a naming
+ *                       scheme nothing simpler describes.
+ *   !QC-TRAINING        a refusal: whatever else matches, this is never a
+ *                       control. Refusals are checked first and always win.
+ *
+ * An unparseable regular expression is treated as the literal text it is,
+ * rather than throwing — a typo in a settings box must not stop an analyser
+ * transmitting.
+ */
+function compilePattern(raw: string): { negate: boolean; test: (id: string) => boolean } | null {
+  let pattern = String(raw ?? '').trim();
+  if (!pattern) return null;
+  const negate = pattern.startsWith('!');
+  if (negate) pattern = pattern.slice(1).trim();
+  if (!pattern) return null;
+
+  const asRegex = pattern.match(/^\/(.*)\/([a-z]*)$/);
+  if (asRegex) {
+    try {
+      const expression = new RegExp(asRegex[1], asRegex[2].includes('i') ? asRegex[2] : `${asRegex[2]}i`);
+      return { negate, test: id => expression.test(id) };
+    } catch { /* a typo is literal text, not a broken link */ }
+  }
+
+  const upper = pattern.toUpperCase();
+  if (/[*?]/.test(upper)) {
+    const escaped = upper.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    const expression = new RegExp(`^${escaped}$`);
+    return { negate, test: id => expression.test(id) };
+  }
+
+  const escaped = upper.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // A boundary is the start, the end, or a separator — so "QC-2" and "2:QC"
+  // match on "QC", while "SC2024QCX" does not.
+  const boundary = new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`);
+  return { negate, test: id => id === upper || boundary.test(id) };
+}
+
+/**
  * Does this sample identifier name a control?
  *
  * Deliberately anchored rather than a loose "contains": a patient sample
  * numbered `SC2024-QC-0031` must not be swept into the QC record because three
- * of its characters happen to spell QC. A pattern matches when the identifier
- * IS it, or begins or ends with it at a token boundary.
+ * of its characters happen to spell QC.
+ *
+ * WHAT THIS IS NOT: it is not a filter on what the bridge accepts. Every
+ * message an analyser sends is received, recorded and kept whether it matches
+ * anything here or not — that is the whole point of writing the raw message
+ * down before trying to understand it. All this decides is WHERE a message
+ * goes once it has arrived: a control run to the IQC bench, a patient result
+ * to the link's own record. A laboratory that recognises none of its controls
+ * still has every one of them, under "patient", and can say so afterwards.
  */
 export function looksLikeControl(sampleId: string | null | undefined, patterns?: string[] | null): boolean {
   const id = String(sampleId ?? '').trim().toUpperCase();
   if (!id) return false;
-  const list = (patterns && patterns.length ? patterns : DEFAULT_CONTROL_PATTERNS).map(p => String(p).trim().toUpperCase()).filter(Boolean);
-  for (const pattern of list) {
-    if (id === pattern) return true;
-    // A boundary is the start, the end, or a separator — so "QC-2" and "2:QC"
-    // match on "QC", while "SC2024QCX" does not.
-    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`).test(id)) return true;
+  const list = (patterns && patterns.length ? patterns : DEFAULT_CONTROL_PATTERNS)
+    .map(compilePattern).filter(Boolean) as Array<{ negate: boolean; test: (id: string) => boolean }>;
+  // A refusal wins over every match, so a laboratory can carve one name out of
+  // a rule that is otherwise right.
+  if (list.some(p => p.negate && p.test(id))) return false;
+  return list.some(p => !p.negate && p.test(id));
+}
+
+/* ============================================================================
+   Deciding what a message is
+   ----------------------------------------------------------------------------
+   One place, used by the bridge when a message lands and by the "try a
+   message" screen when somebody is proving a link — so what the screen says
+   would happen is what actually happens.
+
+   The signals are taken in order of how much they are worth. An analyser that
+   SAYS the run is quality control, in the protocol's own field for saying so,
+   is believed outright and needs no configuration at all. A sample identifier
+   that matches a control material this laboratory has actually registered is
+   next: that is this laboratory's own record agreeing, not a guess. Only then
+   the identifier patterns, which are a convention rather than a fact.
+
+   And nothing is a control by elimination. A message that matches none of
+   these is a patient result, because inventing a control record is as bad as
+   losing one.
+   ========================================================================= */
+
+export interface ControlSignals {
+  sampleId?: string | null;
+  lotNumber?: string | null;
+  /** The analyser said so itself, in the protocol's own field for it. */
+  controlHint?: boolean | null;
+  /**
+   * Lot numbers and codes of the control materials this laboratory has
+   * registered, so a control named only by its own lot is recognised without
+   * anybody configuring a pattern for it.
+   */
+  knownControlIds?: Array<string | null | undefined> | null;
+}
+
+export interface ControlVerdict {
+  control: boolean;
+  /** Why, in a few words, for the screen and the audit trail. */
+  because: string;
+}
+
+function sameIdentifier(a: string, b: string): boolean {
+  const normalise = (v: string) => v.trim().toUpperCase().replace(/[\s_-]+/g, '');
+  return Boolean(normalise(a)) && normalise(a) === normalise(b);
+}
+
+export function classifyMessage(signals: ControlSignals, patterns?: string[] | null): ControlVerdict {
+  const sampleId = String(signals.sampleId ?? '').trim();
+  const lotNumber = String(signals.lotNumber ?? '').trim();
+
+  // An explicit refusal beats everything, including the analyser's own flag:
+  // it is the one way a laboratory can say "not this one" and be obeyed.
+  const refused = [sampleId, lotNumber].filter(Boolean).some(id => {
+    const upper = id.toUpperCase();
+    return (patterns ?? []).map(compilePattern).some(p => p?.negate && p.test(upper));
+  });
+  if (refused) return { control: false, because: 'a rule on this link says this identifier is never a control' };
+
+  if (signals.controlHint === true) {
+    return { control: true, because: 'the analyser marked the run as quality control' };
   }
-  return false;
+
+  const known = (signals.knownControlIds ?? []).map(v => String(v ?? '').trim()).filter(Boolean);
+  for (const candidate of [sampleId, lotNumber]) {
+    if (!candidate) continue;
+    if (known.some(id => sameIdentifier(candidate, id))) {
+      return { control: true, because: `"${candidate}" is a control material registered in this laboratory` };
+    }
+  }
+
+  if (looksLikeControl(sampleId, patterns)) {
+    return { control: true, because: `the sample identifier "${sampleId}" matches a control pattern on this link` };
+  }
+  if (looksLikeControl(lotNumber, patterns)) {
+    return { control: true, because: `the lot "${lotNumber}" matches a control pattern on this link` };
+  }
+  if (signals.controlHint === false) {
+    return { control: false, because: 'the analyser marked the run as a patient sample' };
+  }
+  return { control: false, because: 'nothing in the message says it is a control, so it is kept as a patient result' };
 }
 
 /* ============================================================================
