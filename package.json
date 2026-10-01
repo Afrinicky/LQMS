@@ -37,6 +37,7 @@
     "check:bridge": "node scripts/instrument-bridge-check.mjs",
     "check:fetch": "node scripts/instrument-fetch-check.mjs",
     "check:lhims": "node scripts/lhims-bridge-check.mjs",
+    "check:attestations": "node scripts/attestation-list-check.mjs",
     "check:training": "node scripts/training-record-check.mjs",
     "check:risk": "node scripts/risk-check.mjs",
     "check:bench-access": "node scripts/bench-access-check.mjs",
