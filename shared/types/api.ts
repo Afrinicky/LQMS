@@ -38,6 +38,8 @@ export type SystemConnectivity = {
   /** Every address this machine has, and whether the host answers on it. */
   hostAddresses?: Array<{ label: string; url: string; reachable: boolean }>;
   /** The port as a thing the laboratory owns, not only the machine it runs on. */
+  /** The file this host reads its address and port from, before anything else starts. */
+  settingsFile?: { path: string; source: 'file' | 'environment'; problem: string | null };
   portSetting?: {
     /** What it asked for when it started. */
     asked: number;

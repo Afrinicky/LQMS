@@ -43,7 +43,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
  */
 function startHost(env = {}) {
   const child = spawn('npx', ['tsx', 'server/index.ts'], {
-    env: { ...process.env, API_PORT: String(PORT), SECH_LIMS_DB_PATH: DB, SECH_LIMS_API_HOST: '', ...env },
+    // Its own data folder as well as its own database: the address and port
+    // this host listens on live in a file there, and a check that shared that
+    // folder with the developer's own host would read somebody else's choice.
+    env: { ...process.env, API_PORT: String(PORT), SECH_LIMS_DATA_DIR: dir, SECH_LIMS_DB_PATH: DB, SECH_LIMS_API_HOST: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
@@ -123,7 +126,7 @@ try {
 
   let info = (await j('/system/connectivity', { token: A })).json;
   check('the screen reports it as not on the network', info?.lan?.exposed === false, JSON.stringify(info?.lan));
-  check('and that the laboratory has never chosen', info?.lan?.choice === null);
+  check('and that the laboratory is not asking for the network', info?.lan?.choice === false, JSON.stringify(info?.lan));
   check('and that the choice is not locked to the environment', info?.lan?.lockedToEnvironment === false);
   if (lanAddress) {
     check('nothing answers on this machine’s network address', !(await reachableOffLoopback(lanAddress)));
@@ -170,19 +173,37 @@ try {
   }
 
   /* ===================== 5. a deployment that set it deliberately still wins */
-  console.log('\n[5] An environment that names the address deliberately still wins');
+  console.log('\n[5] The laboratory\'s own choice outranks the environment it was installed with');
+  // This used to be the other way round, and that is what left a laboratory
+  // unable to fix its own network: the host had SECH_LIMS_API_HOST set by
+  // whatever shortcut installed it, so the switch on the settings screen was
+  // drawn permanently disabled, and the only remedy was an environment
+  // variable on a machine nobody could log in to. An environment variable may
+  // seed a host that has never been configured. It may not overrule one that
+  // has.
   await host.stop();
   host = startHost({ SECH_LIMS_API_HOST: '0.0.0.0' });
   check('the host starts', await host.ready());
-  check('bound to the network although the stored choice says otherwise',
-    /reachable from the network/.test(host.log()), host.log().slice(-200));
+  check('and stays where this laboratory put it, not where the variable says',
+    /this computer only/.test(host.log()), host.log().slice(-200));
 
   const C = (await j('/auth/login', { method: 'POST', body: { username: 'admin', password: PW } })).json?.token;
   info = (await j('/system/connectivity', { token: C })).json;
-  check('the screen says the environment is in charge', info?.lan?.lockedToEnvironment === true);
-  const refused = await j('/system/lan', { token: C, method: 'PUT', body: { enabled: false } });
-  check('and refuses to pretend it can change it here', refused.status === 400, JSON.stringify(refused.json));
-  check('naming the variable that decides', /SECH_LIMS_API_HOST/.test(String(refused.json?.error ?? '')));
+  check('the screen does not claim the environment is in charge', info?.lan?.lockedToEnvironment === false,
+    JSON.stringify(info?.lan));
+  check('and names the file the answer really comes from',
+    /connectivity\.json$/.test(String(info?.settingsFile?.path ?? '')), JSON.stringify(info?.settingsFile));
+
+  const accepted = await j('/system/lan', { token: C, method: 'PUT', body: { enabled: true } });
+  check('the switch works even on a host whose environment names an address',
+    accepted.status === 200, JSON.stringify(accepted.json));
+
+  await host.stop();
+  host = startHost({ SECH_LIMS_API_HOST: '127.0.0.1' });
+  check('the host starts once more', await host.ready());
+  check('on the network, because that is what this laboratory chose',
+    /reachable from the network/.test(host.log()), host.log().slice(-200));
+
 } finally {
   if (host) await host.stop();
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* a temp directory */ }

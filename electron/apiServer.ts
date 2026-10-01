@@ -3,7 +3,7 @@ import { createApiServer } from '../server/index.js';
 import { getDb } from '../server/db/database.js';
 import { startBackgroundServices } from '../server/services/backgroundJobs.js';
 import { config } from '../server/config/index.js';
-import { resolveBindHost, resolvePort, recordBinding, hostIsLan } from '../server/services/hostBinding.js';
+import { recordBinding, hostIsLan, networkConfig, importLegacyChoices } from '../server/services/hostBinding.js';
 
 export type ApiState = { host: string; port: number; baseUrl: string; reused: boolean };
 
@@ -61,14 +61,16 @@ export function startLocalApi(): Promise<ApiState> {
   }
 
   console.log('[boot] startLocalApi called');
-  const requestedPort = resolvePort(getDb);
+  const settings = networkConfig();
+  const requestedPort = settings.port;
   // The bind host may be 0.0.0.0 (or ::) to expose the API to the LAN, but that
   // is NOT a connectable address — the local Electron window and preload must
   // reach the API over loopback. The API listening on 0.0.0.0 also answers on
   // 127.0.0.1, so we bind on `host` yet advertise `clientHost` to the renderer.
-  // The laboratory's stored choice, not only the environment — a LAN that goes
-  // away on every restart is worse than one that was never switched on.
-  const host = resolveBindHost(getDb);
+  // One file, read before anything else starts — see services/hostBinding.
+  // Nothing about listening may depend on the database.
+  const host = settings.host;
+  if (settings.problem) console.warn('[boot]', settings.problem);
   const clientHost = hostIsLan(host) ? '127.0.0.1' : host;
   const candidates = [requestedPort, requestedPort + 1, requestedPort + 2, requestedPort + 3, requestedPort + 4];
   console.log('[boot] startLocalApi candidates', { host, clientHost, candidates });
@@ -97,6 +99,9 @@ export function startLocalApi(): Promise<ApiState> {
         // packaged desktop host — the machine a laboratory actually runs — the
         // backup schedule was accepted and never acted on.
         try { startBackgroundServices(getDb); } catch (e) { console.error('[boot] background jobs failed to start', e); }
+        // A choice made while this lived in the settings table, brought across
+        // now that the server is up and nothing depends on the result.
+        try { importLegacyChoices(getDb()); } catch { /* nothing to bring across */ }
         return resolved;
       } catch (err) {
         lastErr = err;

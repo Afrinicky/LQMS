@@ -76,7 +76,7 @@ import { ensureDataDirs, getDb } from './db/database.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
 import { seedDefaults } from './db/seed.js';
 import { config } from './config/index.js';
-import { resolveBindHost, resolvePort, recordBinding, hostIsLan } from './services/hostBinding.js';
+import { resolveBindHost, resolvePort, recordBinding, hostIsLan, networkConfig, importLegacyChoices } from './services/hostBinding.js';
 
 /**
  * Resolve the directory that holds the built renderer (dist/index.html).
@@ -246,13 +246,17 @@ export function createApiServer() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  // Both the address and the port are stored settings rather than environment
-  // variables, so they survive the restart that used to quietly put the host
-  // back on 127.0.0.1 and take the network down with it.
-  const port = resolvePort(getDb);
-  const host = resolveBindHost(getDb);
+  // One small file in the laboratory's own data folder, read before anything
+  // else starts. Nothing about listening depends on the database: a database
+  // that is busy for a second must never be able to take the network down.
+  const { host, port, path: settingsFile, problem } = networkConfig();
+  if (problem) console.warn(`[boot] ${problem}`);
   createApiServer().listen(port, host, () => {
     recordBinding(host, port, port);
+    console.log(`[boot] connectivity read from ${settingsFile}`);
+    // A choice made while this lived in the settings table, brought across now
+    // that the server is already up and nothing depends on the result.
+    try { importLegacyChoices(getDb()); } catch { /* nothing to bring across */ }
     console.log(`SECH_LIMS host API listening on http://${host}:${port}`
       + (hostIsLan(host) ? ' (reachable from the network)' : ' (this computer only)'));
     // The same jobs the packaged desktop application starts — see
