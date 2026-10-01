@@ -105,6 +105,9 @@ export function useAnalyserListen<T>(options: {
 }
 
 /** Shared by the module and the portal, so one wording is used for both. */
-export async function armAnalyser(path: string) {
-  return api<{ listening: boolean; since: Watermark; note: string }>(path, { method: 'POST' });
+export async function armAnalyser(path: string, body?: Record<string, unknown>) {
+  return api<{ listening: boolean; since: Watermark; note: string }>(path, {
+    method: 'POST',
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }

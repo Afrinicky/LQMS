@@ -440,9 +440,15 @@ function ControlRow({ control, canPerform, onOpen, onChart }: {
 /* ----------------------------------------------------------------------------
    Running one — the six doors into the same room
    ------------------------------------------------------------------------- */
+/** One analyser this unit could listen to, whether or not the control names it. */
+type FeedChoice = {
+  id: number; name: string; equipmentName: string | null;
+  state: string; lastMessageAt: string | null; open: boolean; suggested: boolean;
+};
+
 type Detail = {
   material: any; analytes: any[]; recent: any[];
-  layout: any; feed: any; feedWaiting: number;
+  layout: any; feed: any; feedOptions?: FeedChoice[]; feedWaiting: number;
   canPerform: boolean; canReview: boolean;
 };
 
@@ -532,8 +538,21 @@ function RunControlDialog({ control, onClose, onSaved }: {
    * "entry methods" existed and picking the right one. It belongs beside the
    * boxes it fills.
    */
+  // Which analyser the bench is listening to: the control's own where it has
+  // one, otherwise whichever this unit picks. Hiding the button because no row
+  // matched left a bench with a transmitting analyser and no way to say so.
+  const feedChoices: FeedChoice[] = detail?.feedOptions ?? [];
+  const [feedLinkId, setFeedLinkId] = useState('');
+  const [addingSample, setAddingSample] = useState(false);
+  useEffect(() => {
+    if (feedLinkId) return;
+    const guess = feedChoices.find(l => l.suggested && l.open) ?? feedChoices.find(l => l.open) ?? feedChoices[0];
+    if (guess) setFeedLinkId(String(guess.id));
+  }, [feedChoices, feedLinkId]);
+
   const fetchListen = useAnalyserListen<IqcFeedMessage>({
-    arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`),
+    arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`,
+      feedLinkId ? { linkId: Number(feedLinkId) } : undefined),
     poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
     onArrival: async message => {
       try { applyMapping(await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${control.id}`)); }
@@ -631,8 +650,13 @@ function RunControlDialog({ control, onClose, onSaved }: {
           </div>
 
           {retained && (
-            <label className="iqc-kind-pick">
-              <span>Sample</span>
+            <div className="iqc-kind-pick">
+              <div className="iqc-sample-row">
+                <span>Sample</span>
+                <button type="button" className="iqc-sample-add" onClick={() => setAddingSample(v => !v)}>
+                  {addingSample ? 'Cancel' : '+ Add a sample'}
+                </button>
+              </div>
               <select value={sampleId} onChange={e => setSampleId(e.target.value)}>
                 <option value="">Choose a sample…</option>
                 {samples.map(x => (
@@ -642,10 +666,10 @@ function RunControlDialog({ control, onClose, onSaved }: {
                   </option>
                 ))}
               </select>
-              {samples.length === 0 && (
+              {samples.length === 0 && !addingSample && (
                 <span className="muted">
-                  No sample is on this control&rsquo;s register yet. One is added under Quality Control &rarr;
-                  Run Control, where its original result is recorded.
+                  No sample is on this control&rsquo;s register yet. The register is kept per control, so a sample
+                  enrolled on another control does not appear here. Add one above.
                 </span>
               )}
               {sample && (
@@ -654,7 +678,19 @@ function RunControlDialog({ control, onClose, onSaved }: {
                   {sample.original_run_number ? `, covered by ${sample.original_run_number}` : ''}.
                 </span>
               )}
-            </label>
+              {addingSample && (
+                <AddSample
+                  controlId={control.id} analytes={analytes} qualitative={qualitative}
+                  feedChoices={feedChoices} linkId={feedLinkId}
+                  onProblem={setProblem}
+                  onAdded={async id => {
+                    setAddingSample(false);
+                    const list = await api<any[]>(`/iqc/portal/controls/${control.id}/retained-samples`).catch(() => []);
+                    setSamples(list);
+                    setSampleId(String(id));
+                  }} />
+              )}
+            </div>
           )}
 
           {methods.length > 1 && !retained && (
@@ -680,20 +716,32 @@ function RunControlDialog({ control, onClose, onSaved }: {
           <div className="iqc-entry">
             <div className="iqc-entry-head">
               <span>Parameters</span>
-              {detail.feed && (
-                <button type="button" className={`iqc-fetch tiny${fetchListen.waiting ? ' is-waiting' : ''}`}
-                  onClick={() => (fetchListen.waiting ? fetchListen.stop() : void fetchListen.start())}>
-                  {fetchListen.waiting
-                    ? <><Loader2 size={11} className="pd-spin" /> Waiting… {fetchListen.remaining}s</>
-                    : <><Radio size={11} /> Fetch from analyser</>}
-                </button>
+              {feedChoices.length > 1 && (
+                <select className="iqc-feed-pick" value={feedLinkId} onChange={e => setFeedLinkId(e.target.value)}>
+                  {feedChoices.map(l => (
+                    <option key={l.id} value={l.id}>{l.name}{l.equipmentName ? ` · ${l.equipmentName}` : ''}</option>
+                  ))}
+                </select>
               )}
+              <button type="button" className={`iqc-fetch tiny${fetchListen.waiting ? ' is-waiting' : ''}`}
+                disabled={!detail.feed && feedChoices.length === 0}
+                onClick={() => (fetchListen.waiting ? fetchListen.stop() : void fetchListen.start())}>
+                {fetchListen.waiting
+                  ? <><Loader2 size={11} className="pd-spin" /> Waiting… {fetchListen.remaining}s</>
+                  : <><Radio size={11} /> Fetch from analyser</>}
+              </button>
               <span className="muted">{filled} of {analytes.length} filled</span>
             </div>
             {fetchListen.waiting && (
               <p className="iqc-listening in-head">
                 <span className="iqc-pulse" />
                 Ready. Run the control on the analyser and its results drop into the boxes below.
+              </p>
+            )}
+            {!fetchListen.waiting && !detail.feed && feedChoices.length === 0 && (
+              <p className="iqc-hint in-head">
+                No analyser is set up on this system yet, so there is nothing to fetch from. One is added under
+                Settings &rarr; Analyser Links.
               </p>
             )}
             {!fetchListen.waiting && fetchListen.note && <p className="iqc-hint in-head">{fetchListen.note}</p>}
@@ -787,6 +835,121 @@ function RunControlDialog({ control, onClose, onSaved }: {
 /* ----------------------------------------------------------------------------
    Door 2: paste a table
    ------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   Putting a sample on the register, from the bench
+   ------------------------------------------------------------------------- */
+
+/**
+ * A lot runs out mid-morning and the bench re-reads a sample it already
+ * reported. For that to be a control run at all, the system has to hold what
+ * the sample gave the first time — and until now that record could only be
+ * made at a desktop, which is not where the person holding the tube is.
+ *
+ * So the same enrolment lives here, cut to what the bench actually knows: the
+ * laboratory number, the day it was reported, and the result. The result can
+ * come off the analyser rather than off a printout, because the original run
+ * went over the same wire as everything else.
+ */
+function AddSample({ controlId, analytes, qualitative, feedChoices, linkId, onAdded, onProblem }: {
+  controlId: number;
+  analytes: any[];
+  qualitative: boolean;
+  feedChoices: FeedChoice[];
+  linkId: string;
+  onAdded: (id: number) => void | Promise<void>;
+  onProblem: (message: string | null) => void;
+}) {
+  const [reference, setReference] = useState('');
+  const [runDate, setRunDate] = useState(new Date().toISOString().slice(0, 10));
+  const [originals, setOriginals] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const listen = useAnalyserListen<IqcFeedMessage>({
+    arm: () => armAnalyser(`/iqc/portal/controls/${controlId}/analyser-listen`,
+      linkId ? { linkId: Number(linkId) } : undefined),
+    poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
+    onArrival: async message => {
+      try {
+        const mapped = await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${controlId}`);
+        setOriginals(prev => {
+          const next = { ...prev };
+          for (const r of mapped.readings ?? []) {
+            if (r.analyteId == null) continue;
+            const v = r.value ?? r.qualitativeResult;
+            if (v !== null && v !== undefined && String(v) !== '') next[r.analyteId] = String(v);
+          }
+          return next;
+        });
+        if (!reference && message.sample_id) setReference(String(message.sample_id));
+      } catch (e) { onProblem(errorText(e)); }
+    },
+  });
+
+  async function save() {
+    const values = analytes
+      .filter(a => String(originals[a.id] ?? '').trim() !== '')
+      .map(a => (qualitative
+        ? { analyteId: a.id, originalQualitativeResult: String(originals[a.id]).trim() }
+        : { analyteId: a.id, originalValue: Number(String(originals[a.id]).trim()) }));
+    if (!reference.trim()) return onProblem('Give the laboratory number the sample was reported under.');
+    if (!values.length) return onProblem('Record what the sample originally gave for at least one parameter.');
+    setBusy(true); onProblem(null);
+    try {
+      const created = await api<{ id: number }>('/iqc/retained-samples', {
+        method: 'POST',
+        body: JSON.stringify({ iqcMaterialId: controlId, sampleReference: reference.trim(), originalRunDate: runDate, values }),
+      });
+      await onAdded(created.id);
+    } catch (e) { onProblem(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="iqc-addsample">
+      <div className="iqc-addsample-top">
+        <label>
+          <span>Sample number</span>
+          <TextField value={reference} onValue={setReference} placeholder="laboratory number it was reported under" />
+        </label>
+        <label>
+          <span>First tested</span>
+          <input type="date" value={runDate} max={new Date().toISOString().slice(0, 10)}
+            onChange={e => setRunDate(e.target.value)} />
+        </label>
+        <button type="button" className={`iqc-fetch tiny${listen.waiting ? ' is-waiting' : ''}`}
+          disabled={feedChoices.length === 0}
+          onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
+          {listen.waiting
+            ? <><Loader2 size={11} className="pd-spin" /> Waiting… {listen.remaining}s</>
+            : <><Radio size={11} /> Fetch</>}
+        </button>
+      </div>
+      {listen.waiting && (
+        <p className="iqc-listening">
+          <span className="iqc-pulse" />
+          Ready. Send the sample from the analyser and what it gave drops in below.
+        </p>
+      )}
+      {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}
+      {listen.problem && <p className="iqc-hint crit">{listen.problem}</p>}
+
+      <p className="iqc-hint">What it gave the first time — the re-read is compared with this.</p>
+      <div className="iqc-addsample-grid">
+        {analytes.map(a => (
+          <label key={a.id}>
+            <span>{a.analyte}{a.unit ? ` ${a.unit}` : ''}</span>
+            <TextField value={originals[a.id] ?? ''}
+              onValue={v => setOriginals(prev => ({ ...prev, [a.id]: v }))} />
+          </label>
+        ))}
+      </div>
+      <button type="button" className="iqc-addsample-save" disabled={busy} onClick={save}>
+        {busy ? 'Saving…' : 'Add this sample'}
+      </button>
+    </div>
+  );
+}
+
 function PastePanel({ controlId, onMapped, onProblem }: {
   controlId: number; onMapped: (m: IqcMapping) => void; onProblem: (m: string) => void;
 }) {

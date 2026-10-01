@@ -83,9 +83,10 @@ export default function AnalyserFetch({ module, equipmentId, sectionId, kind, la
     },
   });
 
-  // Nothing is transmitting anywhere on this system, so there is nothing to
-  // offer and no button worth drawing.
-  if (links !== null && links.length === 0) return null;
+  // Nothing is set up to transmit yet. The button still stands, disabled and
+  // saying so: a control that appears only once the configuration is right
+  // cannot be found by the person who needs to fix the configuration.
+  const none = links !== null && links.length === 0;
 
   return (
     <div className="af">
@@ -99,6 +100,7 @@ export default function AnalyserFetch({ module, equipmentId, sectionId, kind, la
         )}
         <button type="button" className={`iqc-fetch${listen.waiting ? ' is-waiting' : ''}`}
           disabled={!linkId}
+          title={none ? 'No analyser link is set up yet' : undefined}
           onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
           {listen.waiting
             ? <><Loader2 size={13} className="pd-spin" /> Waiting… {listen.remaining}s</>
@@ -109,6 +111,12 @@ export default function AnalyserFetch({ module, equipmentId, sectionId, kind, la
         <p className="iqc-listening">
           <span className="iqc-pulse" />
           Ready. Send it from {chosen?.name ?? 'the analyser'} and the results drop in here.
+        </p>
+      )}
+      {none && (
+        <p className="iqc-hint">
+          No analyser is set up on this system yet, so there is nothing to fetch from. One is added under
+          Settings &rarr; Analyser Links.
         </p>
       )}
       {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}

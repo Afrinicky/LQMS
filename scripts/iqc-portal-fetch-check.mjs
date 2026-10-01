@@ -71,9 +71,15 @@ function sendAstm(port, records) {
 
 /* ================================================== 1. a bench, and its analyser */
 console.log('\n[1] A unit, a member of staff in it, and an analyser transmitting to it');
-const sections = (await j('/sections', { token: A })).json ?? [];
-const sectionId = sections.find(s => /haemat/i.test(s.name))?.id ?? sections[0]?.id;
-check('a unit exists to work in', Boolean(sectionId));
+// Its own unit. Several links in one unit is a real situation and the reason
+// the bench gets a picker, but it makes "which link did it guess?" an
+// arbitrary question — so this suite does not share a unit with another's
+// leftovers.
+const made = await j('/section-config/sections', { token: A, method: 'POST', body: {
+  name: `Bench unit ${stamp}`, code: `BU${String(stamp).slice(-6)}`,
+} });
+const sectionId = made.json?.id;
+check('a unit exists to work in', made.status === 201 && Boolean(sectionId), JSON.stringify(made.json));
 
 // /auth/me answers { user, permissions } — the account is one level in.
 const me = (await j('/auth/me', { token: A })).json?.user;

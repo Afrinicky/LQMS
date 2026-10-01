@@ -1,4 +1,5 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from '../hooks/useTheme';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
@@ -3171,6 +3172,60 @@ function QualityWorkflowSettings() {
  * — so the one thing this card owes anybody is a plain yes or no, and the next
  * step when the answer is no.
  */
+/**
+ * Which theme this laboratory opens on.
+ *
+ * The toggle in the header is a personal, per-device thing and stays that way —
+ * a night shift on a dim screen is a different problem from a bench under a
+ * window. What was missing is the laboratory's own answer, so a new machine,
+ * or one somebody toggled months ago, has something to be told.
+ */
+function AppearanceCard({ canEdit }: { canEdit: boolean }) {
+  const { theme, setTheme } = useTheme();
+  const [chosen, setChosen] = useState<'light' | 'dark' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ defaultTheme: 'light' | 'dark' }>('/system/appearance')
+      .then(r => setChosen(r.defaultTheme)).catch(() => setChosen('light'));
+  }, []);
+
+  async function save(next: 'light' | 'dark') {
+    setBusy(true); setProblem(null); setNote(null);
+    try {
+      const r = await api<{ defaultTheme: 'light' | 'dark'; note: string }>('/system/appearance', {
+        method: 'PUT', body: JSON.stringify({ defaultTheme: next }),
+      });
+      setChosen(r.defaultTheme);
+      setNote(r.note);
+      // This device included — an administrator who sets the laboratory to
+      // light and watches their own screen stay dark has been told nothing.
+      setTheme(next);
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card">
+      <div className="section-head"><h3>Appearance</h3></div>
+      <div className="tabs inline" style={{ marginTop: 4 }}>
+        <button type="button" disabled={!canEdit || busy} className={chosen === 'light' ? 'active' : ''}
+          onClick={() => void save('light')}>Light</button>
+        <button type="button" disabled={!canEdit || busy} className={chosen === 'dark' ? 'active' : ''}
+          onClick={() => void save('dark')}>Dark</button>
+      </div>
+      <p className="hint" style={{ marginTop: 8 }}>
+        Every device opens on this theme. Anyone can still switch their own screen from the header, and that
+        choice is kept until this is changed again. This device is currently on <strong>{theme}</strong>.
+      </p>
+      {note && <Notice kind="success">{note}</Notice>}
+      {problem && <Notice kind="error">{problem}</Notice>}
+    </div>
+  );
+}
+
 function RemoteAccessCard({ info, canEdit, onChanged }: {
   info: SystemConnectivity; canEdit: boolean; onChanged: () => void;
 }) {
@@ -3296,7 +3351,21 @@ function RemoteAccessCard({ info, canEdit, onChanged }: {
               : <>Signed in{ts.dnsName ? <> as <code>{ts.dnsName}</code></> : null}{ts.serving ? ' · publishing this laboratory' : ' · not publishing this laboratory yet'}</>}
           </td>
         </tr>
-        {info.lanUrls.length > 0 && <tr><td>LAN client URLs</td><td>{info.lanUrls.map(u => <div key={u}><code>{u}</code></div>)}</td></tr>}
+        {(info.hostAddresses ?? []).length > 0 && (
+          <tr>
+            <td>Addresses</td>
+            <td>
+              {(info.hostAddresses ?? []).map(a => (
+                <div key={a.url}>
+                  <code>{a.url}</code>{' '}
+                  <span className={a.reachable ? 'hint' : 'bad'}>
+                    {a.label}{a.reachable ? '' : ' — not answering, the host is on this computer only'}
+                  </span>
+                </div>
+              ))}
+            </td>
+          </tr>
+        )}
         {info.api.publicUrl && <tr><td>Public URL (remote)</td><td><code>{info.api.publicUrl}</code></td></tr>}
       </tbody></table>
     </div>
@@ -3365,6 +3434,8 @@ export function ConnectivityMode() {
       {message && <Notice kind="success">{message}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
     </div>
+
+    <AppearanceCard canEdit={canEdit} />
 
     <RemoteAccessCard info={info} canEdit={canEdit} onChanged={load} />
 
