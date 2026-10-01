@@ -38,11 +38,18 @@ import PortalIqcCoverage from './PortalIqcCoverage';
  * Then there is the problem that actually stops control records being kept: an
  * FBC control is twenty-three parameters on three levels, every day. Typing
  * sixty-nine numbers off a printout is not a workflow, it is a reason to stop.
- * So the numbers can arrive six ways — typed, pasted, filled into a
- * spreadsheet, read out of the analyser's own export, read off a scan of the
- * printout, or taken from the instrument over the network — and every one of
- * them lands in the same run through the same Westgard evaluation. What
- * changes is the door; the room is the same.
+ * So the numbers can arrive five ways — typed, pasted, filled into a
+ * spreadsheet, read out of the analyser's own export, or read off a scan of the
+ * printout — and every one of them lands in the same run through the same
+ * Westgard evaluation. What changes is the door; the room is the same.
+ *
+ * Receiving them from the analyser over the network is NOT a sixth door, and
+ * offering it as one was a mistake worth naming. It is a way of filling the
+ * form rather than a different form: the boxes stay typeable while the analyser
+ * is listened to, and whatever arrives lands in those same boxes. Put beside
+ * "type each value" as an alternative, it produced two buttons that did the
+ * same thing and a choice between a thing and itself. It now sits on the form,
+ * once, beside the boxes it fills.
  *
  * Every route that reads numbers from somewhere shows the bench what it thinks
  * it found, lined up against the control's own parameters, BEFORE anything is
@@ -438,7 +445,7 @@ function ControlRow({ control, canPerform, onOpen, onChart }: {
 }
 
 /* ----------------------------------------------------------------------------
-   Running one — the six doors into the same room
+   Running one — the five doors into the same room
    ------------------------------------------------------------------------- */
 /** One analyser this unit could listen to, whether or not the control names it. */
 type FeedChoice = {
@@ -456,7 +463,12 @@ function RunControlDialog({ control, onClose, onSaved }: {
   control: IqcBoardControl; onClose: () => void; onSaved: () => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [method, setMethod] = useState<IqcEntryMethod>((control.preferredEntryMethod as IqcEntryMethod) || 'manual');
+  // 'instrument' is no longer one of these: see `methods` below. A control
+  // whose stored preference is still that one opens on the plain form, with the
+  // analyser one button away, rather than on a mode that no longer exists.
+  const [method, setMethod] = useState<IqcEntryMethod>(
+    control.preferredEntryMethod && control.preferredEntryMethod !== 'instrument'
+      ? control.preferredEntryMethod as IqcEntryMethod : 'manual');
   const [values, setValues] = useState<Record<number, string>>({});
   const [mapping, setMapping] = useState<IqcMapping | null>(null);
   /**
@@ -489,7 +501,8 @@ function RunControlDialog({ control, onClose, onSaved }: {
         const next = await api<Detail>(`/iqc/portal/controls/${control.id}`);
         setDetail(next);
         if (!control.preferredEntryMethod && next.material.entryMethods?.length) {
-          setMethod(next.material.entryMethods[0] as IqcEntryMethod);
+          const first = (next.material.entryMethods as IqcEntryMethod[]).find(m => m !== 'instrument');
+          if (first) setMethod(first);
         }
       } catch (e) { setProblem(errorText(e)); }
     })();
@@ -501,14 +514,24 @@ function RunControlDialog({ control, onClose, onSaved }: {
       .then(setSamples).catch(() => setSamples([]));
   }, [control.id, runKind]);
 
-  // An analyser attached to this control is always a door, whether or not
-  // somebody remembered to tick it on the control's definition. Hiding the one
-  // route that does not involve typing twenty-three numbers, because a setting
-  // was left at its default, is how a bench goes back to paper.
+  /**
+   * How the numbers get in, minus the one that is not a way of getting them in.
+   *
+   * "Take it from the instrument" sat in this row beside "Type each value" as
+   * though the two were alternatives. They are not. Choosing it opened a panel
+   * with a Fetch button, while the value boxes underneath carried a Fetch
+   * button of their own and stayed typeable throughout — so both choices led to
+   * the same form, by two routes, with two buttons that did the same thing. A
+   * bench cannot be asked to decide between a thing and itself.
+   *
+   * Receiving from the analyser is not a mode of entry; it is a way of filling
+   * the form, like pasting is. It belongs on the form, once, beside the boxes
+   * it fills — which is where it now is, and the only place it is. What stays
+   * in this row are the routes that genuinely change what is on screen: a
+   * spreadsheet, an upload, a scan.
+   */
   const declared = (detail?.material.entryMethods ?? control.entryMethods ?? ['manual']) as IqcEntryMethod[];
-  const methods = detail?.feed && !declared.includes('instrument')
-    ? ([...declared, 'instrument'] as IqcEntryMethod[])
-    : declared;
+  const methods = declared.filter(m => m !== 'instrument');
   const analytes = detail?.analytes ?? [];
   const qualitative = detail?.material.control_type === 'qualitative';
   const retained = runKind === 'retained_sample';
@@ -544,11 +567,25 @@ function RunControlDialog({ control, onClose, onSaved }: {
   const feedChoices: FeedChoice[] = detail?.feedOptions ?? [];
   const [feedLinkId, setFeedLinkId] = useState('');
   const [addingSample, setAddingSample] = useState(false);
+  /**
+   * Which analyser this control is listened to on.
+   *
+   * Only one that actually belongs to this control — its own instrument, or one
+   * on its unit — is chosen for somebody. Falling through to "whatever link
+   * exists" put a haematology analyser on a GeneXpert MTB control and invited
+   * the bench to wait for a PCR result from a cell counter.
+   *
+   * Every link is still offered in the list, because a machine registered twice
+   * under slightly different names is a real thing and the bench must be able
+   * to say which one it means. But choosing an unrelated one is then a decision
+   * somebody made, not a guess made for them.
+   */
+  const attached = feedChoices.find(l => l.suggested && l.open) ?? feedChoices.find(l => l.suggested);
   useEffect(() => {
-    if (feedLinkId) return;
-    const guess = feedChoices.find(l => l.suggested && l.open) ?? feedChoices.find(l => l.open) ?? feedChoices[0];
-    if (guess) setFeedLinkId(String(guess.id));
-  }, [feedChoices, feedLinkId]);
+    if (feedLinkId || !attached) return;
+    setFeedLinkId(String(attached.id));
+  }, [attached, feedLinkId]);
+  const listeningTo = feedChoices.find(l => String(l.id) === feedLinkId) ?? null;
 
   const fetchListen = useAnalyserListen<IqcFeedMessage>({
     arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`,
@@ -703,45 +740,68 @@ function RunControlDialog({ control, onClose, onSaved }: {
               ))}
             </div>
           )}
-          {!retained && <p className="iqc-method-hint">{IQC_ENTRY_METHOD_HINTS[method]}</p>}
+          {/* Only worth saying when there was a choice to make. */}
+          {!retained && methods.length > 1 && <p className="iqc-method-hint">{IQC_ENTRY_METHOD_HINTS[method]}</p>}
 
           {!retained && method === 'paste' && <PastePanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
           {!retained && method === 'worksheet' && <WorksheetPanel controlId={control.id} analytes={analytes} values={values} setValues={setValues} onProblem={setProblem} />}
           {!retained && method === 'upload' && <UploadPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
           {!retained && method === 'scan' && <ScanPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
-          {!retained && method === 'instrument' && <InstrumentPanel control={control} detail={detail} onMapped={applyMapping} onProblem={setProblem} />}
 
           {mapping && <MappingReport mapping={mapping} />}
 
           <div className="iqc-entry">
+            {/* The one place results are entered, and the one place they can be
+                received. Type them, or let the analyser send them — same form,
+                same boxes, one button. */}
             <div className="iqc-entry-head">
-              <span>Parameters</span>
-              {feedChoices.length > 1 && (
+              <span>Results</span>
+              {feedChoices.length > 0 && (
                 <select className="iqc-feed-pick" value={feedLinkId} onChange={e => setFeedLinkId(e.target.value)}>
+                  <option value="">Select an analyser…</option>
                   {feedChoices.map(l => (
-                    <option key={l.id} value={l.id}>{l.name}{l.equipmentName ? ` · ${l.equipmentName}` : ''}</option>
+                    <option key={l.id} value={l.id}>
+                      {l.name}{l.equipmentName ? ` · ${l.equipmentName}` : ''}
+                      {l.suggested ? '' : ' · other unit'}
+                    </option>
                   ))}
                 </select>
               )}
               <button type="button" className={`iqc-fetch tiny${fetchListen.waiting ? ' is-waiting' : ''}`}
-                disabled={!detail.feed && feedChoices.length === 0}
+                disabled={!feedLinkId && !detail.feed}
                 onClick={() => (fetchListen.waiting ? fetchListen.stop() : void fetchListen.start())}>
                 {fetchListen.waiting
                   ? <><Loader2 size={11} className="pd-spin" /> Waiting… {fetchListen.remaining}s</>
-                  : <><Radio size={11} /> Fetch from analyser</>}
+                  : <><Radio size={11} /> Receive from analyser</>}
               </button>
-              <span className="muted">{filled} of {analytes.length} filled</span>
+              <span className="muted">{filled} of {analytes.length} entered</span>
             </div>
             {fetchListen.waiting && (
               <p className="iqc-listening in-head">
                 <span className="iqc-pulse" />
-                Ready. Run the control on the analyser and its results drop into the boxes below.
+                Listening{listeningTo ? ` to ${listeningTo.name}` : ''}. Run the control on the analyser and
+                transmit it as you would a patient sample; the results land in the boxes below.
               </p>
             )}
-            {!fetchListen.waiting && !detail.feed && feedChoices.length === 0 && (
+            {/* Nothing connected at all, and nothing claimed. Three different
+                situations, each with a different answer — saying "no analyser"
+                to all three is how a bench concludes the button is broken. */}
+            {!fetchListen.waiting && feedChoices.length === 0 && (
               <p className="iqc-hint in-head">
-                No analyser is set up on this system yet, so there is nothing to fetch from. One is added under
-                Settings &rarr; Analyser Links.
+                No analyser is connected on this system yet, so there is nothing to receive from. Enter the
+                results below, or set an analyser up under Settings &rarr; Analyser Links.
+              </p>
+            )}
+            {!fetchListen.waiting && feedChoices.length > 0 && !feedLinkId && (
+              <p className="iqc-hint in-head">
+                No analyser is attached to this control, so none has been chosen for you. Enter the results
+                below, or choose the analyser this control is run on and receive them.
+              </p>
+            )}
+            {!fetchListen.waiting && listeningTo && !listeningTo.suggested && (
+              <p className="iqc-hint in-head">
+                {listeningTo.name} is not recorded against this control&rsquo;s instrument or unit. It will still
+                be listened to — check it is the analyser this control was run on.
               </p>
             )}
             {!fetchListen.waiting && fetchListen.note && <p className="iqc-hint in-head">{fetchListen.note}</p>}
@@ -1241,105 +1301,6 @@ function ScanPanel({ controlId, onMapped, onProblem }: {
         <div className="iqc-scan-view">
           <img src={image} alt="The control printout, for checking the values against" />
         </div>
-      )}
-    </div>
-  );
-}
-
-/* ----------------------------------------------------------------------------
-   Door 6: the instrument itself
-   ------------------------------------------------------------------------- */
-function InstrumentPanel({ control, detail, onMapped, onProblem }: {
-  control: IqcBoardControl; detail: Detail; onMapped: (m: IqcMapping) => void; onProblem: (m: string) => void;
-}) {
-  const [messages, setMessages] = useState<IqcFeedMessage[] | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  // Both statuses: a message the system matched to this control, and one it
-  // recognised as a control but could not place. The second is the one the
-  // bench needs most — it is waiting precisely because nobody has claimed it.
-  const load = useCallback(async () => {
-    try { setMessages(await api<IqcFeedMessage[]>('/iqc/portal/feed-messages')); }
-    catch (e) { onProblem(errorText(e)); }
-  }, [onProblem]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const bringIn = useCallback(async (messageId: number) => {
-    setBusy(true);
-    try { onMapped(await api<IqcMapping>(`/iqc/portal/feed-messages/${messageId}/mapping?materialId=${control.id}`)); }
-    catch (e) { onProblem(errorText(e)); }
-    finally { setBusy(false); }
-  }, [control.id, onMapped, onProblem]);
-
-  // Pressing Fetch opens the door and waits, rather than pulling at an analyser
-  // that decides for itself when to transmit.
-  const listen = useAnalyserListen<IqcFeedMessage>({
-    arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`),
-    poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
-    onArrival: async message => { await bringIn(message.id); await load(); },
-  });
-
-  const mine = (messages ?? []).filter(m =>
-    m.iqc_material_id === control.id || (m.iqc_material_id == null && m.status === 'unmatched'));
-
-  if (!detail.feed) {
-    return (
-      <div className="iqc-panel">
-        <p className="iqc-panel-lead">
-          No instrument feed is attached to this control yet. The analysers here already send their results over
-          TCP/IP; a feed recognises the control samples in that stream and parks them here for the bench to accept.
-          A feed is set up under Quality Control &rarr; IQC &rarr; Instrument feeds, and then chosen on this control.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="iqc-panel">
-      <p className="iqc-panel-lead">
-        <Radio size={12} /> {detail.feed.name}
-        {detail.feed.last_message_at ? ` · last heard from at ${String(detail.feed.last_message_at).slice(11, 16)}` : ' · nothing received yet'}
-        {detail.feed.last_error && <span className="crit"> · {detail.feed.last_error}</span>}
-        <button type="button" className={`iqc-fetch${listen.waiting ? ' is-waiting' : ''}`}
-          onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
-          {listen.waiting
-            ? <><Loader2 size={12} className="pd-spin" /> Waiting… {listen.remaining}s</>
-            : <><Radio size={12} /> Fetch from analyser</>}
-        </button>
-      </p>
-      {listen.waiting && (
-        <p className="iqc-listening">
-          <span className="iqc-pulse" />
-          Ready. Run the control on the analyser and its results drop into the boxes below.
-        </p>
-      )}
-      {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}
-      {listen.problem && <p className="iqc-note bad">{listen.problem}</p>}
-      {mine.length === 0 ? (
-        <p className="muted">
-          Nothing is waiting from this instrument. Run the control on the analyser and send it as you would a
-          patient sample; it will appear here within moments.{' '}
-          <button type="button" className="pq-link" onClick={() => void load()}>Check again</button>
-        </p>
-      ) : (
-        <ul className="iqc-feed-list">
-          {mine.map(message => (
-            <li key={message.id}>
-              <div>
-                <strong>{message.sample_id || 'control sample'}</strong>
-                <span className="muted">
-                  {' · '}{String(message.received_at).slice(0, 16).replace('T', ' ')}
-                  {' · '}{message.parsed_values?.length ?? 0} parameters
-                  {message.iqc_material_id == null ? ' · not matched to a control' : ''}
-                </span>
-              </div>
-              <button type="button" className="pq-link" disabled={busy} onClick={() => void bringIn(message.id)}>
-                Use these <ArrowRight size={11} />
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );

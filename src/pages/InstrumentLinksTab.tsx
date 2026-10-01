@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, AlertTriangle, Check, Cable, CheckCircle2, CircleDot, DownloadCloud, FolderOpen,
-  Loader2, Play, Plug, Plus, Radio, ShieldCheck, Square, TestTube2, Trash2, Wifi, X,
+  Loader2, MonitorPlay, Pause, Play, Plug, Plus, Radio, Rewind, ShieldCheck, Square,
+  TestTube2, Trash2, Wifi, X,
 } from 'lucide-react';
 import { api, errorText } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
@@ -95,6 +96,29 @@ type Activity = {
   }>;
 };
 
+/** One thing the bridge did, for the window that watches it happen. */
+type BridgeEvent = {
+  id: number; at: string; linkId: number;
+  level: 'info' | 'in' | 'out' | 'ok' | 'warn' | 'error';
+  text: string; detail?: string | null;
+};
+
+type LiveFeed = {
+  link: {
+    id: number; name: string; mode: string; role: string; protocol: string;
+    state: string; state_detail: string | null;
+    listen_host: string | null; listen_port: number | null;
+    remote_host: string | null; remote_port: number | null;
+    watch_path: string | null; tap_path: string | null; tap_offset: number | null;
+    last_message_at: string | null; messages_received: number;
+  };
+  following: { file: string | null; note: string; resolvedFromFolder: boolean } | null;
+  running: boolean;
+  events: BridgeEvent[];
+  cursor: number;
+  configuration: Record<string, unknown> | null;
+};
+
 type Profile = { key: string; label: string; vendor: string; discipline: string; protocol: string; notes: string | null; analyteCount: number };
 type LhimsMap = { key: string; label: string; vendor: string; sourceConfig: string; measureCount: number };
 
@@ -142,6 +166,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
   const [overview, setOverview] = useState<Overview | null>(null);
   const [fetching, setFetching] = useState<number | 'all' | null>(null);
   const [transmission, setTransmission] = useState<Link | null>(null);
+  const [live, setLive] = useState<Link | null>(null);
   const [host, setHost] = useState<HostInfo | null>(null);
   const [showHost, setShowHost] = useState(false);
 
@@ -342,7 +367,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
                     onEdit={() => { setEditing(link); setForm(formFrom(link)); setShowForm(true); }}
                     onMessages={() => setOpenMessages(link)} onFiles={() => setOpenFiles(link)}
                     onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)}
-                    onTransmission={() => setTransmission(link)} />
+                    onTransmission={() => setTransmission(link)} onLive={() => setLive(link)} />
                 ))}
               </ul>
             )}
@@ -358,7 +383,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
                       onEdit={() => { setEditing(link); setForm(formFrom(link)); setShowForm(true); }}
                       onMessages={() => setOpenMessages(link)} onFiles={() => setOpenFiles(link)}
                       onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)}
-                      onTransmission={() => setTransmission(link)} />
+                      onTransmission={() => setTransmission(link)} onLive={() => setLive(link)} />
                   ))}
                 </ul>
               </>
@@ -376,6 +401,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
       {openFiles && <FilesDialog link={openFiles} onClose={() => setOpenFiles(null)} />}
       {trying && <TryDialog link={trying} onClose={() => setTrying(null)} />}
+      {live && <LiveTransmission link={live} onClose={() => { setLive(null); void load(); }} canEdit={canEdit} />}
       {transmission && (
         <TransmissionDialog
           link={transmission} host={host} canEdit={canEdit}
@@ -390,6 +416,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
             setTransmission(null);
             setEditing(link); setForm({ ...formFrom(link), mode: 'lhims_tap' }); setShowForm(true);
           }}
+          onLive={() => { const link = transmission; setTransmission(null); setLive(link); }}
           onChanged={load} />
       )}
     </div>
@@ -437,11 +464,11 @@ function OverviewStat({ label, value, note, tone }: {
 /* ----------------------------------------------------------------------------
    One link
    ------------------------------------------------------------------------- */
-function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMessages, onFiles, onFetch, onTry, onTransmission }: {
+function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMessages, onFiles, onFetch, onTry, onTransmission, onLive }: {
   link: Link; canEdit: boolean; busy: boolean; fetching: boolean;
   onStart: () => void; onStop: () => void; onEdit: () => void;
   onMessages: () => void; onFiles: () => void; onFetch: () => void; onTry: () => void;
-  onTransmission: () => void;
+  onTransmission: () => void; onLive: () => void;
 }) {
   // A link the bridge will never open cannot transmit, however healthy its
   // settings look. Saying it on the row itself is the difference between a
@@ -516,11 +543,12 @@ function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMes
                 {busy ? <Loader2 size={12} className="pd-spin" /> : <Play size={12} />} Start
               </button>
         )}
-        {CAN_FETCH(link.mode) && link.role !== 'lhims_owned' && (
+        {CAN_FETCH(link.mode) && (link.role !== 'lhims_owned' || modeIsPassive(link.mode)) && (
           <button type="button" className="pq-link" disabled={fetching} onClick={onFetch}>
             {fetching ? <Loader2 size={12} className="pd-spin" /> : <DownloadCloud size={12} />} Fetch
           </button>
         )}
+        <button type="button" className="pq-link" onClick={onLive}><MonitorPlay size={12} /> Live</button>
         <button type="button" className="pq-link" onClick={onTransmission}><Activity size={12} /> Transmission</button>
         <button type="button" className="pq-link" onClick={onMessages}>Messages</button>
         {link.mode === 'file_drop' && <button type="button" className="pq-link" onClick={onFiles}><FolderOpen size={12} /> Files</button>}
@@ -582,9 +610,9 @@ function HostPanel({ host, links }: { host: HostInfo | null; links: Link[] }) {
    messages arriving, watched live, because seeing a transmission land settles
    the question better than any label.
    ------------------------------------------------------------------------- */
-function TransmissionDialog({ link, host, canEdit, onClose, onSettings, onTakeCopy, onChanged }: {
+function TransmissionDialog({ link, host, canEdit, onClose, onSettings, onTakeCopy, onLive, onChanged }: {
   link: Link; host: HostInfo | null; canEdit: boolean;
-  onClose: () => void; onSettings: () => void; onTakeCopy: () => void; onChanged: () => void;
+  onClose: () => void; onSettings: () => void; onTakeCopy: () => void; onLive: () => void; onChanged: () => void;
 }) {
   const [checks, setChecks] = useState<Checks | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
@@ -685,6 +713,11 @@ function TransmissionDialog({ link, host, canEdit, onClose, onSettings, onTakeCo
         )}
 
         <div className="il-trans-acts">
+          {/* The checklist says what is left to do; this says whether it is
+              happening. Somebody standing at the analyser wants the second one. */}
+          <button type="button" className="secondary" onClick={onLive}>
+            <MonitorPlay size={13} /> Watch it live
+          </button>
           <button type="button" className="secondary" disabled={testing} onClick={() => void selfTest()}>
             {testing ? <Loader2 size={13} className="pd-spin" /> : <Plug size={13} />} Test the connection
           </button>
@@ -723,6 +756,214 @@ function TransmissionDialog({ link, host, canEdit, onClose, onSettings, onTakeCo
             )}
           </>
         )}
+
+        <div className="pr-btns"><button type="button" className="secondary" onClick={onClose}>Close</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   The transmission, as it happens
+   ----------------------------------------------------------------------------
+   The LHIMS client puts the conversation on its own screen: what it is
+   configured to do on one side, and on the other every step of every message
+   as it arrives — received, queued, sent, transmitted. A laboratory running a
+   sample watches it land. Nobody has to decide whether "listening" means it is
+   working.
+
+   SECHLIMS had the answer and no way to watch it. The checklist says what is
+   left to do and the message list says what arrived some seconds ago, but
+   neither shows a transmission HAPPENING, which is the thing somebody standing
+   at the analyser actually wants.
+
+   So: the configuration on the left, in the analyser's own terms — the ones
+   somebody would type into the machine — and the live log on the right,
+   colour-coded by what each line means. It is a window onto now; the record is
+   under Messages and is written first, in full, before any of this.
+   ------------------------------------------------------------------------- */
+const LEVEL_WORD: Record<BridgeEvent['level'], string> = {
+  info: 'link', in: 'received', out: 'sent', ok: 'read', warn: 'check', error: 'failed',
+};
+
+function LiveTransmission({ link, canEdit, onClose }: { link: Link; canEdit: boolean; onClose: () => void }) {
+  const [feed, setFeed] = useState<LiveFeed | null>(null);
+  const [lines, setLines] = useState<BridgeEvent[]>([]);
+  const [cursor, setCursor] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'fetch' | 'rewind' | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const log = useRef<HTMLDivElement | null>(null);
+  const pinned = useRef(true);
+
+  const poll = useCallback(async (after: number) => {
+    try {
+      const next = await api<LiveFeed>(`/instrument-links/${link.id}/events?after=${after}`);
+      setFeed(next);
+      setProblem(null);
+      if (next.events.length) {
+        // Capped on the client as well as the server: a window left open all
+        // day must not grow until the browser struggles with it.
+        setLines(current => [...current, ...next.events].slice(-400));
+      }
+      setCursor(next.cursor);
+      return next.cursor;
+    } catch (e) { setProblem(errorText(e)); return after; }
+  }, [link.id]);
+
+  useEffect(() => { void poll(0); }, [poll]);
+
+  useEffect(() => {
+    if (paused) return;
+    let at = cursor;
+    let live = true;
+    const timer = setInterval(() => {
+      if (!live) return;
+      void poll(at).then(next => { at = next; });
+    }, 2_000);
+    return () => { live = false; clearInterval(timer); };
+    // `cursor` is read once to seed the loop; the loop carries its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paused, poll]);
+
+  // Follow the newest line, unless somebody has scrolled up to read something.
+  useEffect(() => {
+    const box = log.current;
+    if (!box || !pinned.current) return;
+    box.scrollTop = box.scrollHeight;
+  }, [lines, showRaw]);
+
+  function onScroll() {
+    const box = log.current;
+    if (!box) return;
+    pinned.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  }
+
+  async function run(what: 'fetch' | 'rewind') {
+    setBusy(what); setNote(null);
+    try {
+      const outcome = await api<{ ok: boolean; read: number; note: string }>(
+        `/instrument-links/${link.id}/${what === 'fetch' ? 'fetch' : 'rewind'}`, { method: 'POST' });
+      setNote(outcome.note);
+      await poll(cursor);
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  const state = feed?.link.state ?? link.state;
+  const running = feed?.running ?? link.running;
+  const canFetch = CAN_FETCH(link.mode) && (link.role !== 'lhims_owned' || modeIsPassive(link.mode));
+
+  /** What somebody would type into the analyser, or into the client. */
+  const setup: Array<[string, string]> = [];
+  if (link.mode === 'server') {
+    setup.push(['PORT', String(feed?.link.listen_port ?? link.listen_port ?? '—')]);
+    setup.push(['BIND', feed?.link.listen_host || link.listen_host || 'every interface']);
+    setup.push(['MODE', 'server — the analyser connects here']);
+  } else if (link.mode === 'client') {
+    setup.push(['EQUIPMENT_IP', String(feed?.link.remote_host ?? link.remote_host ?? '—')]);
+    setup.push(['PORT', String(feed?.link.remote_port ?? link.remote_port ?? '—')]);
+    setup.push(['MODE', 'client — SECHLIMS connects out']);
+  } else if (link.mode === 'file_drop') {
+    setup.push(['FOLDER', String(link.watch_path ?? '—')]);
+    setup.push(['PATTERN', link.file_pattern || 'every file']);
+    setup.push(['MODE', 'watched folder']);
+  } else {
+    setup.push(['PATH', String(link.tap_path ?? '—')]);
+    setup.push(['FOLLOWING', feed?.following?.file ?? '—']);
+    setup.push(['OFFSET', String(feed?.link.tap_offset ?? link.tap_offset ?? 0)]);
+    setup.push(['MODE', 'read-only copy of the client’s log']);
+  }
+
+  return (
+    <div className="ls-modal-back" onClick={onClose}>
+      <div className="ls-modal is-wide il-live" onClick={e => e.stopPropagation()}>
+        <header>
+          <h4><MonitorPlay size={15} /> {link.name} — live transmission</h4>
+          <button type="button" className="pq-link" onClick={onClose}><X size={14} /></button>
+        </header>
+
+        {problem && <Notice kind="error">{problem}</Notice>}
+
+        <div className="il-live-body">
+          {/* What this link is set to — the analyser's own terms. */}
+          <aside className="il-live-config">
+            <h5>Active configuration</h5>
+            <dl>
+              <dt>Feed</dt>
+              <dd>{LINK_MODE_LABELS[link.mode]?.split(';')[0] ?? link.mode}</dd>
+              <dt>Speaks</dt>
+              <dd>{LINK_PROTOCOL_LABELS[link.protocol]?.split('(')[0].trim() ?? link.protocol}</dd>
+              <dt>Analyser</dt>
+              <dd>{link.equipment_name || link.name}</dd>
+              <dt>State</dt>
+              <dd>
+                <span className={`il-live-dot s-${state}${running ? ' is-live' : ''}`} />
+                {LINK_STATE_LABELS[state as keyof typeof LINK_STATE_LABELS] ?? state}
+              </dd>
+            </dl>
+
+            <h6>Source setup</h6>
+            <pre className="il-live-setup">
+              {setup.map(([key, value]) => `${key} = ${value}`).join('\n')}
+            </pre>
+
+            {feed?.following?.resolvedFromFolder && (
+              <p className="il-live-hint">{feed.following.note}</p>
+            )}
+
+            <div className="il-live-acts">
+              {canFetch && (
+                <button type="button" className="secondary" disabled={busy !== null} onClick={() => void run('fetch')}>
+                  {busy === 'fetch' ? <Loader2 size={13} className="pd-spin" /> : <DownloadCloud size={13} />} Look now
+                </button>
+              )}
+              {canEdit && link.mode === 'lhims_tap' && (
+                <button type="button" className="secondary" disabled={busy !== null} onClick={() => void run('rewind')}>
+                  {busy === 'rewind' ? <Loader2 size={13} className="pd-spin" /> : <Rewind size={13} />} Read from the start
+                </button>
+              )}
+            </div>
+            {note && <p className="il-live-hint is-note">{note}</p>}
+          </aside>
+
+          {/* The conversation. */}
+          <section className="il-live-log">
+            <div className="il-live-bar">
+              <span className={`il-live-pulse${running && !paused ? ' is-live' : ''}`} />
+              <strong>{running ? 'Watching' : 'Not running'}</strong>
+              <span className="muted">{lines.length} line{lines.length === 1 ? '' : 's'}</span>
+              <label className="il-live-toggle">
+                <input type="checkbox" checked={showRaw} onChange={e => setShowRaw(e.target.checked)} />
+                Show the transmission
+              </label>
+              <button type="button" className="pq-link" onClick={() => setPaused(p => !p)}>
+                {paused ? <><Play size={12} /> Resume</> : <><Pause size={12} /> Pause</>}
+              </button>
+              <button type="button" className="pq-link" onClick={() => { setLines([]); pinned.current = true; }}>Clear</button>
+            </div>
+
+            <div className="il-live-lines" ref={log} onScroll={onScroll}>
+              {lines.length === 0 ? (
+                <p className="muted">
+                  Nothing yet. Run a sample on the analyser and transmit it as you normally would —
+                  every step of it appears here as it happens.
+                </p>
+              ) : lines.map(line => (
+                <div key={line.id} className={`il-live-line l-${line.level}`}>
+                  <span className="il-live-time">{String(line.at).slice(11, 19)}</span>
+                  <span className="il-live-tag">{LEVEL_WORD[line.level] ?? line.level}</span>
+                  <span className="il-live-text">
+                    {line.text}
+                    {showRaw && line.detail && <pre className="il-live-raw">{line.detail}</pre>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
 
         <div className="pr-btns"><button type="button" className="secondary" onClick={onClose}>Close</button></div>
       </div>

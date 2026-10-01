@@ -6941,6 +6941,22 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_kind ON instrument_messages(k
 CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_messages(forward_status);
 `);
 
+  // What makes one transmission itself.
+  //
+  // A message read from a FILE can be read again — a log followed from its
+  // beginning, a folder swept twice, a client that rewrote what it had written.
+  // Over a socket that cannot happen, and two identical transmissions are two
+  // genuine runs; from a file it happens routinely, and a control run recorded
+  // twice puts a point on a Levey-Jennings chart that never happened. The
+  // fingerprint is of what the analyser SAID — which sample, which machine,
+  // which moment, which values — not of the bytes, so a client that changed how
+  // it writes its log is still recognised as having said the same thing twice.
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(instrument_messages)").all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('message_hash')) database.exec('ALTER TABLE instrument_messages ADD COLUMN message_hash TEXT');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_instrument_messages_hash ON instrument_messages(link_id, message_hash)');
+  }
+
   // Carrying a result INTO LHIMS, and taking a copy OUT of its middleware.
   //
   // The LHIMS client posts each result to api/update_result.php with a
