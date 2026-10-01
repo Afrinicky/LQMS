@@ -26,6 +26,12 @@ uploads/
 evidence/
 config/local.json
 
+# The host's own data folder when it is run from the repository rather than
+# installed: the database, uploads, and now config/connectivity.json, which
+# holds the address and port this machine listens on. Per-machine runtime
+# state, never source.
+local-data/
+
 # Validation evidence is a retained quality record, not runtime data: the
 # objective evidence behind docs/validation/ has to travel with the code it
 # validates. Re-included after the runtime `evidence/` and `*.log` rules above.

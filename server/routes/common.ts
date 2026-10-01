@@ -9,8 +9,7 @@ import { backupFolder } from '../services/backupDestinations.js';
 import { config, type AppMode } from '../config/index.js';
 import {
   boundHost, boundPort, boundToLan, portMovedFromConfigured, askedPort,
-  storedLanChoice, setStoredLanChoice, hostSetInEnvironment,
-  storedPort, setStoredPort, resolvePort, portSetInEnvironment,
+  networkConfig, writeNetworkConfig, hostIsLan,
 } from '../services/hostBinding.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -3498,6 +3497,7 @@ export function commonRoutes() {
 
   router.get('/system/connectivity', requireAuth, async (_req, res) => {
     const { mode, source } = resolveMode();
+    const settings = networkConfig(true);
     // Whether anybody else can actually open this laboratory. Binding to
     // loopback is the default and is invisible from the outside — a browser on
     // another machine simply times out — so the host has to say so itself
@@ -3517,23 +3517,26 @@ export function commonRoutes() {
       // nothing.
       lan: {
         exposed: boundToLan(),
-        choice: storedLanChoice(getDb()),
-        lockedToEnvironment: hostSetInEnvironment(),
+        // What the laboratory has chosen for next time, which is not always
+        // what is running now — a change waits for a restart.
+        choice: hostIsLan(settings.host),
+        lockedToEnvironment: false,
         configuredPort: config.api.port,
         portMoved: portMovedFromConfigured(),
       },
-      // The port as a thing the laboratory owns, rather than something only the
-      // machine it was installed on knows.
       portSetting: {
         // What it asked for when it started, and what it will ask for next
         // time — which differ the moment somebody chooses a new one here.
         asked: askedPort(),
-        next: resolvePort(getDb),
+        next: settings.port,
         bound: boundPort(),
-        chosen: storedPort(getDb()),
-        lockedToEnvironment: portSetInEnvironment(),
+        chosen: settings.port,
+        lockedToEnvironment: false,
         envDefault: config.api.port,
       },
+      // Where the answer is kept, so a laboratory can see it, read it, and if
+      // everything else has gone wrong, edit it in a text editor.
+      settingsFile: { path: settings.path, source: settings.source, problem: settings.problem },
       lanReady: true,
       lanUrls: lanUrls(),
       hostAddresses: hostAddresses(),
@@ -3647,18 +3650,17 @@ export function commonRoutes() {
    * drop every connected bench mid-request to save somebody a restart.
    */
   router.put('/system/lan', requirePermission('settings', 'edit'), (req, res) => {
-    if (hostSetInEnvironment()) {
-      return res.status(400).json({
-        error: 'This host\'s bind address is set in its environment (SECH_LIMS_API_HOST), which takes precedence. '
-          + 'Change it there, or clear it to manage access from here.',
-      });
-    }
     const requested = req.body?.enabled;
     if (typeof requested !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false' });
 
-    const before = storedLanChoice(getDb());
-    setStoredLanChoice(getDb(), requested);
-    audit(req, { action: 'edit', entity: 'system_lan', entityId: 'lanExposed', oldValue: before, newValue: requested });
+    const before = networkConfig().host;
+    let after;
+    try {
+      after = writeNetworkConfig({ host: requested ? '0.0.0.0' : '127.0.0.1' });
+    } catch (err) {
+      return res.status(500).json({ error: `This host could not write its connectivity file: ${String(err)}` });
+    }
+    audit(req, { action: 'edit', entity: 'system_lan', entityId: 'bindHost', oldValue: before, newValue: after.host });
     res.json({
       ok: true,
       enabled: requested,
@@ -3685,18 +3687,16 @@ export function commonRoutes() {
    * restart to a person is better than doing it to them.
    */
   router.put('/system/port', requirePermission('settings', 'edit'), (req, res) => {
-    if (portSetInEnvironment()) {
-      return res.status(400).json({
-        error: 'This host\'s port is set in its environment (API_PORT), which takes precedence. '
-          + 'Change it there, or clear it to manage the port from here.',
-      });
-    }
     const asked = Number(req.body?.port);
     if (!Number.isInteger(asked) || asked < 1024 || asked > 65535) {
       return res.status(400).json({ error: 'Choose a port between 1024 and 65535.' });
     }
-    const before = storedPort(getDb());
-    setStoredPort(getDb(), asked);
+    const before = networkConfig().port;
+    try {
+      writeNetworkConfig({ port: asked });
+    } catch (err) {
+      return res.status(500).json({ error: `This host could not write its connectivity file: ${String(err)}` });
+    }
     audit(req, { action: 'edit', entity: 'system_port', entityId: 'apiPort', oldValue: before, newValue: asked });
     res.json({
       ok: true,

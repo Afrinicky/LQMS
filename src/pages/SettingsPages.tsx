@@ -3357,18 +3357,14 @@ function HostCard({ info, canEdit, onChanged }: {
 
       <div className="ap-group">
         <strong>Who may reach it</strong>
-        {lan?.lockedToEnvironment ? (
-          <span className="chip">Set in this host&rsquo;s environment (SECH_LIMS_API_HOST)</span>
-        ) : (
-          <div className="ap-choices">
-            <button type="button" disabled={!canEdit || busy}
-              className={`ap-choice${lan?.choice === true ? ' is-on' : ''}`}
-              onClick={() => void setLan(true)}>Every device on this network</button>
-            <button type="button" disabled={!canEdit || busy}
-              className={`ap-choice${lan?.choice !== true ? ' is-on' : ''}`}
-              onClick={() => void setLan(false)}>This computer only</button>
-          </div>
-        )}
+        <div className="ap-choices">
+          <button type="button" disabled={!canEdit || busy}
+            className={`ap-choice${lan?.choice === true ? ' is-on' : ''}`}
+            onClick={() => void setLan(true)}>Every device on this network</button>
+          <button type="button" disabled={!canEdit || busy}
+            className={`ap-choice${lan?.choice !== true ? ' is-on' : ''}`}
+            onClick={() => void setLan(false)}>This computer only</button>
+        </div>
         <span className="hint">
           {lan?.exposed
             ? 'The host is listening on every interface, so any device on this network can open it.'
@@ -3382,17 +3378,13 @@ function HostCard({ info, canEdit, onChanged }: {
 
       <div className="ap-group">
         <strong>Port</strong>
-        {portSetting?.lockedToEnvironment ? (
-          <span className="chip">Set in this host&rsquo;s environment (API_PORT)</span>
-        ) : (
-          <div className="cx-actions" style={{ marginTop: 0 }}>
-            <input className="cx-port" type="number" min={1024} max={65535} value={port}
-              disabled={!canEdit || busy} onChange={e => setPort(e.target.value)} />
-            <button type="button" disabled={!canEdit || busy || !portChanged} onClick={() => void savePort()}>
-              {busy ? 'Saving…' : 'Change port'}
-            </button>
-          </div>
-        )}
+        <div className="cx-actions" style={{ marginTop: 0 }}>
+          <input className="cx-port" type="number" min={1024} max={65535} value={port}
+            disabled={!canEdit || busy} onChange={e => setPort(e.target.value)} />
+          <button type="button" disabled={!canEdit || busy || !portChanged} onClick={() => void savePort()}>
+            {busy ? 'Saving…' : 'Change port'}
+          </button>
+        </div>
         <span className="hint">
           The host answers on <code>{info.api.port}</code> now.
           {portPending && <> It moves to <code>{portSetting!.next}</code> when it is next restarted.</>}
@@ -3413,6 +3405,17 @@ function HostCard({ info, canEdit, onChanged }: {
         ))}
         {info.api.publicUrl && <Row label="Public URL"><code>{info.api.publicUrl}</code></Row>}
       </div>
+
+      {/* Named rather than hidden: when everything else has gone wrong, this
+          file is the thing a facility can open and correct by hand. */}
+      {info.settingsFile && (
+        <p className="hint" style={{ marginTop: 10 }}>
+          Both are kept in <code>{info.settingsFile.path}</code>
+          {info.settingsFile.source === 'environment'
+            && ' — written just now from this host\u2019s starting values, and yours to change from here.'}
+        </p>
+      )}
+      {info.settingsFile?.problem && <Notice kind="warn" silent>{info.settingsFile.problem}</Notice>}
 
       {lan?.portMoved && (
         <Notice kind="warn" silent>
