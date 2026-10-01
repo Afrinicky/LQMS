@@ -3449,6 +3449,37 @@ export function commonRoutes() {
     return { mode: config.mode, source: 'default' };
   }
 
+  /**
+   * Every address this machine has, whether or not the host answers on it.
+   *
+   * The reachable list goes empty when the host is on loopback, which drew
+   * nothing at all — and "no addresses shown" reads as a screen with nothing to
+   * say rather than as a host that is refusing the network. Somebody trying to
+   * work out why the address they have always used stopped answering needs to
+   * see that address, and see it marked as not answering.
+   */
+  function hostAddresses(): Array<{ label: string; url: string; reachable: boolean }> {
+    const open = boundToLan();
+    const out: Array<{ label: string; url: string; reachable: boolean }> = [];
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const net of ifaces[name] ?? []) {
+        if (net.family !== 'IPv4' || net.internal) continue;
+        // A Tailscale address is a real interface on this machine, so it is
+        // reached directly only while the host listens on every interface.
+        // Published with `tailscale serve` it goes through loopback instead,
+        // which is why one route can work while the other does not.
+        const viaTailscale = net.address.startsWith('100.');
+        out.push({
+          label: viaTailscale ? 'Tailscale address' : `This network (${name})`,
+          url: `http://${net.address}:${boundPort()}/`,
+          reachable: open,
+        });
+      }
+    }
+    return out;
+  }
+
   function lanUrls(): string[] {
     // The port that was actually bound, not the one that was asked for. A host
     // whose port was taken walks on to the next, and handing somebody the
@@ -3492,11 +3523,61 @@ export function commonRoutes() {
       },
       lanReady: true,
       lanUrls: lanUrls(),
+      hostAddresses: hostAddresses(),
       reach,
       database: { driver: config.db.driver },
       sync: { enabled: config.sync.enabled, status: 'planned' },
       generatedAt: new Date().toISOString()
     });
+  });
+
+  /* --------------------------------------------------------------------------
+     Appearance
+     ----------------------------------------------------------------------- */
+
+  /**
+   * The light or dark theme this laboratory starts people on.
+   *
+   * A theme is a per-device choice — one person works a night shift on a dim
+   * screen, another is under a window — so the personal toggle stays. What was
+   * missing is the laboratory's own answer for a device that has never chosen,
+   * which left every new machine on whatever the build happened to default to
+   * with nobody able to say otherwise.
+   *
+   * The timestamp is what makes a change reach devices that HAVE chosen: a
+   * device adopts the default whenever it was set more recently than that
+   * device last picked for itself. So an administrator who sets the laboratory
+   * to light moves everybody to light, and anyone who still wants dark toggles
+   * it back and keeps it.
+   */
+  function appearance() {
+    const db = getDb();
+    const read = (key: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+      { value?: string } | undefined)?.value ?? null;
+    const stored = read('defaultTheme');
+    return {
+      defaultTheme: stored === 'dark' ? 'dark' : 'light',
+      setAt: read('defaultThemeSetAt'),
+    };
+  }
+
+  router.get('/system/appearance', requireAuth, (_req, res) => res.json(appearance()));
+
+  router.put('/system/appearance', requirePermission('settings', 'edit'), (req, res) => {
+    const requested = req.body?.defaultTheme;
+    if (requested !== 'light' && requested !== 'dark') {
+      return res.status(400).json({ error: 'defaultTheme must be "light" or "dark".' });
+    }
+    const db = getDb();
+    const before = appearance();
+    const write = db.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`);
+    write.run('defaultTheme', requested);
+    write.run('defaultThemeSetAt', new Date().toISOString());
+    audit(req, { action: 'edit', entity: 'system_appearance', entityId: 'defaultTheme', oldValue: before.defaultTheme, newValue: requested });
+    res.json({ ...appearance(), note: requested === 'light'
+      ? 'Every device now opens in the light theme. Anyone who prefers dark can switch it back for themselves.'
+      : 'Every device now opens in the dark theme. Anyone who prefers light can switch it back for themselves.' });
   });
 
   router.put('/system/mode', requirePermission('settings', 'edit'), (req, res) => {

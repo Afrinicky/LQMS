@@ -35,6 +35,8 @@ export type SystemConnectivity = {
   };
   lanReady: boolean;
   lanUrls: string[];
+  /** Every address this machine has, and whether the host answers on it. */
+  hostAddresses?: Array<{ label: string; url: string; reachable: boolean }>;
   /** Whether anybody other than this computer can open the laboratory. */
   reach: {
     reachable: boolean;

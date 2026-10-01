@@ -1127,10 +1127,11 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
             </div>
           )}
 
-          {/* The analyser, where one is attached to this control. Typing a
-              twenty-three parameter FBC off a printout is not a workflow; it
-              is a reason to stop keeping the record. */}
-          {analyser && (analyser.source || (analyser.options ?? []).length > 0) && (
+          {/* The analyser. Always drawn, even where nothing is linked yet:
+              a Fetch button that appears only once the configuration happens
+              to be right is a Fetch button people are told does not exist.
+              With nothing to listen to it stands disabled and says why. */}
+          {analyser && (
             <AnalyserPanel
               materialId={Number(materialId)} status={analyser} mapping={mapping}
               linkId={linkId} onLink={setLinkId} equipmentId={meta.equipmentId}

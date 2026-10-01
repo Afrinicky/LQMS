@@ -113,6 +113,33 @@ export function iqcPortalRoutes() {
         LIMIT 1`).get(material.equipment_id, unitId, material.equipment_id, unitId) ?? null;
   }
 
+  /**
+   * Every link that could be listened to, best guess first.
+   *
+   * The guess above returns one link or nothing, and "nothing" was being drawn
+   * as "this control has no analyser" — which is not the same statement. A
+   * laboratory with two links and a control that names neither has an analyser
+   * sitting there transmitting; it just has no row saying which. Offering the
+   * list lets the bench say so in one click instead of giving up.
+   */
+  function linkOptions(db: any, material: any) {
+    const unitId = material.performing_section_id ?? material.section_id ?? null;
+    const rows = db.prepare(`SELECT l.id, l.name, l.mode, l.role, l.state, l.equipment_id, l.section_id,
+          l.last_message_at, e.name AS equipment_name
+        FROM instrument_links l LEFT JOIN equipment_items e ON e.id = l.equipment_id
+        WHERE l.is_active = 1
+        ORDER BY (l.equipment_id = ?) DESC, (l.section_id = ?) DESC,
+                 (l.state IN ('listening','connected','following')) DESC, l.name`)
+      .all(material.equipment_id, unitId) as any[];
+    return rows.map(l => ({
+      id: l.id, name: l.name, equipmentName: l.equipment_name ?? null,
+      state: l.state, lastMessageAt: l.last_message_at,
+      open: linkIsOurs(l.role, l.mode),
+      suggested: (material.equipment_id != null && Number(l.equipment_id) === Number(material.equipment_id))
+        || (unitId != null && Number(l.section_id) === Number(unitId)),
+    }));
+  }
+
   function reachableControl(db: any, req: any, materialId: number): boolean {
     const sectionId = currentSection(db, req);
     if (!sectionId) return false;
@@ -606,6 +633,7 @@ export function iqcPortalRoutes() {
         preferredEntryMethod: material.preferred_entry_method || null,
       },
       analytes, recent, layout, feed,
+      feedOptions: linkOptions(db, material),
       feedWaiting: Number(waiting?.n ?? 0),
       canPerform: mayPerform(req, controlSection),
       canReview: mayReview(req),
@@ -1114,7 +1142,12 @@ export function iqcPortalRoutes() {
     if (!reachableControl(db, req, Number(req.params.id))) {
       return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
     }
-    const link = linkForControl(db, material) as any;
+    // The bench may name the analyser itself when the control names none, or
+    // names the wrong one. Its own choice wins over the guess.
+    const asked = parseIntNullable(req.body?.linkId);
+    const link = (asked
+      ? db.prepare('SELECT * FROM instrument_links WHERE id = ? AND is_active = 1').get(asked)
+      : null) ?? linkForControl(db, material) as any;
 
     const newest = db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
         WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)

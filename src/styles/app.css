@@ -7244,3 +7244,29 @@ button.cell-mark:disabled { cursor: default; }
 }
 .af-drop:hover { color: var(--danger); }
 .af-staged-act { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Choosing the analyser from the bench, where the control names none. */
+.iqc-feed-pick {
+  font-size: 11.5px; max-width: 190px; padding: 4px 7px;
+  border-radius: 7px; border: 1px solid var(--border); background: var(--surface);
+}
+
+/* Putting a sample on the register without leaving the run dialog. */
+.iqc-sample-row { display: flex; align-items: center; gap: 10px; }
+.iqc-sample-add {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--accent-bright); font-size: 11.5px; font-weight: 600; padding: 2px 4px;
+}
+.iqc-sample-add:hover { text-decoration: underline; }
+.iqc-addsample {
+  margin-top: 8px; padding: 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  display: flex; flex-direction: column; gap: 9px;
+}
+.iqc-addsample-top { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.iqc-addsample-top label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; flex: 1; min-width: 150px; }
+.iqc-addsample-top label > span { color: var(--muted); }
+.iqc-addsample-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; }
+.iqc-addsample-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+.iqc-addsample-grid label > span { color: var(--muted); }
+.iqc-addsample-save { align-self: flex-start; }
