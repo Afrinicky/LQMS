@@ -7328,9 +7328,12 @@ button.cell-mark:disabled { cursor: default; }
 
 /* Fetch, sitting on the parameters header where the boxes it fills are. */
 .iqc-fetch.tiny { padding: 4px 10px; font-size: 11.5px; border-radius: 7px; gap: 5px; }
-.iqc-entry-head { gap: 10px; }
+/* The analyser picker now shows whenever this system has an analyser at all,
+   not only when it has two — so the row carries four things and must be
+   allowed to wrap rather than squashing them on a phone. */
+.iqc-entry-head { gap: 8px 10px; flex-wrap: wrap; }
 .iqc-entry-head > span:first-child { flex: none; }
-.iqc-entry-head > .muted { margin-left: auto; }
+.iqc-entry-head > .muted { margin-left: auto; white-space: nowrap; }
 .iqc-listening.in-head, .iqc-hint.in-head {
   margin: 0; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--surface);
 }
@@ -7374,7 +7377,7 @@ button.cell-mark:disabled { cursor: default; }
 
 /* Choosing the analyser from the bench, where the control names none. */
 .iqc-feed-pick {
-  font-size: 11.5px; max-width: 190px; padding: 4px 7px;
+  font-size: 11.5px; max-width: 190px; min-width: 0; padding: 4px 7px;
   border-radius: 7px; border: 1px solid var(--border); background: var(--surface);
 }
 

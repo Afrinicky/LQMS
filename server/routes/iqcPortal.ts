@@ -97,20 +97,35 @@ export function iqcPortalRoutes() {
   /**
    * The analyser link that serves a control, asked as widely as the module.
    *
-   * The instrument on the control first, then the unit's, then — when this
-   * laboratory has exactly one link at all — that one. Matching only on
-   * equipment_id is how a machine registered twice under slightly different
-   * names ends up with no analyser and no explanation.
+   * The instrument this control runs on, failing that an analyser on the same
+   * unit. Matching only on equipment_id is how a machine registered twice under
+   * slightly different names ends up with no analyser and no explanation, so
+   * the unit is accepted as well.
+   *
+   * WHAT IS NOT ACCEPTED, and used to be: "this laboratory happens to own
+   * exactly one link, so it must be the one." It is not. A laboratory that has
+   * connected its first analyser — a haematology analyser, say — had that
+   * analyser offered on every control in the building, including a GeneXpert
+   * MTB control that cannot possibly come off it. The bench is then invited to
+   * wait for a PCR result from a cell counter, which is not a thing that will
+   * ever happen, and the screen names a machine that has nothing to do with the
+   * control in front of it.
+   *
+   * Nothing is better than the wrong thing here. Where no analyser belongs to
+   * this control, none is named, and the bench may still pick one deliberately
+   * from the full list — which is a decision somebody made, not a guess the
+   * system made for them.
    */
   function linkForControl(db: any, material: any) {
     const unitId = material.performing_section_id ?? material.section_id ?? null;
+    if (material.equipment_id == null && unitId == null) return null;
     return db.prepare(`SELECT * FROM instrument_links
         WHERE is_active = 1
-          AND (equipment_id = ? OR section_id = ?
-               OR (SELECT COUNT(*) FROM instrument_links WHERE is_active = 1) = 1)
+          AND ((? IS NOT NULL AND equipment_id = ?) OR (? IS NOT NULL AND section_id = ?))
         ORDER BY (equipment_id = ?) DESC, (section_id = ?) DESC,
                  (state IN ('listening','connected','following')) DESC, id
-        LIMIT 1`).get(material.equipment_id, unitId, material.equipment_id, unitId) ?? null;
+        LIMIT 1`).get(material.equipment_id, material.equipment_id, unitId, unitId,
+          material.equipment_id, unitId) ?? null;
   }
 
   /**
