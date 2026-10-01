@@ -63,6 +63,17 @@ fs.writeFileSync(tapFile, '');
 function clientAppends(records) {
   fs.appendFileSync(tapFile, records.join('\r') + '\r', 'latin1');
 }
+function clientAppendsFramed(records) {
+  // This is the form found in the XN-550 LHIMSDataInput.txt: ENQ, ASTM
+  // frames (STX + frame number + record + CR + ETX), then EOT.
+  const chunks = [Buffer.from([0x05])];
+  records.forEach((record, i) => {
+    chunks.push(Buffer.from([0x02]));
+    chunks.push(Buffer.from(String(i % 8) + record + '\r\x03', 'latin1'));
+  });
+  chunks.push(Buffer.from([0x04]));
+  fs.appendFileSync(tapFile, Buffer.concat(chunks));
+}
 
 /* ==========================================================================
    A stub standing in for the LHIMS server
@@ -186,6 +197,26 @@ check('a control in the log is recognised as a control',
   messages.find(m => m.sample_id === 'QC2')?.kind);
 check('and parked on the IQC bench',
   ((await j('/iqc/portal/feed-messages', { token: A })).json ?? []).some(m => m.sample_id === 'QC2'));
+// Real XN-550/LHIMSDataInput.txt framing: the middleware writes ASTM control
+// characters into the append log. The tap must parse that form too.
+clientAppendsFramed([
+  'H|\\^&|||    XN-550^00-27^15346^^^^BD634545||||||||E1394-97',
+  'P|1||||^^|||U|||||^||||||||||||^^^',
+  'C|1||',
+  'O|1||^^       CTRL-TEST-01^M|^^^^WBC\\^^^^HGB',
+  'C|1||',
+  'R|1|^^^^WBC^1|6.80|10*3/uL||N||F||||20260923074220',
+  'R|2|^^^^HGB^1|11.4|g/dL||N||F||||20260923074220',
+  'L|1|N',
+]);
+await wait(4500);
+messages = (await j(`/instrument-links/${tap.json.id}/messages`, { token: A })).json ?? [];
+const framedControl = messages.find(m => m.sample_id === 'CTRL-TEST-01');
+check('a real XN-550 framed transmission is parsed from LHIMSDataInput.txt', Boolean(framedControl));
+check('the framed XN-550 control is recognised as a control', framedControl?.kind === 'control', framedControl?.kind);
+check('and its WBC/HGB values are mapped',
+  framedControl?.parsed_values?.some(v => v.code === 'WBC' && v.value === '6.80' && v.analyte === 'WBC')
+  && framedControl?.parsed_values?.some(v => v.code === 'HGB' && v.value === '11.4' && v.analyte === 'Haemoglobin'));
 
 // Half an append must not be parsed as a whole message.
 fs.appendFileSync(tapFile, 'H|\\^&|||XN-550^1.0|||||||P|1\rO|1|SC-PARTIAL||^^^^FBC|R\rR|1|^^^WBC|4.4', 'latin1');
