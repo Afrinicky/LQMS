@@ -44,6 +44,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
+import { linksForControl } from '../services/controlAnalyser.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { mayActOnUnit, leadsAnyUnit } from '../services/unitLeadership.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
@@ -97,70 +98,58 @@ export function iqcPortalRoutes() {
   /**
    * The analyser link that serves a control, asked as widely as the module.
    *
-   * The instrument this control runs on, failing that an analyser on the same
-   * unit. Matching only on equipment_id is how a machine registered twice under
-   * slightly different names ends up with no analyser and no explanation, so
-   * the unit is accepted as well.
+   * The analyser links that belong to THIS control.
    *
-   * WHAT IS NOT ACCEPTED, and used to be: "this laboratory happens to own
-   * exactly one link, so it must be the one." It is not. A laboratory that has
-   * connected its first analyser — a haematology analyser, say — had that
-   * analyser offered on every control in the building, including a GeneXpert
-   * MTB control that cannot possibly come off it. The bench is then invited to
-   * wait for a PCR result from a cell counter, which is not a thing that will
-   * ever happen, and the screen names a machine that has nothing to do with the
-   * control in front of it.
+   * One rule, and it is a strict one: a link counts only when it is registered
+   * against the very instrument the control runs on. Not the unit, not "the
+   * only analyser this laboratory owns", not anything else.
    *
-   * Nothing is better than the wrong thing here. Where no analyser belongs to
-   * this control, none is named, and the bench may still pick one deliberately
-   * from the full list — which is a decision somebody made, not a guess the
-   * system made for them.
+   * One machine registered twice under slightly different spellings still
+   * counts as one machine; two machines in one room never count as one. The
+   * rule and the reasoning live in `controlAnalyser.ts`, so this screen and the
+   * module's cannot drift apart about it.
+   *
+   * Where no link belongs to the control's instrument, none is offered, and
+   * the screen says which of the two things is missing: an instrument on the
+   * control, or a link on that instrument.
    */
+  const linkRowsForControl = (db: any, material: any): any[] => linksForControl(db, material);
+
+  /** The one to listen on by default: a link that is up, else the first. */
   function linkForControl(db: any, material: any) {
-    const unitId = material.performing_section_id ?? material.section_id ?? null;
-    if (material.equipment_id == null && unitId == null) return null;
-    return db.prepare(`SELECT * FROM instrument_links
-        WHERE is_active = 1
-          AND ((? IS NOT NULL AND equipment_id = ?) OR (? IS NOT NULL AND section_id = ?))
-        ORDER BY (equipment_id = ?) DESC, (section_id = ?) DESC,
-                 (state IN ('listening','connected','following')) DESC, id
-        LIMIT 1`).get(material.equipment_id, material.equipment_id, unitId, unitId,
-          material.equipment_id, unitId) ?? null;
+    const rows = linkRowsForControl(db, material);
+    return rows.find(l => linkIsOurs(l.role, l.mode)) ?? rows[0] ?? null;
   }
 
   /**
-   * Every link that could be listened to, best guess first.
+   * The same links, shaped for the screen's picker.
    *
-   * The guess above returns one link or nothing, and "nothing" was being drawn
-   * as "this control has no analyser" — which is not the same statement. A
-   * laboratory with two links and a control that names neither has an analyser
-   * sitting there transmitting; it just has no row saying which. Offering the
-   * list lets the bench say so in one click instead of giving up.
+   * More than one is a real arrangement rather than an oddity: an analyser
+   * whose results SECHLIMS reads directly and also follows through a
+   * middleware's log has two links to one machine, and the bench must be able
+   * to say which it is standing in front of.
    */
   function linkOptions(db: any, material: any) {
-    const unitId = material.performing_section_id ?? material.section_id ?? null;
-    const rows = db.prepare(`SELECT l.id, l.name, l.mode, l.role, l.state, l.equipment_id, l.section_id,
-          l.last_message_at, e.name AS equipment_name
-        FROM instrument_links l LEFT JOIN equipment_items e ON e.id = l.equipment_id
-        WHERE l.is_active = 1
-        ORDER BY (l.equipment_id = ?) DESC, (l.section_id = ?) DESC,
-                 (l.state IN ('listening','connected','following')) DESC, l.name`)
-      .all(material.equipment_id, unitId) as any[];
-    return rows.map(l => ({
+    return linkRowsForControl(db, material).map(l => ({
       id: l.id, name: l.name, equipmentName: l.equipment_name ?? null,
       state: l.state, lastMessageAt: l.last_message_at,
       open: linkIsOurs(l.role, l.mode),
-      suggested: (material.equipment_id != null && Number(l.equipment_id) === Number(material.equipment_id))
-        || (unitId != null && Number(l.section_id) === Number(unitId)),
+      // Every option offered now belongs to this control's instrument, so
+      // there is no longer such a thing as an unsuggested one.
+      suggested: true,
+      /** Can this link be asked for results, or only waited on? */
+      canPull: l.mode === 'file_drop' || l.mode === 'lhims_tap',
     }));
   }
 
   function reachableControl(db: any, req: any, materialId: number): boolean {
-    const sectionId = currentSection(db, req);
-    if (!sectionId) return false;
     const row = db.prepare(`SELECT COALESCE(m.performing_section_id, m.section_id, e.section_id) AS resolved
         FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id WHERE m.id = ?`).get(materialId) as any;
-    return Number(row?.resolved) === Number(sectionId);
+    if (row?.resolved == null) return false;
+    const scope = resolveUnitScope(req, row.resolved);
+    // A senior post asked for this control's unit and was given it; everybody
+    // else is handed their own, which must then be the control's.
+    return Number(scope.sectionId) === Number(row.resolved);
   }
 
   function currentSection(db: any, req: any): number | null {
@@ -1157,23 +1146,28 @@ export function iqcPortalRoutes() {
     if (!reachableControl(db, req, Number(req.params.id))) {
       return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
     }
-    // The bench may name the analyser itself when the control names none, or
-    // names the wrong one. Its own choice wins over the guess.
+    // The bench may say which of this control's links it is standing in front
+    // of, where the instrument carries more than one. It may not name a link
+    // belonging to another instrument: a control run attributed to the wrong
+    // analyser corrupts that analyser's own mean and chart, and the request is
+    // simply ignored rather than obeyed.
     const asked = parseIntNullable(req.body?.linkId);
-    const link = (asked
-      ? db.prepare('SELECT * FROM instrument_links WHERE id = ? AND is_active = 1').get(asked)
-      : null) ?? linkForControl(db, material) as any;
+    const mine = linkRowsForControl(db, material);
+    const named = asked ? mine.find(l => Number(l.id) === Number(asked)) : undefined;
+    const link: any = named ?? linkForControl(db, material);
 
-    const newest = db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
+    const newestId = () => Number((db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
         WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)
-      .get(link?.id ?? null, link?.id ?? null, material.feed_id, material.feed_id) as { id: number | null };
+      .get(link?.id ?? null, link?.id ?? null, material.feed_id, material.feed_id) as { id: number | null })?.id ?? 0);
     // A pair, so the module and the bench speak the same shape. The bench only
     // ever watches control runs, so the patient mark stays at zero.
-    const since = { control: Number(newest?.id ?? 0), patient: 0 };
+    const since = { control: newestId(), patient: 0 };
 
     if (!link) return res.json({ listening: Boolean(material.feed_id), since, note: material.feed_id
       ? 'Ready. Send the control from the analyser and it will appear here.'
-      : 'No analyser is attached to this control.' });
+      : material.equipment_id
+        ? 'No analyser link is registered against this control\'s instrument. One is added under Settings → Analyser Links.'
+        : 'This control does not say which instrument it runs on, so there is no analyser to fetch from.' });
 
     if (!linkIsOurs(link.role, link.mode)) {
       return res.json({ listening: false, since, note: 'This link is one LHIMS owns, so nothing will arrive here.' });
@@ -1181,8 +1175,49 @@ export function iqcPortalRoutes() {
     const bridge = currentBridge();
     if (!bridge) return res.json({ listening: false, since, note: 'The analyser bridge is not running on this host.' });
     if (!bridge.isRunning(Number(link.id))) bridge.restart(Number(link.id));
-    else if (link.mode === 'file_drop' || link.mode === 'lhims_tap') bridge.fetchNow(Number(link.id));
-    res.json({ listening: true, since, note: 'Ready. Send the control from the analyser and it will appear here.' });
+
+    /**
+     * Ask, where asking is possible; wait, where it is not.
+     *
+     * Both are "fetch", and which one happens is a property of the link rather
+     * than anything the bench should have to know. An analyser that dials in
+     * decides for itself when to transmit, so there the only honest thing is to
+     * stand ready. But where SECHLIMS is the middleware — a folder the analyser
+     * exports into, a client's log it follows — the results may already be
+     * sitting there, and pressing fetch should go and look, exactly as the
+     * LHIMS client's own fetch does. Pressing it and being told to wait for
+     * something that arrived an hour ago is how a bench stops pressing it.
+     */
+    const canPull = link.mode === 'file_drop' || link.mode === 'lhims_tap';
+    if (canPull) {
+      try { bridge.fetchNow(Number(link.id)); }
+      catch { /* what landed is measured below; a failed look is not a failed fetch */ }
+    }
+
+    /**
+     * What to say, measured rather than assumed.
+     *
+     * Asking the bridge how many FILES it read is the wrong question twice
+     * over: starting a stopped link sweeps its folder on the way up, so the
+     * fetch that follows truthfully reports "nothing new" about results it has
+     * just this second brought in — and a bench reading that concludes the
+     * button does not work. What matters is whether anything arrived for THIS
+     * control since the watermark, which is the same thing the screen is about
+     * to poll for.
+     *
+     * The watermark handed back is the one taken BEFORE any of this, so
+     * whatever landed is still ahead of it and the waiting screen collects it
+     * on its first poll rather than never.
+     */
+    const landed = newestId() - since.control;
+    res.json({
+      listening: true, since,
+      note: landed > 0
+        ? `${landed} control run${landed === 1 ? '' : 's'} brought in. Still listening in case the analyser sends again.`
+        : canPull
+          ? 'Nothing waiting. Standing by — run the control on the analyser and it will appear here.'
+          : 'Ready. Send the control from the analyser and it will appear here.',
+    });
   });
 
   router.post('/portal/feed-messages/:id/reject', numericOnly, (req, res) => {

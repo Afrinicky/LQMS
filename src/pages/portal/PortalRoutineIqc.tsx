@@ -447,10 +447,12 @@ function ControlRow({ control, canPerform, onOpen, onChart }: {
 /* ----------------------------------------------------------------------------
    Running one — the five doors into the same room
    ------------------------------------------------------------------------- */
-/** One analyser this unit could listen to, whether or not the control names it. */
+/** One analyser link registered against this control's own instrument. */
 type FeedChoice = {
   id: number; name: string; equipmentName: string | null;
   state: string; lastMessageAt: string | null; open: boolean; suggested: boolean;
+  /** Can this link be asked for results, or only waited on? */
+  canPull?: boolean;
 };
 
 type Detail = {
@@ -570,17 +572,17 @@ function RunControlDialog({ control, onClose, onSaved }: {
   /**
    * Which analyser this control is listened to on.
    *
-   * Only one that actually belongs to this control — its own instrument, or one
-   * on its unit — is chosen for somebody. Falling through to "whatever link
-   * exists" put a haematology analyser on a GeneXpert MTB control and invited
-   * the bench to wait for a PCR result from a cell counter.
+   * The host only ever offers links registered against this control's own
+   * instrument, so there is nothing here to guard against: the first one that
+   * the bridge will actually open is the right default, and the picker below
+   * appears only where that instrument carries more than one link.
    *
-   * Every link is still offered in the list, because a machine registered twice
-   * under slightly different names is a real thing and the bench must be able
-   * to say which one it means. But choosing an unrelated one is then a decision
-   * somebody made, not a guess made for them.
+   * A control run is a statement about one instrument's performance, and an
+   * accepted run cannot be un-attributed afterwards — so an analyser that was
+   * never linked to this control is not offered at all, rather than offered
+   * with a warning beside it.
    */
-  const attached = feedChoices.find(l => l.suggested && l.open) ?? feedChoices.find(l => l.suggested);
+  const attached = feedChoices.find(l => l.open) ?? feedChoices[0];
   useEffect(() => {
     if (feedLinkId || !attached) return;
     setFeedLinkId(String(attached.id));
@@ -756,14 +758,14 @@ function RunControlDialog({ control, onClose, onSaved }: {
                 same boxes, one button. */}
             <div className="iqc-entry-head">
               <span>Results</span>
-              {feedChoices.length > 0 && (
+              {/* Only the links registered against this control's own
+                  instrument. More than one is a real arrangement — a machine
+                  read directly and also followed through a middleware's log —
+                  so the picker stays; one is simply chosen. */}
+              {feedChoices.length > 1 && (
                 <select className="iqc-feed-pick" value={feedLinkId} onChange={e => setFeedLinkId(e.target.value)}>
-                  <option value="">Select an analyser…</option>
                   {feedChoices.map(l => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}{l.equipmentName ? ` · ${l.equipmentName}` : ''}
-                      {l.suggested ? '' : ' · other unit'}
-                    </option>
+                    <option key={l.id} value={l.id}>{l.name}{l.equipmentName ? ` · ${l.equipmentName}` : ''}</option>
                   ))}
                 </select>
               )}
@@ -772,7 +774,7 @@ function RunControlDialog({ control, onClose, onSaved }: {
                 onClick={() => (fetchListen.waiting ? fetchListen.stop() : void fetchListen.start())}>
                 {fetchListen.waiting
                   ? <><Loader2 size={11} className="pd-spin" /> Waiting… {fetchListen.remaining}s</>
-                  : <><Radio size={11} /> Receive from analyser</>}
+                  : <><Radio size={11} /> Fetch Results</>}
               </button>
               <span className="muted">{filled} of {analytes.length} entered</span>
             </div>
@@ -783,25 +785,14 @@ function RunControlDialog({ control, onClose, onSaved }: {
                 transmit it as you would a patient sample; the results land in the boxes below.
               </p>
             )}
-            {/* Nothing connected at all, and nothing claimed. Three different
-                situations, each with a different answer — saying "no analyser"
-                to all three is how a bench concludes the button is broken. */}
-            {!fetchListen.waiting && feedChoices.length === 0 && (
+            {/* Two different reasons for there being nothing to fetch from,
+                with two different remedies. Saying "no analyser" to both is how
+                a bench concludes the button is broken. */}
+            {!fetchListen.waiting && feedChoices.length === 0 && !detail.feed && (
               <p className="iqc-hint in-head">
-                No analyser is connected on this system yet, so there is nothing to receive from. Enter the
-                results below, or set an analyser up under Settings &rarr; Analyser Links.
-              </p>
-            )}
-            {!fetchListen.waiting && feedChoices.length > 0 && !feedLinkId && (
-              <p className="iqc-hint in-head">
-                No analyser is attached to this control, so none has been chosen for you. Enter the results
-                below, or choose the analyser this control is run on and receive them.
-              </p>
-            )}
-            {!fetchListen.waiting && listeningTo && !listeningTo.suggested && (
-              <p className="iqc-hint in-head">
-                {listeningTo.name} is not recorded against this control&rsquo;s instrument or unit. It will still
-                be listened to — check it is the analyser this control was run on.
+                {detail.material.equipment_id
+                  ? 'No analyser link is registered against this control\u2019s instrument, so there is nothing to fetch from. Enter the results below, or add one under Settings \u2192 Analyser Links.'
+                  : 'This control does not say which instrument it runs on, so there is no analyser to fetch from. Enter the results below, or set its instrument on the control.'}
               </p>
             )}
             {!fetchListen.waiting && fetchListen.note && <p className="iqc-hint in-head">{fetchListen.note}</p>}
