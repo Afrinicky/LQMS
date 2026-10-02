@@ -111,6 +111,8 @@ type CoverageRun = { id: number; run_number: string; run_date: string; run_time:
 type FeedCandidate = {
   id: number; sample_id: string | null; received_at: string; instrument_run_at: string | null;
   feed_name: string | null; parsed_values: { analyte?: string; value?: number | string }[];
+  /** Already lined up against this control's parameters, by the host. */
+  readings?: Array<{ analyteId: number; analyte: string; value: number | null; qualitativeResult?: string | null }>;
 };
 
 /**
@@ -1611,10 +1613,16 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
   const takeFromInstrument = useCallback((message: FeedCandidate) => {
     setFeedMessageId(String(message.id));
     setSource('instrument');
+    // Which of this control's parameters each reading is, is the host's
+    // question, and it answers it with the link's own map and the synonyms. The
+    // screen was comparing the two strings instead: a Sysmex sends PLT, the
+    // link maps it to Platelets, the control calls it PLT, and the platelet
+    // count arrived, was displayed, and filled nothing.
     const next: Record<number, string> = {};
-    for (const parsed of message.parsed_values ?? []) {
-      const match = analytes.find(a => a.analyte.toLowerCase() === String(parsed.analyte ?? '').toLowerCase());
-      if (match && parsed.value !== undefined && parsed.value !== null) next[match.id] = String(parsed.value);
+    for (const reading of message.readings ?? []) {
+      const value = reading.value ?? reading.qualitativeResult;
+      if (reading.analyteId == null || value === null || value === undefined || String(value) === '') continue;
+      next[reading.analyteId] = String(value);
     }
     setValues(next);
     if (message.sample_id) setForm(f => ({ ...f, sampleReference: message.sample_id as string }));
@@ -1652,7 +1660,10 @@ function EnrolRetainedSample({ material, analytes, equipment, onSaved, onCancel,
         method: 'POST',
         body: JSON.stringify({
           iqcMaterialId: material.id, ...form, source,
-          feedMessageId: source === 'instrument' ? feedMessageId || undefined : undefined,
+          // A patient transmission, so it is named as one: writing its id into
+          // the control-run column failed the foreign key and refused the whole
+          // enrolment. See the note in the retained-samples route.
+          instrumentMessageId: source === 'instrument' ? feedMessageId || undefined : undefined,
           values: rows,
         }),
       });
