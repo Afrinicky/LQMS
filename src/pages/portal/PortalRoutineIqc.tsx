@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  AlertTriangle, ArrowRight, Beaker, Check, CheckCircle2, ClipboardPaste, Clock,
+  AlertTriangle, ArrowRight, Beaker, Check, CheckCircle2, ClipboardPaste, Clock, MonitorPlay,
   Download, FileSpreadsheet, FileUp, Keyboard, LineChart, Loader2, Lock, Plus,
   Printer, Radio, ScanLine, ShieldAlert, Table2, Upload, X, XCircle,
 } from 'lucide-react';
@@ -17,6 +17,8 @@ import {
 } from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
 import { useAnalyserListen, armAnalyser } from '../../hooks/useAnalyserListen';
+import LiveTransmission from '../../components/instruments/LiveTransmission';
+import TransmissionsDialog, { type Transmission } from '../../components/instruments/TransmissionsDialog';
 import type {
   IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
 } from '../../../shared/types/api';
@@ -569,6 +571,10 @@ function RunControlDialog({ control, onClose, onSaved }: {
   const feedChoices: FeedChoice[] = detail?.feedOptions ?? [];
   const [feedLinkId, setFeedLinkId] = useState('');
   const [addingSample, setAddingSample] = useState(false);
+  /** Watching the conversation while standing ready for it. */
+  const [watching, setWatching] = useState(false);
+  /** Every earlier transmission, searchable, when the one wanted is not new. */
+  const [browsing, setBrowsing] = useState(false);
   /**
    * Which analyser this control is listened to on.
    *
@@ -752,6 +758,24 @@ function RunControlDialog({ control, onClose, onSaved }: {
 
           {mapping && <MappingReport mapping={mapping} />}
 
+          {watching && feedLinkId && (
+            <LiveTransmission linkId={Number(feedLinkId)} onClose={() => setWatching(false)} />
+          )}
+
+          {browsing && (
+            <TransmissionsDialog
+              endpoint="/iqc/portal/transmissions"
+              title="Earlier results from the analysers"
+              onClose={() => setBrowsing(false)}
+              onUse={async (row: Transmission) => {
+                setBrowsing(false);
+                try {
+                  applyMapping(await api<IqcMapping>(
+                    `/iqc/portal/feed-messages/${row.id}/mapping?materialId=${control.id}`));
+                } catch (e) { setProblem(errorText(e)); }
+              }} />
+          )}
+
           <div className="iqc-entry">
             {/* The one place results are entered, and the one place they can be
                 received. Type them, or let the analyser send them — same form,
@@ -776,6 +800,16 @@ function RunControlDialog({ control, onClose, onSaved }: {
                   ? <><Loader2 size={11} className="pd-spin" /> Waiting… {fetchListen.remaining}s</>
                   : <><Radio size={11} /> Fetch Results</>}
               </button>
+              {/* While it stands ready, the one thing somebody wants is to see
+                  whether anything is reaching the host at all — rather than
+                  watching a countdown and guessing. */}
+              {feedLinkId && (
+                <button type="button" className="iqc-watch" title="Watch the conversation with this analyser as it happens"
+                  onClick={() => setWatching(true)}>
+                  <MonitorPlay size={11} /> Watch live
+                </button>
+              )}
+              <button type="button" className="pq-link" onClick={() => setBrowsing(true)}>Earlier results</button>
               <span className="muted">{filled} of {analytes.length} entered</span>
             </div>
             {fetchListen.waiting && (
@@ -1327,54 +1361,25 @@ function MappingReport({ mapping }: { mapping: IqcMapping }) {
 
 /* ----------------------------------------------------------------------------
    Control results waiting from the analysers
+   ----------------------------------------------------------------------------
+   The same searchable list the module uses, scoped to this unit's board. It was
+   an unbounded list, and this laboratory had 2,693 waiting: a dialog that long
+   is not a register, it is a wall.
    ------------------------------------------------------------------------- */
 function FeedDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
-  const [messages, setMessages] = useState<IqcFeedMessage[] | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try { setMessages(await api<IqcFeedMessage[]>('/iqc/portal/feed-messages')); }
-    catch (e) { setProblem(errorText(e)); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-
   return (
-    <Modal onClose={onClose} title="Control results from the analysers">
-      <p className="iqc-modal-lead">
-        These arrived over the network. They are evidence that a control was run — not a decision that it passed,
-        and not permission to release patient results. That decision is yours, on the control itself.
-      </p>
-      {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
-      {!messages ? <p className="muted">Loading…</p> : messages.length === 0 ? (
-        <p className="muted">Nothing is waiting.</p>
-      ) : (
-        <ul className="iqc-feed-list wide">
-          {messages.map(message => (
-            <li key={message.id} className={message.status === 'unmatched' ? 'is-unmatched' : ''}>
-              <div>
-                <strong>{message.material_name || message.sample_id || 'unidentified control'}</strong>
-                <span className="muted">
-                  {' '}· {message.feed_name ?? 'feed'} · {String(message.received_at).slice(0, 16).replace('T', ' ')}
-                  {' '}· {message.parsed_values?.length ?? 0} parameters · {message.status}
-                </span>
-                {message.status_note && <p className="iqc-feed-note">{message.status_note}</p>}
-              </div>
-              {message.status !== 'accepted' && message.status !== 'rejected' && (
-                <button type="button" className="pq-link" onClick={async () => {
-                  try {
-                    await api(`/iqc/portal/feed-messages/${message.id}/reject`, {
-                      method: 'POST', body: JSON.stringify({ reason: 'Rejected on the bench' }),
-                    });
-                    void load(); onChanged();
-                  } catch (e) { setProblem(errorText(e)); }
-                }}>Reject</button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="pr-btns"><button type="button" className="secondary" onClick={onClose}>Close</button></div>
-    </Modal>
+    <TransmissionsDialog
+      endpoint="/iqc/portal/transmissions"
+      title="Control results from the analysers"
+      lead={'These arrived over the network. They are evidence that a control was run — not a decision that it '
+        + 'passed, and not permission to release patient results. That decision is yours, on the control itself.'}
+      onReject={async row => {
+        await api(`/iqc/portal/feed-messages/${row.id}/reject`, {
+          method: 'POST', body: JSON.stringify({ reason: 'Rejected on the bench' }),
+        });
+        onChanged();
+      }}
+      onClose={onClose} />
   );
 }
 

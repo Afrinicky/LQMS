@@ -787,6 +787,21 @@ export const LHIMS_TAP_START_AT_END = true;
 /** How often to look for new bytes. The file is local or on a share; this is cheap. */
 export const LHIMS_TAP_POLL_MS = 3_000;
 
+/**
+ * How much of a backlog to clear in one look.
+ *
+ * These logs run to hundreds of megabytes. A link that has been off overnight,
+ * or has just been asked to read from the start, has to get through all of it
+ * before the bench sees today's control — and reading one small chunk per look
+ * turned that into a wait of minutes with nothing on screen to explain it. So a
+ * look keeps reading until it has caught up.
+ *
+ * It is capped all the same: a file something else is appending to as fast as
+ * this reads it would otherwise never let the poll go. At the cap the look
+ * stops, having made real progress, and the next one continues from there.
+ */
+export const LHIMS_TAP_MAX_CATCHUP_BYTES = 64 * 1024 * 1024;
+
 /* ============================================================================
    Delivering to LHIMS
    ========================================================================= */

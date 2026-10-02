@@ -7229,6 +7229,55 @@ button.cell-mark:disabled { cursor: default; }
 .iqc-analyser-map { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
 .iqc-analyser-map strong { color: var(--success); }
 
+/* Watching the conversation while standing ready for it — a quiet companion
+   to Fetch Results rather than a second call to action beside it. */
+.iqc-watch {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.iqc-watch:hover { color: var(--accent); border-color: var(--accent); }
+.iqc-watch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.iqc-see-all { align-self: flex-start; font-size: 11.5px; }
+
+/* Every transmission, and a way through them. */
+.il-tx-filters {
+  display: flex; gap: 8px 10px; flex-wrap: wrap; align-items: flex-end;
+  padding: 11px 12px; margin-bottom: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel);
+}
+.il-tx-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.il-tx-filters label > span { display: flex; align-items: center; gap: 4px; }
+.il-tx-filters input[type="date"], .il-tx-filters select {
+  padding: 5px 8px; font-size: 12px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.il-tx-search { flex: 1; min-width: 200px; position: relative; }
+.il-tx-search > svg { position: absolute; left: 9px; top: 9px; color: var(--faint); pointer-events: none; }
+.il-tx-search input { padding-left: 27px !important; }
+
+.il-tx-count { margin: 0 0 9px; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+.il-tx-list {
+  list-style: none; margin: 0 0 10px; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 46vh; overflow-y: auto;
+}
+.il-tx-list li {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 11px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); font-size: 12px;
+}
+.il-tx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.il-tx-main .muted { font-size: 11px; }
+.il-tx-foot { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+@media (max-width: 560px) {
+  .il-tx-filters label, .il-tx-search { width: 100%; }
+}
+
 /* The waiting row opens the transmission. It is a button because it does
    something, so it answers Enter and a screen reader announces it as one —
    but it carries the row's own text rather than looking like a control. */

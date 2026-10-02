@@ -31,6 +31,7 @@ import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
 import { linksForControl } from '../services/controlAnalyser.js';
 import { feedMessageValues } from '../services/feedMessageValues.js';
+import { listTransmissions } from '../services/transmissionList.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -350,6 +351,29 @@ export function iqcAnalyserRoutes() {
       materialId: material.id,
       ...mapRows(grid, analytes),
     });
+  });
+
+  /**
+   * Every control run the analysers have sent, searchable.
+   *
+   * The run form shows the newest few, because a bench is looking for the one
+   * they have just put on the machine. This is the rest of them — narrowed by
+   * day, by control, by analyser or by the identifier the machine used — so
+   * "the newest few" does not mean a fortnight's runs falling off the bottom
+   * of a list with nowhere to look them up.
+   */
+  router.get('/analyser/transmissions', requirePermission('iqc', 'view'), (req, res) => {
+    const q = req.query as Record<string, unknown>;
+    res.json(listTransmissions(getDb(), {
+      linkId: parseIntNullable(q.linkId),
+      materialId: parseIntNullable(q.materialId),
+      from: typeof q.from === 'string' ? q.from : null,
+      to: typeof q.to === 'string' ? q.to : null,
+      search: typeof q.search === 'string' ? q.search : null,
+      state: typeof q.state === 'string' ? q.state : null,
+      limit: parseIntNullable(q.limit),
+      offset: parseIntNullable(q.offset),
+    }));
   });
 
   /**
