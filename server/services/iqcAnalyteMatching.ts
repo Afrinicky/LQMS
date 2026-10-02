@@ -72,6 +72,26 @@ export function findAnalyte(label: string, analytes: any[]): any | null {
   return prefix.length === 1 ? prefix[0] : null;
 }
 
+/**
+ * Which of several labels for one reading this control actually knows.
+ *
+ * An analyser sends a parameter under its own mnemonic, and the link may also
+ * carry a mapped name for it: HGB and Haemoglobin, for the same number. Which
+ * of the two a control recognises depends on how the control was defined —
+ * one laboratory writes "Haemoglobin", another writes "HGB" — so both are
+ * tried rather than one being chosen in advance and the reading lost when the
+ * guess is wrong.
+ *
+ * The first that resolves wins; where neither does, the first non-empty one is
+ * returned so the bench is told which label went unrecognised rather than
+ * being shown a blank.
+ */
+export function bestLabel(candidates: Array<string | null | undefined>, analytes: any[]): string {
+  const offered = candidates.map(c => String(c ?? '').trim()).filter(Boolean);
+  for (const label of offered) if (findAnalyte(label, analytes)) return label;
+  return offered[0] ?? '';
+}
+
 /** Split pasted text on tabs, then on commas, then on runs of spaces. */
 export function splitPasted(text: string): any[][] {
   const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim() !== '');
@@ -103,7 +123,17 @@ export function detectOrientation(grid: any[][], analytes: any[]): 'rows' | 'col
 }
 
 export interface Mapping {
-  readings: Array<{ analyteId: number; analyte: string; unit: string | null; value: number | null; qualitativeResult?: string | null; raw: string }>;
+  readings: Array<{
+    analyteId: number; analyte: string; unit: string | null;
+    value: number | null; qualitativeResult?: string | null; raw: string;
+    /**
+     * The label this reading was recognised BY, which is not always the
+     * control's own name for it: a Sysmex sends PLT, the control may call the
+     * parameter Platelets, and a screen showing the transmission beside the
+     * control has to be able to say which line filled which box.
+     */
+    label: string;
+  }>;
   unmatchedLabels: string[];
   missingAnalytes: Array<{ analyteId: number; analyte: string }>;
   matched: number;
@@ -139,7 +169,7 @@ export function mapRows(grid: any[][], analytes: any[]): Mapping {
     seen.add(Number(analyte.id));
     readings.push({
       analyteId: Number(analyte.id), analyte: analyte.analyte, unit: analyte.unit ?? null,
-      value, qualitativeResult: qualitative, raw: raw || qualitative || '',
+      value, qualitativeResult: qualitative, raw: raw || qualitative || '', label,
     });
   }
 
@@ -176,7 +206,7 @@ export function mapColumns(grid: any[][], analytes: any[]): Mapping {
     seen.add(Number(analyte.id));
     readings.push({
       analyteId: Number(analyte.id), analyte: analyte.analyte, unit: analyte.unit ?? null,
-      value, qualitativeResult: qualitative, raw: String(valueRow[index] ?? ''),
+      value, qualitativeResult: qualitative, raw: String(valueRow[index] ?? ''), label,
     });
   });
 
