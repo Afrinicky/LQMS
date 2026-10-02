@@ -194,10 +194,13 @@ export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | n
       <PortalIqcCoverage onChanged={load} sectionId={sectionId ?? null} />
 
       {openControl && (
-        <RunControlDialog control={openControl} onClose={() => setOpenControl(null)}
+        <RunControlDialog control={openControl} sectionId={sectionId ?? null}
+          onClose={() => setOpenControl(null)}
           onSaved={() => { setOpenControl(null); void load(); }} />
       )}
-      {showFeed && <FeedDialog onClose={() => setShowFeed(false)} onChanged={load} />}
+      {showFeed && (
+        <FeedDialog sectionId={sectionId ?? null} onClose={() => setShowFeed(false)} onChanged={load} />
+      )}
     </div>
   );
 }
@@ -463,8 +466,18 @@ type Detail = {
   canPerform: boolean; canReview: boolean;
 };
 
-function RunControlDialog({ control, onClose, onSaved }: {
-  control: IqcBoardControl; onClose: () => void; onSaved: () => void;
+function RunControlDialog({ control, sectionId, onClose, onSaved }: {
+  control: IqcBoardControl;
+  /**
+   * The unit whose board this control was opened from.
+   *
+   * Carried down here because the register of earlier transmissions is scoped
+   * by unit on the server, and without being told which one it fell back to the
+   * reader's own — so a senior post looking at the haematology board was told
+   * "nothing matches that" about haematology's own transmissions.
+   */
+  sectionId: number | null;
+  onClose: () => void; onSaved: () => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   // 'instrument' is no longer one of these: see `methods` below. A control
@@ -598,7 +611,23 @@ function RunControlDialog({ control, onClose, onSaved }: {
   const fetchListen = useAnalyserListen<IqcFeedMessage>({
     arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`,
       feedLinkId ? { linkId: Number(feedLinkId) } : undefined),
-    poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
+    /*
+     * Scoped to the unit being looked at, and to the analyser being waited on.
+     *
+     * Neither was being sent, and the unit was the bug the bench was feeling:
+     * the server scopes this list by unit, and with nothing told to it, it fell
+     * back to the READER's own unit. So a control transmitted from the
+     * haematology Sysmex arrived, was parked correctly, and was then filtered
+     * out of the very poll that was standing there waiting for it — the bench
+     * pressed Fetch Results, the LHIMS client reported success, and the boxes
+     * stayed empty.
+     */
+    poll: since => {
+      const q = new URLSearchParams({ since: String(since.control) });
+      if (sectionId) q.set('sectionId', String(sectionId));
+      if (feedLinkId) q.set('linkId', String(feedLinkId));
+      return api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?${q}`);
+    },
     onArrival: async message => {
       try { applyMapping(await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${control.id}`)); }
       catch (e) { setProblem(errorText(e)); }
@@ -725,7 +754,7 @@ function RunControlDialog({ control, onClose, onSaved }: {
               )}
               {addingSample && (
                 <AddSample
-                  controlId={control.id} analytes={analytes} qualitative={qualitative}
+                  controlId={control.id} sectionId={sectionId} analytes={analytes} qualitative={qualitative}
                   feedChoices={feedChoices} linkId={feedLinkId}
                   onProblem={setProblem}
                   onAdded={async id => {
@@ -765,6 +794,8 @@ function RunControlDialog({ control, onClose, onSaved }: {
           {browsing && (
             <TransmissionsDialog
               endpoint="/iqc/portal/transmissions"
+              scope={{ sectionId }}
+              mapUrl={row => `/iqc/portal/feed-messages/${row.id}/mapping?materialId=${control.id}`}
               title="Earlier results from the analysers"
               onClose={() => setBrowsing(false)}
               onUse={async (row: Transmission) => {
@@ -935,8 +966,10 @@ function RunControlDialog({ control, onClose, onSaved }: {
  * come off the analyser rather than off a printout, because the original run
  * went over the same wire as everything else.
  */
-function AddSample({ controlId, analytes, qualitative, feedChoices, linkId, onAdded, onProblem }: {
+function AddSample({ controlId, sectionId, analytes, qualitative, feedChoices, linkId, onAdded, onProblem }: {
   controlId: number;
+  /** The unit whose board this is, for the same reason the run dialog needs it. */
+  sectionId: number | null;
   analytes: any[];
   qualitative: boolean;
   feedChoices: FeedChoice[];
@@ -952,7 +985,23 @@ function AddSample({ controlId, analytes, qualitative, feedChoices, linkId, onAd
   const listen = useAnalyserListen<IqcFeedMessage>({
     arm: () => armAnalyser(`/iqc/portal/controls/${controlId}/analyser-listen`,
       linkId ? { linkId: Number(linkId) } : undefined),
-    poll: since => api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?since=${since.control}`),
+    /*
+     * Scoped to the unit being looked at, and to the analyser being waited on.
+     *
+     * Neither was being sent, and the unit was the bug the bench was feeling:
+     * the server scopes this list by unit, and with nothing told to it, it fell
+     * back to the READER's own unit. So a control transmitted from the
+     * haematology Sysmex arrived, was parked correctly, and was then filtered
+     * out of the very poll that was standing there waiting for it — the bench
+     * pressed Fetch Results, the LHIMS client reported success, and the boxes
+     * stayed empty.
+     */
+    poll: since => {
+      const q = new URLSearchParams({ since: String(since.control) });
+      if (sectionId) q.set('sectionId', String(sectionId));
+      if (linkId) q.set('linkId', String(linkId));
+      return api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?${q}`);
+    },
     onArrival: async message => {
       try {
         const mapped = await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${controlId}`);
@@ -1366,10 +1415,14 @@ function MappingReport({ mapping }: { mapping: IqcMapping }) {
    an unbounded list, and this laboratory had 2,693 waiting: a dialog that long
    is not a register, it is a wall.
    ------------------------------------------------------------------------- */
-function FeedDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+function FeedDialog({ sectionId, onClose, onChanged }: {
+  sectionId: number | null; onClose: () => void; onChanged: () => void;
+}) {
   return (
     <TransmissionsDialog
       endpoint="/iqc/portal/transmissions"
+      scope={{ sectionId }}
+      mapUrl={row => `/iqc/portal/feed-messages/${row.id}/mapping`}
       title="Control results from the analysers"
       lead={'These arrived over the network. They are evidence that a control was run — not a decision that it '
         + 'passed, and not permission to release patient results. That decision is yours, on the control itself.'}

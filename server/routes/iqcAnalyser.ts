@@ -30,7 +30,7 @@ import { bestLabel, mapRows } from '../services/iqcAnalyteMatching.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
 import { linksForControl } from '../services/controlAnalyser.js';
-import { feedMessageValues } from '../services/feedMessageValues.js';
+import { feedMessageValues, messageFacts } from '../services/feedMessageValues.js';
 import { listTransmissions } from '../services/transmissionList.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
@@ -110,7 +110,20 @@ export function iqcAnalyserRoutes() {
   function waitingFor(materialId: number, linkId: number | null, feedId: number | null, since?: number | null) {
     const db = getDb();
     // Everything this analyser has sent that has not been accepted, whichever
-    // control the system guessed it belonged to.
+    // control the system guessed it belonged to, NEWEST FIRST.
+    //
+    // It used to put the runs matched to a control above the rest, and that
+    // quietly broke the screen. A run matched to ANOTHER control scores higher
+    // than one matched to nothing, so two September runs belonging to other
+    // controls sat permanently at the top while every unmatched run — which is
+    // most of them, and includes every X-bar M the analyser sends — sorted
+    // below. Showing the newest five then showed five old ones, and the control
+    // somebody had just transmitted was nowhere, however correctly it had
+    // arrived.
+    //
+    // The question this list answers is "what has just come in", so it is
+    // answered by when things came in. Finding a particular run is a different
+    // question, and the register answers that one with filters.
     //
     // Guessing is all it can do: an analyser that puts no lot number in its
     // transmission leaves only the sample identifier and the instrument to go
@@ -131,8 +144,8 @@ export function iqcAnalyserRoutes() {
         WHERE m.status IN ('matched', 'unmatched')
           AND (m.iqc_material_id = ? OR m.link_id = ? OR m.feed_id = ?)
           AND (? IS NULL OR m.id > ?)
-        ORDER BY (m.iqc_material_id = ?) DESC, m.received_at DESC LIMIT 25`)
-      .all(materialId, materialId, linkId, feedId, since ?? null, since ?? null, materialId) as any[])
+        ORDER BY m.received_at DESC, m.id DESC LIMIT 25`)
+      .all(materialId, materialId, linkId, feedId, since ?? null, since ?? null) as any[])
       .map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) ?? [] }));
   }
 
@@ -347,7 +360,7 @@ export function iqcAnalyserRoutes() {
       bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], analytes), v.value,
     ]);
     res.json({
-      message: { ...message, parsed_values: values },
+      message: { ...message, parsed_values: values, ...messageFacts(db, message) },
       materialId: material.id,
       ...mapRows(grid, analytes),
     });

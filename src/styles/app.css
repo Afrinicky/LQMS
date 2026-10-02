@@ -7272,6 +7272,16 @@ button.cell-mark:disabled { cursor: default; }
 }
 .il-tx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .il-tx-main .muted { font-size: 11px; }
+/* The register's row opens the transmission, the same as the newest-few list on
+   the form behind it. A button, because it does something — but carrying the
+   row's own text rather than looking like a control. */
+button.il-tx-open {
+  margin: 0; padding: 0; border: 0; background: none; box-shadow: none;
+  font: inherit; font-size: 12px; color: inherit; text-align: left;
+  cursor: pointer; border-radius: 6px; align-items: stretch;
+}
+button.il-tx-open:hover strong, button.il-tx-open:focus-visible strong { text-decoration: underline; }
+button.il-tx-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .il-tx-foot { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
 @media (max-width: 560px) {
@@ -7310,6 +7320,32 @@ button.cell-mark:disabled { cursor: default; }
 .iqc-tx-table td .muted { font-size: 11px; }
 .iqc-tx-table td .badge { margin-left: 6px; }
 .iqc-tx-fills { color: var(--success); font-weight: 600; }
+
+/* The transmission's own particulars — above all, when it arrived. A bench
+   deciding whether this is the run they have just put on the analyser asks for
+   that before anything else, and a count of parameters cannot answer it. */
+.iqc-tx-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px; margin: 0 0 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel);
+}
+.iqc-tx-facts > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.iqc-tx-facts dt {
+  font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.iqc-tx-facts dd { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.iqc-tx-facts dd .muted { font-size: 11.5px; }
+
+/* Two dates that disagree is the normal condition of a stored moving average,
+   not a fault — but it is why a list once looked full of old controls. */
+.iqc-tx-skew {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin: 0 0 12px; padding: 9px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--warning-line); background: var(--warning-bg);
+  font-size: 12px; line-height: 1.55; color: var(--text);
+}
+.iqc-tx-skew svg { flex: none; margin-top: 2px; color: var(--warning); }
 
 @media (max-width: 560px) {
   .iqc-tx-table th:nth-child(3), .iqc-tx-table td:nth-child(3) { display: none; }

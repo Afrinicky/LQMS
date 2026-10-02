@@ -45,7 +45,7 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
 import { linksForControl } from '../services/controlAnalyser.js';
-import { feedMessageValues } from '../services/feedMessageValues.js';
+import { feedMessageValues, messageFacts } from '../services/feedMessageValues.js';
 import { listTransmissions } from '../services/transmissionList.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { mayActOnUnit, leadsAnyUnit } from '../services/unitLeadership.js';
@@ -978,6 +978,10 @@ export function iqcPortalRoutes() {
     const db = getDb();
     const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     const status = typeof req.query.status === 'string' ? req.query.status : null;
+    // Which analyser, when the screen knows. A bench standing at one machine
+    // waiting for the control it has just run should not be handed the run that
+    // a different machine in the same unit happened to send a second earlier.
+    const linkId = parseIntNullable(req.query.linkId);
     // Everything after the watermark somebody armed with, so a run that was
     // already sitting there is never taken for the one just transmitted.
     const since = parseIntNullable(req.query.since);
@@ -1001,9 +1005,11 @@ export function iqcPortalRoutes() {
         LEFT JOIN iqc_materials mat ON mat.id = m.iqc_material_id
         WHERE (COALESCE(f.section_id, l.section_id) IS NULL
                OR COALESCE(f.section_id, l.section_id) = ? OR ? IS NULL)
+          AND (? IS NULL OR m.link_id = ?)
           AND (? IS NULL OR m.status = ?)
           AND (? IS NULL OR m.id > ?)
-        ORDER BY m.received_at DESC LIMIT 200`).all(sectionId, sectionId, status, status, since, since) as any[];
+        ORDER BY m.received_at DESC LIMIT 200`)
+      .all(sectionId, sectionId, linkId, linkId, status, status, since, since) as any[];
     res.json(rows.map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) })));
   });
 
@@ -1102,7 +1108,7 @@ export function iqcPortalRoutes() {
       bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], analytes), v.value,
     ]);
     const mapped = mapRows(grid, analytes);
-    res.json({ message: { ...message, parsed_values: values }, materialId, ...mapped });
+    res.json({ message: { ...message, parsed_values: values, ...messageFacts(db, message) }, materialId, ...mapped });
   });
 
   /**
