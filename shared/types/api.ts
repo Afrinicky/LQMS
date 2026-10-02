@@ -569,6 +569,136 @@ export type SystemValidationRecord = { id:number; validation_number:string; syst
 export type SystemDowntimeRecord = { id:number; downtime_number:string; system_id:number; downtime_start:string; downtime_end?:string; duration_minutes?:number; downtime_type?:string; affected_services:string; impact_summary?:string; workaround_used?:string; reported_by_staff_id?:number; resolved_by_staff_id?:number; linked_action_id?:number; linked_nc_id?:number; status:string; created_by?:number; created_at:string; updated_at?:string };
 export type InformationManagementReview = { id:number; review_number:string; review_period_start:string; review_period_end:string; review_date:string; information_assets_summary?:string; access_review_summary?:string; security_incident_summary?:string; change_request_summary?:string; downtime_summary?:string; validation_summary?:string; data_integrity_summary?:string; issues_identified?:string; actions_required?:string; reviewed_by_staff_id?:number; approved_by_staff_id?:number; approved_at?:string; status:string; created_by?:number; created_at:string; updated_at?:string };
 export type InformationManagementSummary = { activeInformationAssets:number; activeSystems:number; openAccessReviews:number; openSecurityIncidents:number; pendingDataCorrections:number; openChangeRequests:number; validationsPendingApproval:number; downtimeRecordsThisMonth:number; pendingInformationReviews:number };
+
+/* ------------------------------------------------ central Communication Service */
+
+/**
+ * A communication thread — one conversation, however many messages it holds.
+ *
+ * A memo and the three replies it drew are one record to the person who has to
+ * account for them, so the thread is what the inbox lists and what the log
+ * groups by. `last_message_*` is denormalised onto the thread because an inbox
+ * that has to open every conversation to sort them is an inbox nobody sorts.
+ */
+export type CommunicationThread = {
+  id:number; thread_number:string; subject:string; communication_type:string;
+  source_module?:string|null; source_record_type?:string|null; source_record_id?:string|null;
+  confidentiality:string; status:string;
+  started_by_user_id?:number|null; started_by_name?:string|null;
+  message_count:number; last_message_at?:string|null; last_message_preview?:string|null;
+  last_sender_name?:string|null;
+  created_at:string; updated_at?:string|null;
+  /** Present on the inbox/thread endpoints: this reader's own state. */
+  unread_count?:number; my_recipient_id?:number|null;
+  messages?:Communication[];
+  participants?:string[];
+};
+
+export type Communication = {
+  id:number; communication_number:string; thread_id:number; parent_communication_id?:number|null;
+  communication_type:string; direction:string; channel:string;
+  subject:string; body:string; body_format:string;
+  priority:string; confidentiality:string; status:string;
+  sender_user_id?:number|null; sender_staff_id?:number|null; sender_name?:string|null;
+  sender_external_name?:string|null; sender_external_address?:string|null;
+  memo_to_text?:string|null; memo_from_text?:string|null; memo_date?:string|null;
+  memo_reference?:string|null; signatory_staff_id?:number|null; signatory_name?:string|null;
+  requires_approval:number; approved_by_user_id?:number|null; approved_by_name?:string|null;
+  approved_at?:string|null; approval_notes?:string|null;
+  requires_acknowledgement:number; acknowledgement_due?:string|null;
+  source_module?:string|null; source_record_type?:string|null; source_record_id?:string|null;
+  sent_at?:string|null; created_by?:number|null; created_at:string; updated_at?:string|null;
+  thread_number?:string|null;
+  recipients?:CommunicationRecipient[];
+  attachments?:CommunicationAttachment[];
+  dispatches?:CommunicationDispatch[];
+  events?:CommunicationEvent[];
+  /** Counts the register and the thread view show without loading the children. */
+  recipient_count?:number; read_count?:number; acknowledged_count?:number;
+  attachment_count?:number; reply_count?:number;
+  /** This reader's own row, when the endpoint is reading an inbox. */
+  my_delivery_status?:string|null; my_read_at?:string|null; my_recipient_id?:number|null;
+};
+
+export type CommunicationRecipient = {
+  id:number; communication_id:number;
+  audience_kind:string; audience_ref?:string|null; audience_label:string;
+  user_id?:number|null; staff_id?:number|null; stakeholder_id?:number|null;
+  external_address?:string|null;
+  delivery_status:string; delivered_at?:string|null; read_at?:string|null;
+  replied_at?:string|null; acknowledged_at?:string|null; dismissed_at?:string|null;
+  notification_id?:number|null; failure_reason?:string|null;
+  created_at:string;
+  staff_name?:string|null; user_name?:string|null;
+};
+
+export type CommunicationAttachment = {
+  id:number; communication_id:number; file_id:number; caption?:string|null;
+  original_name?:string|null; mime_type?:string|null; size_bytes?:number|null;
+  created_at:string;
+};
+
+/**
+ * One act of sending, per channel.
+ *
+ * A memo dispatched in-app AND exported to PDF for WhatsApp is two dispatches,
+ * because they carry different evidence: the first can prove delivery, the
+ * second can only prove that a document was produced and who produced it.
+ * `delivery_confirmed` is therefore nullable on purpose — null means "not
+ * claimed", which is the honest answer for every channel SECH_LIMS does not
+ * speak itself.
+ */
+export type CommunicationDispatch = {
+  id:number; communication_id:number; channel:string; dispatch_method:string;
+  share_format?:string|null; recipient_label?:string|null; external_reference?:string|null;
+  delivery_confirmed?:number|null; file_id?:number|null;
+  dispatched_by_user_id?:number|null; dispatched_by_name?:string|null;
+  dispatched_at:string; notes?:string|null;
+  sensitive_release_confirmed:number; sensitive_release_justification?:string|null;
+};
+
+export type CommunicationEvent = {
+  id:number; communication_id:number; recipient_id?:number|null;
+  event_type:string; event_note?:string|null;
+  actor_user_id?:number|null; actor_name?:string|null; actor_staff_id?:number|null;
+  created_at:string;
+};
+
+/** A saved audience an administrator configured, e.g. "Hospital management". */
+export type CommunicationAudience = {
+  id:number; audience_code:string; audience_name:string; description?:string|null;
+  source:string; rule_json?:string|null; member_count?:number;
+  is_active:number; created_by?:number|null; created_at:string; updated_at?:string|null;
+};
+
+/** One addressable option the compose screen offers, resolved server-side. */
+export type CommunicationAudienceOption = {
+  kind:string; ref:string|null; label:string; detail?:string|null; recipientCount:number;
+};
+
+export type CommunicationTemplate = {
+  id:number; template_code:string; template_name:string; communication_type:string;
+  subject:string; body:string; default_audience_kind?:string|null; default_audience_ref?:string|null;
+  default_channel?:string|null; requires_approval:number; requires_acknowledgement:number;
+  confidentiality:string; is_active:number;
+  created_by?:number|null; created_at:string; updated_at?:string|null;
+};
+
+export type CommunicationSummary = {
+  myUnread:number; myThreads:number; myAwaitingAcknowledgement:number;
+  awaitingApproval:number; draftsMine:number;
+  sentThisMonth:number; inboundThisMonth:number; externalSharesThisMonth:number;
+  byType:Array<{ communication_type:string; c:number }>;
+  byChannel:Array<{ channel:string; c:number }>;
+  byDirection:Array<{ direction:string; c:number }>;
+};
+
+/** A row of the Communication Log register. */
+export type CommunicationLogRow = Communication & {
+  recipients_summary?:string|null; dispatch_summary?:string|null;
+  thread_number?:string|null; last_event_at?:string|null;
+};
+
 export type SystemHealthSummary = { activeModules:number; totalUsers:number; usersLinkedToStaff:number; usersNotLinkedToStaff:number; openActions:number; overdueActions:number; unreadNotifications:number; overdueCalendarItems:number; recentAuditEvents:number; backupChecksThisMonth:number; openDataIntegrityIssues:number };
 export type MyWorkSummary = { myOpenTasks:number; myUnreadNotifications:number; myDueToday:number; myOverdueItems:number; myOpenActions:number; myPendingApprovals:number };
 export type SetupHealthSummary = { hasAdminUser:boolean; adminLinkedToStaff:boolean; moduleCount:number; activeModuleCount:number; permissionRowsCount:number; staffCount:number; positionsCount:number; backupConfigured:boolean; warnings:string[] };

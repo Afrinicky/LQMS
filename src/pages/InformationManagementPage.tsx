@@ -14,6 +14,7 @@ import type {
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
+import CommunicationSection, { COMMUNICATION_TABS, isCommunicationTab } from './communication';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -149,12 +150,18 @@ export function InformationManagementPage() {
   async function approveReview(id: number) { try { await post(`/information-management/reviews/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
   async function closeReview(id: number) { try { await post(`/information-management/reviews/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
 
-  const tabs = ['Dashboard', 'Information Assets', 'Information Systems', 'Access Reviews', 'Security Incidents', 'Data Corrections', 'Change Requests', 'Software Releases', 'System Validations', 'Downtime Records', 'Information Reviews', 'Reports'];
+  // Communication sits at the front of the module: it is the tab most of the
+  // laboratory opens, and the one every other module's memos and notices end
+  // up in. Its four tabs come from src/pages/communication, and each is gated
+  // on its own feature by the permission-filtered tab bar.
+  const tabs = ['Dashboard', ...COMMUNICATION_TABS, 'Information Assets', 'Information Systems', 'Access Reviews', 'Security Incidents', 'Data Corrections', 'Change Requests', 'Software Releases', 'System Validations', 'Downtime Records', 'Information Reviews', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Information Management" title="Information Management" />
     {tabBar(tab, tabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
+
+    {isCommunicationTab(tab) && <CommunicationSection tab={tab} />}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="information_management" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[

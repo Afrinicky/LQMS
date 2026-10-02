@@ -7768,6 +7768,214 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
     }
   }
 
+  // ======================================================================
+  // The central Communication Service
+  // ----------------------------------------------------------------------
+  // Every message, memo, notice, alert and system notification SECH_LIMS
+  // sends or receives is a row in `communications`, grouped into a thread and
+  // addressed through `communication_recipients`. Nothing in the system is
+  // meant to send a communication any other way: a module that raises a memo
+  // calls the service (server/services/communicationService.ts) and gets a
+  // numbered record back, so the register in Information Management is the
+  // whole truth about what the laboratory has said and been told.
+  //
+  // Four tables carry the evidence, and they answer different questions:
+  //   recipients  — who it was addressed to, and what each of them did with it
+  //   dispatches  — which channels it actually travelled by, and how
+  //   events      — the chronological trail, including exports and shares
+  //   attachments — what travelled with it
+  //
+  // `dispatches.delivery_confirmed` is nullable on purpose. SECH_LIMS speaks
+  // only its own in-app channel; a memo carried out as a PDF over WhatsApp is
+  // recorded as PREPARED, with the member of staff who did it named, and no
+  // delivery or read confirmation is invented for it.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS communication_threads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_number TEXT NOT NULL UNIQUE,
+  subject TEXT NOT NULL,
+  communication_type TEXT NOT NULL DEFAULT 'direct_message',
+  -- Where the conversation came from, when a module started it.
+  source_module TEXT,
+  source_record_type TEXT,
+  source_record_id TEXT,
+  confidentiality TEXT NOT NULL DEFAULT 'internal',
+  status TEXT NOT NULL DEFAULT 'open',          -- open | closed | archived
+  started_by_user_id INTEGER REFERENCES users(id),
+  message_count INTEGER NOT NULL DEFAULT 0,
+  last_message_at TEXT,
+  last_message_preview TEXT,
+  last_sender_user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comm_threads_recent ON communication_threads(last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comm_threads_source ON communication_threads(source_module, source_record_type, source_record_id);
+
+CREATE TABLE IF NOT EXISTS communications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  communication_number TEXT NOT NULL UNIQUE,
+  thread_id INTEGER NOT NULL REFERENCES communication_threads(id) ON DELETE CASCADE,
+  -- The message this one answers. A thread is flat for reading; the parent is
+  -- kept so a forwarded or quoted reply can still name what it replied to.
+  parent_communication_id INTEGER REFERENCES communications(id),
+  communication_type TEXT NOT NULL DEFAULT 'direct_message',
+  direction TEXT NOT NULL DEFAULT 'internal',   -- outbound | inbound | internal
+  channel TEXT NOT NULL DEFAULT 'in_app',
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  body_format TEXT NOT NULL DEFAULT 'text',     -- text | html
+  priority TEXT NOT NULL DEFAULT 'normal',
+  confidentiality TEXT NOT NULL DEFAULT 'internal',
+  status TEXT NOT NULL DEFAULT 'draft',
+  -- Who sent it. A SECH_LIMS user for anything raised inside the system; the
+  -- external fields carry the sender of an inbound message from outside.
+  sender_user_id INTEGER REFERENCES users(id),
+  sender_staff_id INTEGER REFERENCES staff(id),
+  sender_external_name TEXT,
+  sender_external_address TEXT,
+  -- The formal memo block, printed verbatim on the memo sheet.
+  memo_to_text TEXT,
+  memo_from_text TEXT,
+  memo_date TEXT,
+  memo_reference TEXT,
+  signatory_staff_id INTEGER REFERENCES staff(id),
+  signatory_name TEXT,
+  requires_approval INTEGER NOT NULL DEFAULT 0,
+  approved_by_user_id INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  approval_notes TEXT,
+  requires_acknowledgement INTEGER NOT NULL DEFAULT 0,
+  acknowledgement_due TEXT,
+  -- The record this communication is about, so an alert about a document or a
+  -- critical value can be opened from the log.
+  source_module TEXT,
+  source_record_type TEXT,
+  source_record_id TEXT,
+  sent_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_communications_thread ON communications(thread_id, id);
+CREATE INDEX IF NOT EXISTS idx_communications_status ON communications(status, communication_type);
+CREATE INDEX IF NOT EXISTS idx_communications_sender ON communications(sender_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_communications_source ON communications(source_module, source_record_type, source_record_id);
+CREATE INDEX IF NOT EXISTS idx_communications_sent ON communications(sent_at DESC);
+
+CREATE TABLE IF NOT EXISTS communication_recipients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  communication_id INTEGER NOT NULL REFERENCES communications(id) ON DELETE CASCADE,
+  -- How the sender named this recipient, kept alongside the person it resolved
+  -- to. "All laboratory staff" has to still read as "all laboratory staff" in
+  -- the log a year later, even once the membership has changed.
+  audience_kind TEXT NOT NULL,
+  audience_ref TEXT,
+  audience_label TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  staff_id INTEGER REFERENCES staff(id),
+  stakeholder_id INTEGER REFERENCES customer_stakeholders(id),
+  external_address TEXT,
+  delivery_status TEXT NOT NULL DEFAULT 'pending',
+  delivered_at TEXT,
+  read_at TEXT,
+  replied_at TEXT,
+  acknowledged_at TEXT,
+  dismissed_at TEXT,
+  -- The inbox alert raised for this person, so the two stay in step.
+  notification_id INTEGER REFERENCES notifications(id),
+  failure_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comm_recipients_comm ON communication_recipients(communication_id);
+CREATE INDEX IF NOT EXISTS idx_comm_recipients_user ON communication_recipients(user_id, delivery_status);
+CREATE INDEX IF NOT EXISTS idx_comm_recipients_staff ON communication_recipients(staff_id);
+
+CREATE TABLE IF NOT EXISTS communication_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  communication_id INTEGER NOT NULL REFERENCES communications(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL REFERENCES files(id),
+  caption TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comm_attachments_comm ON communication_attachments(communication_id);
+
+CREATE TABLE IF NOT EXISTS communication_dispatches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  communication_id INTEGER NOT NULL REFERENCES communications(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL,
+  dispatch_method TEXT NOT NULL DEFAULT 'system',  -- system | prepared | manual
+  share_format TEXT,                               -- pdf | docx | jpg | text | html
+  recipient_label TEXT,
+  external_reference TEXT,
+  -- NULL means "no claim". Only a channel SECH_LIMS delivers itself may set it.
+  delivery_confirmed INTEGER,
+  file_id INTEGER REFERENCES files(id),
+  dispatched_by_user_id INTEGER REFERENCES users(id),
+  dispatched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notes TEXT,
+  -- A restricted or confidential communication leaving SECH_LIMS must say who
+  -- authorised it and why; the service refuses the share without this.
+  sensitive_release_confirmed INTEGER NOT NULL DEFAULT 0,
+  sensitive_release_justification TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comm_dispatches_comm ON communication_dispatches(communication_id);
+CREATE INDEX IF NOT EXISTS idx_comm_dispatches_channel ON communication_dispatches(channel, dispatched_at DESC);
+
+CREATE TABLE IF NOT EXISTS communication_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  communication_id INTEGER NOT NULL REFERENCES communications(id) ON DELETE CASCADE,
+  recipient_id INTEGER REFERENCES communication_recipients(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  event_note TEXT,
+  actor_user_id INTEGER REFERENCES users(id),
+  actor_staff_id INTEGER REFERENCES staff(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comm_events_comm ON communication_events(communication_id, id);
+
+-- A saved audience: "Hospital management", "Referral laboratories", "Night
+-- shift". Either a fixed list of staff, a rule resolved against the
+-- organisation every time it is used, or a list of external addresses.
+CREATE TABLE IF NOT EXISTS communication_audiences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  audience_code TEXT NOT NULL UNIQUE,
+  audience_name TEXT NOT NULL,
+  description TEXT,
+  source TEXT NOT NULL DEFAULT 'staff_list',   -- staff_list | organisation_rule | external_list
+  rule_json TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS communication_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_code TEXT NOT NULL UNIQUE,
+  template_name TEXT NOT NULL,
+  communication_type TEXT NOT NULL DEFAULT 'memo',
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  default_audience_kind TEXT,
+  default_audience_ref TEXT,
+  default_channel TEXT NOT NULL DEFAULT 'in_app',
+  requires_approval INTEGER NOT NULL DEFAULT 0,
+  requires_acknowledgement INTEGER NOT NULL DEFAULT 0,
+  confidentiality TEXT NOT NULL DEFAULT 'internal',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // The audiences and templates a laboratory can use on day one. Seeded once
+  // and by code, so a laboratory that renames, retargets or deactivates one
+  // keeps its decision across upgrades.
+  seedCommunicationDefaults(database);
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an
@@ -7939,4 +8147,69 @@ function seedDecontaminationFrameworks(database: Database.Database) {
       f.frequency, f.decontaminant, f.method, f.instructions, f.key);
   }
   database.prepare("INSERT INTO settings (key, value) VALUES ('decontamination.frameworksSeeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
+}
+
+/**
+ * The audiences and memo templates a laboratory starts with.
+ *
+ * Nobody should have to define "All laboratory staff" before they can send
+ * their first notice, and the three templates below are the communications
+ * every laboratory writes in its first month. They are organisation RULES, not
+ * fixed lists, so an audience follows the register as people join and leave
+ * rather than quietly going stale.
+ *
+ * Seeded once, keyed by code: a laboratory that renames an audience, retargets
+ * a template or deactivates either keeps that decision across upgrades.
+ */
+function seedCommunicationDefaults(database: Database.Database) {
+  const seeded = database.prepare("SELECT value FROM settings WHERE key = 'communication.defaultsSeeded'").get() as { value?: string } | undefined;
+  if (seeded?.value === '1') return;
+
+  const audience = database.prepare(`INSERT OR IGNORE INTO communication_audiences
+    (audience_code, audience_name, description, source, rule_json, is_active)
+    VALUES (?, ?, ?, ?, ?, 1)`);
+  const audiences: Array<[string, string, string, string, unknown]> = [
+    ['AUD-LAB-ALL', 'All laboratory staff', 'Every active member of laboratory staff with a SECH_LIMS account.',
+      'organisation_rule', { kind: 'laboratory_staff' }],
+    ['AUD-LAB-HEADS', 'Unit heads and supervisors', 'The person running each unit, and their deputy.',
+      'organisation_rule', { kind: 'unit_leads' }],
+    ['AUD-QMS', 'Quality management', 'The quality manager and the quality officers.',
+      'organisation_rule', { kind: 'position_match', match: 'quality' }],
+    // Hospital staff hold no SECH_LIMS accounts, so these audiences resolve
+    // against the stakeholder register in Customer Focus rather than the user
+    // table. A communication addressed to them is prepared and shared, and the
+    // log says so instead of claiming an in-app delivery that cannot happen.
+    ['AUD-HOSP-CLIN', 'Hospital clinical staff', 'Clinicians and wards the laboratory reports to, from the stakeholder register.',
+      'organisation_rule', { kind: 'stakeholder_group', stakeholderType: 'clinician' }],
+    ['AUD-HOSP-DEPT', 'Hospital departments', 'Hospital departments and units the laboratory serves.',
+      'organisation_rule', { kind: 'stakeholder_group', stakeholderType: 'internal_unit' }],
+    ['AUD-MGMT', 'Management and partner organisations', 'Hospital management and the partner organisations in the stakeholder register.',
+      'organisation_rule', { kind: 'stakeholder_group', stakeholderType: 'organisation' }],
+  ];
+  for (const [code, name, desc, source, rule] of audiences) {
+    audience.run(code, name, desc, source, rule ? JSON.stringify(rule) : null);
+  }
+
+  const template = database.prepare(`INSERT OR IGNORE INTO communication_templates
+    (template_code, template_name, communication_type, subject, body, default_audience_kind, default_audience_ref,
+     default_channel, requires_approval, requires_acknowledgement, confidentiality, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'in_app', ?, ?, ?, 1)`);
+  template.run('TPL-GEN-MEMO', 'General memorandum', 'memo',
+    'Memorandum',
+    'Please be informed that …\n\nKindly acknowledge receipt of this memorandum.',
+    'audience_group', 'AUD-LAB-ALL', 1, 1, 'internal');
+  template.run('TPL-STAFF-NOTICE', 'Staff notice', 'notice',
+    'Notice to all laboratory staff',
+    'All members of staff are informed that …\n\nThis notice takes effect immediately.',
+    'audience_group', 'AUD-LAB-ALL', 0, 0, 'internal');
+  template.run('TPL-SOP-NOTICE', 'Document release notice', 'notice',
+    'Release of a controlled document',
+    'The following controlled document has been approved and released:\n\nDocument: \nVersion: \nEffective date: \n\nAll affected staff are to read the document and record their attestation in SECH_LIMS.',
+    'audience_group', 'AUD-LAB-ALL', 0, 1, 'internal');
+  template.run('TPL-SHIFT-HANDOVER', 'Shift handover communication', 'direct_message',
+    'Shift handover',
+    'Outstanding work at handover:\n\n1. \n2. \n\nEquipment or reagent issues:\n\nSamples requiring attention:',
+    'audience_group', 'AUD-LAB-HEADS', 0, 0, 'internal');
+
+  database.prepare("INSERT INTO settings (key, value) VALUES ('communication.defaultsSeeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
 }
