@@ -266,6 +266,69 @@ check('and it says which file is actually being followed',
   /LHIMSDataInput\.txt/.test(feed?.following?.file ?? ''), feed?.following?.file);
 
 /* ==========================================================================
+   8b. Transmitting the same control twice
+   --------------------------------------------------------------------------
+   An X-bar M file holds the analyser's stored moving averages with a stored
+   timestamp, so transmitting it twice in a row — which is exactly what somebody
+   does when the first attempt appears not to have worked — sends byte-for-byte
+   the same thing. It was recognised as a duplicate and dropped, and the bench
+   watched a countdown run out while the analyser insisted it had sent.
+
+   Following a log forward cannot re-read anything: the offset only moves on. So
+   a transmission arriving as new bytes is a genuine delivery, however familiar
+   it looks. Re-reading is a different act, and is still guarded — see below.
+   ======================================================================== */
+console.log('\n[8b] The same control, transmitted twice because nothing seemed to happen');
+
+const beforeTwice = ((await j(`/instrument-links/${id}/messages`, { token: A })).json ?? []).length;
+const twice = xn550('XbarM2', '20260923075000', FBC, { actionCode: 'Q' });
+clientReceives(twice);
+await j(`/instrument-links/${id}/fetch`, { token: A, method: 'POST' });
+const once = ((await j(`/instrument-links/${id}/messages`, { token: A })).json ?? []).length;
+check('the control run arrives', once === beforeTwice + 1, `${beforeTwice} -> ${once}`);
+
+// The bench saw nothing, so it sends the identical run again.
+clientReceives(twice);
+await j(`/instrument-links/${id}/fetch`, { token: A, method: 'POST' });
+const andAgain = ((await j(`/instrument-links/${id}/messages`, { token: A })).json ?? []).length;
+check('and sending the identical run again is not swallowed', andAgain === once + 1,
+  `${once} -> ${andAgain}`);
+check('so a bench standing at the analyser is never left waiting on a run it sent',
+  andAgain > once);
+
+// Re-reading the log, on the other hand, must invent nothing.
+const beforeRewind = ((await j(`/instrument-links/${id}/messages`, { token: A })).json ?? []).length;
+await j(`/instrument-links/${id}/rewind`, { token: A, method: 'POST' });
+await wait(500);
+const afterRewind = ((await j(`/instrument-links/${id}/messages`, { token: A })).json ?? []).length;
+check('while reading the whole log again invents nothing', afterRewind === beforeRewind,
+  `${beforeRewind} -> ${afterRewind}`);
+
+/* ==========================================================================
+   8c. Every transmission, searchable
+   ======================================================================== */
+console.log('\n[8c] The newest few on the form, and the rest where they can be found');
+
+const register = (await j('/iqc/analyser/transmissions?limit=5', { token: A })).json;
+check('the register answers', Array.isArray(register?.rows), JSON.stringify(register)?.slice(0, 160));
+check('a page is a page, not the whole thing', (register?.rows ?? []).length <= 5,
+  `${(register?.rows ?? []).length} row(s)`);
+check('and it says how many there are in total', Number(register?.total ?? 0) >= (register?.rows ?? []).length,
+  `${register?.total} total`);
+check('it offers the analysers to narrow by', (register?.sources ?? []).length >= 1,
+  JSON.stringify((register?.sources ?? []).map(s => s.name)));
+
+const narrowed = (await j('/iqc/analyser/transmissions?search=XbarM2&limit=50', { token: A })).json;
+check('narrowing by what the analyser called the sample works',
+  (narrowed?.rows ?? []).length > 0 && (narrowed?.rows ?? []).every(r => /XbarM2/i.test(String(r.sample_id ?? ''))),
+  JSON.stringify((narrowed?.rows ?? []).map(r => r.sample_id).slice(0, 4)));
+
+const byDay = (await j('/iqc/analyser/transmissions?from=2026-09-23&to=2026-09-23&limit=50', { token: A })).json;
+check('and narrowing by the day the analyser ran it works',
+  (byDay?.rows ?? []).every(r => String(r.instrument_run_at ?? r.received_at).startsWith('2026-09-23')),
+  JSON.stringify((byDay?.rows ?? []).map(r => r.instrument_run_at).slice(0, 4)));
+
+/* ==========================================================================
    9. An analyser nobody configured correctly
    ======================================================================== */
 console.log('\n[9] A link whose protocol is left to be worked out');

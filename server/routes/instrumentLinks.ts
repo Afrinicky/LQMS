@@ -721,9 +721,14 @@ export function instrumentLinkRoutes() {
    */
   router.get('/:id/events', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
     const db = getDb();
-    const link = db.prepare(`SELECT id, name, mode, role, protocol, state, state_detail, listen_host, listen_port,
-          remote_host, remote_port, watch_path, tap_path, tap_offset, last_message_at, messages_received
-        FROM instrument_links WHERE id = ?`).get(req.params.id) as any;
+    // Everything the live window draws, so it can be opened from any screen
+    // that knows a link's id and needs nothing else passed to it.
+    const link = db.prepare(`SELECT l.id, l.name, l.mode, l.role, l.protocol, l.state, l.state_detail,
+          l.listen_host, l.listen_port, l.remote_host, l.remote_port, l.watch_path, l.file_pattern,
+          l.tap_path, l.tap_offset, l.last_message_at, l.messages_received,
+          e.name AS equipment_name
+        FROM instrument_links l LEFT JOIN equipment_items e ON e.id = l.equipment_id
+        WHERE l.id = ?`).get(req.params.id) as any;
     if (!link) return res.status(404).json({ error: 'Link not found' });
     const after = Number(req.query.after ?? 0);
     const feed = bridge.events(Number(req.params.id), Number.isFinite(after) ? after : 0);

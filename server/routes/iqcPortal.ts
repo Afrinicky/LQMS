@@ -46,6 +46,7 @@ import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
 import { linksForControl } from '../services/controlAnalyser.js';
 import { feedMessageValues } from '../services/feedMessageValues.js';
+import { listTransmissions } from '../services/transmissionList.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { mayActOnUnit, leadsAnyUnit } from '../services/unitLeadership.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
@@ -1051,6 +1052,28 @@ export function iqcPortalRoutes() {
   });
 
   /** Line an arriving message up against a control's analytes, for the bench to accept. */
+  /**
+   * The same searchable list, for the bench — scoped to its own unit's board.
+   *
+   * The run dialog shows the newest few; this is where the rest live, narrowed
+   * by day, control, analyser or sample identifier.
+   */
+  router.get('/portal/transmissions', (req, res) => {
+    const q = req.query as Record<string, unknown>;
+    const scope = resolveUnitScope(req, q.sectionId);
+    res.json(listTransmissions(getDb(), {
+      sectionId: scope.sectionId,
+      linkId: parseIntNullable(q.linkId),
+      materialId: parseIntNullable(q.materialId),
+      from: typeof q.from === 'string' ? q.from : null,
+      to: typeof q.to === 'string' ? q.to : null,
+      search: typeof q.search === 'string' ? q.search : null,
+      state: typeof q.state === 'string' ? q.state : null,
+      limit: parseIntNullable(q.limit),
+      offset: parseIntNullable(q.offset),
+    }));
+  });
+
   router.get('/portal/feed-messages/:id/mapping', numericOnly, (req, res) => {
     const db = getDb();
     const message = db.prepare('SELECT * FROM iqc_feed_messages WHERE id = ?').get(req.params.id) as any;

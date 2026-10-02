@@ -46,7 +46,7 @@ import {
   LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, classifyMessage, linkIsOurs, mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
 import {
-  LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
+  LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_MAX_CATCHUP_BYTES, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
 
@@ -215,7 +215,7 @@ class Link {
   private tapFile: string | null = null;
   /** The last state written, so the live log carries changes rather than noise. */
   private lastState = '';
-  /** How many transmissions this link has taken in since it started. */
+  /** How many messages this link has actually RECORDED since it started. */
   private ingested = 0;
 
   constructor(getDb: DbGetter, row: LinkRow, emit: (linkId: number, level: BridgeEventLevel, text: string, detail?: string | null) => void) {
@@ -442,8 +442,12 @@ class Link {
     try { this.getDb().prepare('UPDATE instrument_links SET tap_offset = 0 WHERE id = ?').run(this.id); } catch { /* best effort */ }
     this.emit('info', `Reading ${target.file} again from the beginning. Anything already recorded is recognised and skipped.`);
     const before = this.ingested;
+    // Everything from here is ground already covered, so a transmission that
+    // matches one already stored is a re-read rather than a second delivery.
+    this.rereading = true;
     try { this.readTap(); }
     catch (error) { return { ok: false, read: 0, note: (error as Error).message }; }
+    finally { this.rereading = false; }
     const read = this.ingested - before;
     return { ok: true, read, note: read ? `${read} message(s) read from the log.` : 'Nothing in the log that had not already been recorded.' };
   }
@@ -466,39 +470,77 @@ class Link {
     }
     if (size === this.tapOffset) return;
 
+    /**
+     * Catch up, rather than creep.
+     *
+     * One chunk per look is fine while a link is keeping pace and useless once
+     * it is not. These logs run to hundreds of megabytes: a link that has been
+     * off overnight, or has just been asked to read from the start, was reading
+     * half a megabyte every three seconds — so a hundred megabytes behind meant
+     * ten minutes before the bench saw anything, with the screen saying
+     * "following" throughout. It now reads until it has caught up.
+     *
+     * Bounded, because a file something else is appending to as fast as this
+     * reads it would otherwise never let go: at the cap it stops, having made
+     * real progress, and the next look continues.
+     */
+    let readThisTime = 0;
+    let found = 0;
     const handle = fs.openSync(file, 'r');
     try {
-      const length = size - this.tapOffset;
-      const buffer = Buffer.alloc(Math.min(length, LINK_MAX_FRAME_BYTES));
-      const read = fs.readSync(handle, buffer, 0, buffer.length, this.tapOffset);
-      this.tapOffset += read;
-      this.tapCarry += buffer.subarray(0, read).toString('latin1');
+      while (this.tapOffset < size && readThisTime < LHIMS_TAP_MAX_CATCHUP_BYTES) {
+        const want = Math.min(size - this.tapOffset, LINK_MAX_FRAME_BYTES);
+        const buffer = Buffer.alloc(want);
+        const read = fs.readSync(handle, buffer, 0, want, this.tapOffset);
+        if (read <= 0) break;
+        this.tapOffset += read;
+        readThisTime += read;
+        this.tapCarry += buffer.subarray(0, read).toString('latin1');
+
+        // The client appends whole transmissions, each ending in its ASTM
+        // terminator record — wrapped in the protocol's own framing, because
+        // what the client writes down is what it received off the wire. The
+        // splitter takes that framing off before looking for the terminator;
+        // without that, every transmission reads as unfinished and is held back
+        // for ever.
+        const { complete, remainder } = splitTransmissions(this.tapCarry, this.row.protocol);
+        if (remainder.length > LINK_MAX_FRAME_BYTES) {
+          // Held text this large is not one transmission. Say so rather than
+          // dropping it in silence, which is how this failed before.
+          this.emit('warn', `Held ${remainder.length} bytes from the log without finding the end of a transmission. Starting again from here — check the link's protocol matches what the client writes.`);
+          this.tapCarry = '';
+        } else {
+          this.tapCarry = remainder;
+        }
+        for (const text of complete) {
+          if (text.trim()) this.ingest(text, 'lhims-client-log');
+        }
+        found += complete.length;
+      }
     } finally {
       fs.closeSync(handle);
     }
 
-    // The client appends whole transmissions, each ending in its ASTM
-    // terminator record — wrapped in the protocol's own framing, because what
-    // the client writes down is what it received off the wire. The splitter
-    // takes that framing off before looking for the terminator; without that,
-    // every transmission reads as unfinished and is held back for ever.
-    const { complete, remainder } = splitTransmissions(this.tapCarry, this.row.protocol);
-    if (remainder.length > LINK_MAX_FRAME_BYTES) {
-      // Held text this large is not one transmission. Say so rather than
-      // dropping it in silence, which is how this failed before.
-      this.emit('warn', `Held ${remainder.length} bytes from the log without finding the end of a transmission. Starting again from here — check the link's protocol matches what the client writes.`);
-      this.tapCarry = '';
-    } else {
-      this.tapCarry = remainder;
-    }
-    for (const text of complete) {
-      if (text.trim()) this.ingest(text, 'lhims-client-log');
-    }
-    if (complete.length) {
+    /**
+     * Where to resume, which is NOT where reading stopped.
+     *
+     * Whatever is held in `tapCarry` was read but not yet understood — the
+     * beginning of a transmission the client had not finished writing. It lives
+     * in memory and nowhere else, so a bookmark pointing past it loses exactly
+     * that transmission when the host restarts, and the bench never learns a
+     * run went missing. The bookmark is therefore the start of the held text,
+     * so a restart picks the half-written transmission up from its first byte.
+     */
+    const resumeAt = Math.max(0, this.tapOffset - this.tapCarry.length);
+    if (readThisTime > 0) {
       try {
-        this.getDb().prepare('UPDATE instrument_links SET tap_offset = ? WHERE id = ?').run(this.tapOffset, this.id);
+        this.getDb().prepare('UPDATE instrument_links SET tap_offset = ? WHERE id = ?').run(resumeAt, this.id);
       } catch { /* the offset is an optimisation, not the record */ }
-      this.setState('following', `Following ${file}. ${complete.length} message(s) read just now.`);
+    }
+    if (found) {
+      const behind = size - this.tapOffset;
+      this.setState('following', `Following ${file}. ${found} message(s) read just now.`
+        + (behind > 0 ? ` ${behind.toLocaleString()} byte(s) still to catch up on.` : ''));
     }
   }
 
@@ -606,6 +648,9 @@ class Link {
       let messages = 0;
       let outcome = 'read';
       let note: string | null = null;
+      // A watched folder offers the same file again every time it is looked at,
+      // so a transmission matching one already stored is a re-read.
+      this.rereading = true;
       try {
         const text = fs.readFileSync(full, 'latin1');
         if (text.trim()) {
@@ -624,6 +669,8 @@ class Link {
         outcome = 'error';
         note = (error as Error).message;
         this.setState('error', `Reading ${name}: ${note}`, note);
+      } finally {
+        this.rereading = false;
       }
 
       try {
@@ -802,7 +849,6 @@ class Link {
    */
   private ingest(text: string, peer: string): number {
     const db = this.getDb();
-    this.ingested++;
     this.emit('in', `New message received from ${peer}`, text.slice(0, 2_000));
 
     // What the message actually is, rather than what the link was told it
@@ -860,13 +906,32 @@ class Link {
       }, patterns);
       const kind = message.results.length === 0 ? 'unknown' : verdict.control ? 'control' : 'patient';
 
-      // The same transmission read twice is not two runs. A log followed from
-      // the beginning, a folder swept again, a client that re-wrote its file —
-      // all of them would otherwise put a point on a Levey-Jennings chart that
-      // never happened. Only file-borne messages are checked: over a socket,
-      // two identical transmissions are two genuine runs.
+      /**
+       * The same transmission READ twice is not two runs. A transmission SENT
+       * twice is.
+       *
+       * That distinction was missing, and it cost the bench its control runs.
+       * An X-bar M file holds the analyser's stored moving averages with a
+       * stored timestamp, so transmitting it twice in a row — which is exactly
+       * what somebody does when the first attempt appears not to have worked —
+       * sends byte-for-byte the same thing. It was recognised as a duplicate
+       * and dropped, the waiting screen was watching for a row above the mark
+       * it took when it armed, no row appeared, and the bench watched a
+       * countdown run out while the analyser insisted it had sent the results.
+       *
+       * Following a log forward cannot re-read anything: the offset only ever
+       * moves on, so every byte reaching here has never been seen before and
+       * what it carries is a genuine delivery. Re-reading is a different act
+       * and is still guarded — reading a log again from the start, or sweeping
+       * a folder whose files are still sitting in it.
+       *
+       * The asymmetry is deliberate. Nothing here accepts a run; a duplicate
+       * waits on the IQC board where a person can reject it in one click. A
+       * run that never arrives is invisible, and the laboratory concludes
+       * transmission is broken.
+       */
       const fingerprint = this.fingerprint(message, text);
-      if (this.fromAFile() && fingerprint) {
+      if (this.rereading && fingerprint) {
         try {
           const seen = db.prepare('SELECT id FROM instrument_messages WHERE link_id = ? AND message_hash = ?')
             .get(this.id, fingerprint) as any;
@@ -908,9 +973,23 @@ class Link {
 
       if (kind === 'control') this.routeControl(db, messageId, message, values);
       recorded++;
+      // Counted here rather than on arrival, so "3 message(s) read" means three
+      // runs are on the bench — not three transmissions seen and two of them
+      // recognised as ground already covered.
+      this.ingested++;
     }
     return recorded;
   }
+
+  /**
+   * Is this read going back over ground already covered?
+   *
+   * True while a log is being read again from its beginning, and while a folder
+   * is swept — a file still sitting in a watched folder is offered again every
+   * time the folder is looked at. False while a log is followed forward, where
+   * the offset guarantees every byte is new.
+   */
+  private rereading = false;
 
   /** Is this link reading something somebody else wrote down, rather than a socket? */
   private fromAFile(): boolean {

@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlaskConical, Beaker, CheckCircle2, AlertTriangle, LineChart, Plus, Trash2,
-  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X, Radio, Loader2, Check,
+  ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil, X, Radio, Loader2, Check, MonitorPlay,
 } from 'lucide-react';
 import { api, errorText, apiRead } from '../services/api';
 import { useModules } from '../hooks/useModules';
@@ -33,6 +33,8 @@ import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 import InstrumentLinksTab from './InstrumentLinksTab';
+import LiveTransmission from '../components/instruments/LiveTransmission';
+import TransmissionsDialog from '../components/instruments/TransmissionsDialog';
 import DefineControlForm from '../components/iqc/DefineControlForm';
 
 /* ============================================================================
@@ -109,6 +111,15 @@ type FeedCandidate = {
   id: number; sample_id: string | null; received_at: string; instrument_run_at: string | null;
   feed_name: string | null; parsed_values: { analyte?: string; value?: number | string }[];
 };
+
+/**
+ * How many of the newest transmissions the run form shows.
+ *
+ * A bench is looking for the run they have just put on the analyser. Thousands
+ * of older ones above it is not a list, it is a haystack — and this laboratory
+ * had 2,693 waiting. The rest are a click away, searchable.
+ */
+const WAITING_SHOWN = 5;
 
 type AnalyserWaiting = {
   id: number; sample_id: string | null; lot_number: string | null;
@@ -1274,9 +1285,16 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
   const [busy, setBusy] = useState<number | null>(null);
   /** The transmission being looked at before anything is taken from it. */
   const [preview, setPreview] = useState<AnalyserWaiting | null>(null);
+  /** The whole searchable list, when the newest few are not the one. */
+  const [browsing, setBrowsing] = useState(false);
+  /** Watching the conversation while standing ready for it. */
+  const [watching, setWatching] = useState(false);
   const source = status.source;
   const options = status.options ?? [];
-  const waiting = status.waiting ?? [];
+  const all = status.waiting ?? [];
+  // The newest handful only. A bench is looking for the run they have just put
+  // on the analyser, and thousands of older ones buries it.
+  const waiting = all.slice(0, WAITING_SHOWN);
 
   const bringIn = useCallback(async (message: AnalyserWaiting) => {
     setBusy(message.id);
@@ -1337,6 +1355,15 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
             ? <><Loader2 size={13} className="pd-spin" /> Waiting… {listen.remaining}s</>
             : <><Radio size={13} /> Fetch Results</>}
         </button>
+        {/* While it is standing ready, the one thing somebody wants is to see
+            whether anything is reaching the host at all — rather than watching
+            a countdown and guessing. */}
+        {source?.kind === 'link' && (
+          <button type="button" className="iqc-watch" title="Watch the conversation with this analyser as it happens"
+            onClick={() => setWatching(true)}>
+            <MonitorPlay size={12} /> Watch live
+          </button>
+        )}
       </div>
       {listen.waiting && (
         <p className="iqc-listening">
@@ -1384,12 +1411,34 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
         </ul>
       )}
 
+      {/* The rest of them, when the newest few are not the one. */}
+      {all.length > waiting.length && (
+        <button type="button" className="pq-link iqc-see-all" onClick={() => setBrowsing(true)}>
+          See all transmissions
+        </button>
+      )}
+
       {preview && (
         <TransmissionPreview
           materialId={materialId} message={preview}
           onClose={() => setPreview(null)}
           onUse={async () => { const m = preview; setPreview(null); await bringIn(m); }}
           onError={onError} />
+      )}
+
+      {browsing && (
+        <TransmissionsDialog
+          endpoint="/iqc/analyser/transmissions"
+          busyId={busy}
+          onClose={() => setBrowsing(false)}
+          onUse={async row => {
+            setBrowsing(false);
+            await bringIn({ ...row, parsed_values: [], matched_elsewhere: null } as unknown as AnalyserWaiting);
+          }} />
+      )}
+
+      {watching && source?.kind === 'link' && (
+        <LiveTransmission linkId={source.id} onClose={() => setWatching(false)} />
       )}
 
       {mapping && (
