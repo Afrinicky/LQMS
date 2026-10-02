@@ -198,6 +198,63 @@ const drifted = await j('/iqc/runs', { token: A, method: 'POST', body: {
 check('and a re-read that has drifted is rejected', drifted.json?.status === 'out_of_control', JSON.stringify(drifted.json));
 check('holding patient results', drifted.json?.mayReleasePatientResults === false);
 
+/* ================= 6. whose board a control is on, and who may say so */
+/*
+ * The board is drawn through the unit scope, which knows that three posts — the
+ * administrator, the Quality Manager and the Laboratory Manager — answer for
+ * every unit and may CHOOSE which unit they are looking at. Every per-control
+ * action checked the reader's own staff section instead, so a Quality Manager
+ * could open another unit's board from the picker, see its controls listed,
+ * press Run it, and be told the control was not on their board — about a
+ * control that plainly was on the board in front of them.
+ *
+ * Both directions matter. The senior post must reach it; the bench must not.
+ */
+console.log('\n[6] Reaching a control on a unit that is not your own');
+
+const otherUnit = ((await j('/sections', { token: A })).json ?? []).find(x => Number(x.id) !== Number(sectionId));
+const awayControl = otherUnit ? await j('/iqc/materials', { token: A, method: 'POST', body: {
+  materialName: `Away control ${stamp}`, testName: 'Full blood count', lotNumber: `AW-${stamp}`,
+  levelLabel: 'Level 1 (Low)', source: 'commercial', controlType: 'quantitative', qcFrequency: 'daily',
+  sectionId: otherUnit.id,
+  analytes: [{ analyte: 'Haemoglobin', unit: 'g/dL', targetMean: 13.5, targetSd: 0.4, decimalPlaces: 1 }],
+} }) : null;
+check('a control exists on another unit', awayControl?.status === 201, JSON.stringify(awayControl?.json));
+
+if (awayControl?.status === 201) {
+  const awayId = awayControl.json.id;
+  // The administrator's own staff record is on THIS unit, not that one.
+  const register = await j(`/iqc/portal/controls/${awayId}/retained-samples`, { token: A });
+  check('a post that answers for every unit reaches it', register.status === 200,
+    JSON.stringify(register.json?.error));
+  const armed = await j(`/iqc/portal/controls/${awayId}/analyser-listen`, { token: A, method: 'POST' });
+  check('and may stand ready on it', armed.status === 200, JSON.stringify(armed.json?.error));
+
+  // A bench account is held to its own unit, which is the whole point of the check.
+  const roles = (await j('/roles', { token: A })).json ?? [];
+  const bench = (Array.isArray(roles) ? roles : []).find(r => /biomedical scientist/i.test(String(r.name)));
+  const benchStaff = await j('/staff', { token: A, method: 'POST', body: {
+    fullName: `Bench ${stamp}`, staffNumber: `BT${stamp % 100000}`, sectionId, employmentStatus: 'active',
+  } });
+  const username = `bench${stamp % 100000}`;
+  await j('/users', { token: A, method: 'POST', body: {
+    username, password: PW, fullName: `Bench ${stamp}`, roleId: bench?.id, staffId: benchStaff.json?.id,
+  } });
+  const B = (await j('/auth/login', { method: 'POST', body: { username, password: PW } })).json?.token;
+  check('a bench account can be signed in', Boolean(B));
+
+  if (B) {
+    const refusedRegister = await j(`/iqc/portal/controls/${awayId}/retained-samples`, { token: B });
+    check('the bench is still refused another unit\u2019s control', refusedRegister.status === 404,
+      `${refusedRegister.status}`);
+    const refusedArm = await j(`/iqc/portal/controls/${awayId}/analyser-listen`, { token: B, method: 'POST' });
+    check('and cannot stand ready on it either', refusedArm.status === 404, `${refusedArm.status}`);
+    const own = await j(`/iqc/portal/controls/${controlId}/retained-samples`, { token: B });
+    check('while its own unit\u2019s control is reachable as before', own.status === 200,
+      JSON.stringify(own.json?.error));
+  }
+}
+
 await j(`/instrument-links/${link.json.id}/stop`, { token: A, method: 'POST' });
 
 console.log(`\n${pass} passed, ${fail} failed`);

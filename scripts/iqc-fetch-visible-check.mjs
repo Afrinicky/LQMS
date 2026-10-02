@@ -88,32 +88,45 @@ const controlId = control.json.id;
 check('the control is defined, naming an instrument no link is set up against', control.status === 201,
   JSON.stringify(control.json));
 
-/* ================================ 2. the module says so, and still offers both */
-console.log('\n[2] Run Control: no match is not the same as no analyser');
+/* ========= 2. the module says so, and offers nothing it cannot stand behind */
+/*
+ * A control run is a statement about ONE instrument's performance: CLSI C24
+ * keeps a mean, an SD and a Levey-Jennings chart per instrument, and ISO 15189
+ * has the laboratory show comparability BETWEEN instruments. Neither survives a
+ * run filed against a machine it was not run on, and an accepted run cannot be
+ * un-attributed afterwards. So a link on another machine is not offered with a
+ * warning beside it; it is not offered.
+ */
+console.log('\n[2] Run Control: an analyser that is not this control’s is not offered');
 const attached = (await j(`/iqc/materials/${controlId}/analyser`, { token: A })).json;
 check('the module reports no match rather than a feed', attached?.linked === false, JSON.stringify(attached?.linked));
-check('and names the real problem', /match/i.test(String(attached?.why)), String(attached?.why));
-check('while still offering every analyser to choose from',
-  (attached?.options ?? []).some(o => o.id === linkA.json.id) && (attached?.options ?? []).some(o => o.id === linkB.json.id),
+check('and names the real problem', /link is registered against/i.test(String(attached?.why)), String(attached?.why));
+check('and offers no analyser, because none belongs to this control’s instrument',
+  (attached?.options ?? []).length === 0,
   JSON.stringify((attached?.options ?? []).map(o => o.name)));
 
-/* ========================================= 3. the bench gets the same offer */
-console.log('\n[3] The portal: the same control, the same two analysers');
+/* ========================================= 3. the bench is held to the same rule */
+console.log('\n[3] The portal: the same control, and the same refusal');
 const detail = (await j(`/iqc/portal/controls/${controlId}`, { token: A })).json;
 check('the bench can open the control', Boolean(detail?.material), JSON.stringify(detail?.error));
 check('it is told no analyser matched', !detail?.feed, JSON.stringify(detail?.feed));
-check('and is handed both to pick from', (detail?.feedOptions ?? []).length >= 2,
+check('and is offered none to pick from', (detail?.feedOptions ?? []).length === 0,
   JSON.stringify((detail?.feedOptions ?? []).map(o => o.name)));
 
+// Naming one by hand does not get round it: a request for a link on another
+// machine is ignored rather than obeyed.
 const armed = await j(`/iqc/portal/controls/${controlId}/analyser-listen`, {
   token: A, method: 'POST', body: { linkId: linkB.json.id },
 });
-check('the bench can stand ready on the one it picked', armed.json?.listening === true, JSON.stringify(armed.json));
-check('and is handed a watermark', Number.isFinite(Number(armed.json?.since?.control)), JSON.stringify(armed.json?.since));
+check('asking for an analyser on another machine is refused',
+  armed.json?.listening === false, JSON.stringify(armed.json));
+check('and is handed a watermark all the same', Number.isFinite(Number(armed.json?.since?.control)), JSON.stringify(armed.json?.since));
+check('saying which of the two things is missing',
+  /link is registered against/i.test(String(armed.json?.note)), JSON.stringify(armed.json?.note));
 
 const guessed = await j(`/iqc/portal/controls/${controlId}/analyser-listen`, { token: A, method: 'POST' });
-check('without a choice it says plainly that nothing is attached',
-  guessed.json?.listening === false && /no analyser/i.test(String(guessed.json?.note)), JSON.stringify(guessed.json));
+check('and without a choice it says the same thing',
+  guessed.json?.listening === false && /link is registered against/i.test(String(guessed.json?.note)), JSON.stringify(guessed.json));
 
 /* ======================================= 4. enrolling a sample from the bench */
 console.log('\n[4] Putting a sample on the register without leaving the bench');

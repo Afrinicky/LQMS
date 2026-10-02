@@ -29,6 +29,7 @@ import { parseIntNullable } from './routeHelpers.js';
 import { mapRows } from '../services/iqcAnalyteMatching.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
+import { linksForControl } from '../services/controlAnalyser.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -55,39 +56,39 @@ export function iqcAnalyserRoutes() {
    * the bench went back to typing twenty-three numbers off a printout with no
    * indication that anything was wrong.
    *
-   * So the question is asked more widely, in the order of how sure the answer
-   * is: the instrument chosen on the run itself, then the one on the control,
-   * then a feed attached to the control, then the unit's own link, then — when
-   * this laboratory has exactly one analyser transmitting at all — that one.
-   * Every candidate is returned as well, so where the guess is wrong the bench
-   * can simply say which machine it is rather than being told there is none.
+   * So the question is asked of the INSTRUMENT, and only of the instrument:
+   * the one chosen on the run itself, else the one recorded on the control.
+   * Every link registered against that machine is a candidate, and nothing
+   * else is.
+   *
+   * It used to widen further than that — to any link on the unit, and then to
+   * "the only analyser this laboratory owns" — and both of those attach a
+   * control run to a machine it was not run on. A control run is a statement
+   * about one instrument's performance: CLSI C24 has a mean, a standard
+   * deviation and a Levey-Jennings chart kept per instrument, and ISO 15189
+   * has the laboratory demonstrate comparability BETWEEN instruments, neither
+   * of which survives a run filed against the wrong one. An accepted run
+   * cannot be un-attributed afterwards, so the guess has to be right or absent.
    */
   function attachmentFor(materialId: unknown, preferredEquipmentId?: number | null, preferredLinkId?: number | null) {
     const db = getDb();
     const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(materialId) as any;
     if (!material) return null;
 
-    const unitId = material.performing_section_id ?? material.section_id ?? null;
-    const options = db.prepare(`SELECT l.*, e.name AS equipment_name
-        FROM instrument_links l LEFT JOIN equipment_items e ON e.id = l.equipment_id
-        WHERE l.is_active = 1
-        ORDER BY (l.state IN ('listening','connected','following')) DESC, l.name`).all() as any[];
+    // The instrument this run is on: what the run says, else what the control
+    // says. A control with neither has no analyser, which is the honest answer
+    // for a manual method. One machine registered twice under slightly
+    // different spellings is still one machine — the rule, and why it is drawn
+    // exactly there, is in `controlAnalyser.ts`.
+    const equipmentId = preferredEquipmentId ?? material.equipment_id ?? null;
+    const options: any[] = linksForControl(db, { equipment_id: equipmentId });
 
-    const byEquipment = (id: number | null | undefined) =>
-      (id ? options.find(l => Number(l.equipment_id) === Number(id)) : undefined) ?? null;
-
+    // The bench may say which of this instrument's links it means; it may not
+    // name one belonging to a different machine.
     const named: any = preferredLinkId
       ? options.find(l => Number(l.id) === Number(preferredLinkId)) ?? null
       : null;
-    const inUnit: any = unitId
-      ? options.find(l => Number(l.section_id) === Number(unitId)) ?? null
-      : null;
-    const onlyOne: any = options.length === 1 ? options[0] : null;
-    const link: any = named
-      ?? byEquipment(preferredEquipmentId)
-      ?? byEquipment(material.equipment_id)
-      ?? inUnit
-      ?? onlyOne;
+    const link: any = named ?? options[0] ?? null;
 
     const feed = material.feed_id
       ? db.prepare('SELECT * FROM iqc_instrument_feeds WHERE id = ? AND is_active = 1').get(material.feed_id) as any
@@ -158,22 +159,26 @@ export function iqcAnalyserRoutes() {
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
     const { material, link, feed, options } = found;
 
-    // Every analyser the bench could reasonably mean, so a wrong guess is a
-    // dropdown rather than a dead end.
+    // Every link registered against this instrument, so a machine carrying two
+    // of them — read directly and followed through a middleware's log — is a
+    // dropdown rather than a guess.
     const choices = options.map(l => ({
       id: l.id, name: l.name, equipmentName: l.equipment_name ?? null,
       state: l.state, open: linkIsOurs(l.role, l.mode),
+      /** Can this link be asked for results, or only waited on? */
+      canPull: canFetch(l.mode) && linkIsOurs(l.role, l.mode),
     }));
 
     if (!link && !feed) {
+      const equipmentId = parseIntNullable(req.query.equipmentId) ?? material.equipment_id ?? null;
       return res.json({
         linked: false,
-        // Named rather than left blank: "no analyser at all" and "none that
-        // matches this control" are different problems with different
-        // remedies, and the bench cannot act on the first wording.
-        why: options.length
-          ? 'None of the analyser links match this control’s instrument. Choose the machine it runs on.'
-          : 'No analyser link is set up on this system yet. One is added under Analyser Links.',
+        // Two different problems with two different remedies, and the bench
+        // cannot act on a wording that conflates them: either the control does
+        // not say which machine it runs on, or that machine has no link.
+        why: equipmentId == null
+          ? 'This control does not say which instrument it runs on, so there is no analyser to take results from. Set the instrument on the control.'
+          : 'No analyser link is registered against this control’s instrument. One is added under Analyser Links.',
         options: choices,
         waiting: [],
       });
@@ -265,14 +270,40 @@ export function iqcAnalyserRoutes() {
         if (!bridge) {
           listening = false;
           note = 'The analyser bridge is not running on this host.';
-        } else if (!bridge.isRunning(Number(link.id))) {
+        } else {
           // Standing ready has to actually open the door. A screen that says
           // "waiting" over a link that was never started waits for ever.
-          bridge.restart(Number(link.id));
-          note = 'The link was not running, so it was started. Send the sample from the analyser.';
-        } else if (canFetch(link.mode)) {
-          // A folder or a followed log is asked as well as waited on.
-          bridge.fetchNow(Number(link.id));
+          if (!bridge.isRunning(Number(link.id))) bridge.restart(Number(link.id));
+
+          /**
+           * Ask, where asking is possible; wait, where it is not.
+           *
+           * Which of the two happens is a property of the link, not something
+           * the bench should have to know. An analyser that dials in decides
+           * for itself when to transmit, so there the only honest thing is to
+           * stand ready. But where SECHLIMS is itself the middleware — a folder
+           * the analyser exports into, a client's log it follows — the results
+           * may already be sitting there, and pressing fetch must go and look,
+           * exactly as the LHIMS client's own fetch does. This was skipped
+           * entirely whenever the link had just been started, which is the one
+           * moment a backlog is most likely to be waiting.
+           */
+          if (canFetch(link.mode)) {
+            try { bridge.fetchNow(Number(link.id)); }
+            catch { /* what landed is measured below, not taken on trust */ }
+          }
+
+          // Measured, not assumed: starting a stopped link sweeps its folder on
+          // the way up, so the fetch that follows reports "nothing new" about
+          // results it has just brought in. What arrived since the watermark is
+          // the honest answer, and the watermark handed back is still the one
+          // taken before any of it, so the waiting screen collects them.
+          const landed = newestWatermark(link?.id ?? null, feed?.id ?? null).control - since.control;
+          if (landed > 0) {
+            note = `${landed} control run${landed === 1 ? '' : 's'} brought in. Still listening in case the analyser sends again.`;
+          } else if (canFetch(link.mode)) {
+            note = 'Nothing waiting. Standing by — send the sample from the analyser.';
+          }
         }
       }
       audit(req, { action: 'edit', entity: 'instrument_links', entityId: link.id, newValue: { armedForControl: req.params.id } });

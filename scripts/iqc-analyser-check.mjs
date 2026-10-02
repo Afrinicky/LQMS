@@ -85,8 +85,11 @@ const bare = await j('/iqc/materials', { token: A, method: 'POST', body: {
 } });
 const bareStatus = await j(`/iqc/materials/${bare.json.id}/analyser`, { token: A });
 check('a control with no instrument is not linked', bareStatus.json?.linked === false);
+// A manual control has no instrument, so "no link is set up on this system" was
+// the wrong complaint about the wrong thing. The remedy is to say which machine
+// it runs on — if indeed it runs on one.
 check('and says why, naming the remedy rather than the symptom',
-  /No analyser link is set up|Choose the machine/.test(String(bareStatus.json?.why ?? '')),
+  /Set the instrument on the control|link is registered against/.test(String(bareStatus.json?.why ?? '')),
   bareStatus.json?.why);
 
 /* ======================================== 2. an analyser the bridge will not open */
@@ -261,13 +264,20 @@ check('a link LHIMS owns refuses to pretend it is waiting', blockedArm.json?.lis
 check('and says why', /LHIMS/.test(String(blockedArm.json?.note ?? '')), blockedArm.json?.note);
 
 
-/* ============ 4c. the control-material path, and a mismatched instrument */
-console.log('\n[4c] Fetch is offered for control material, even when the instrument does not match');
+/* ======== 4c. one machine registered twice, and a machine that is not it */
+/*
+ * Two names for ONE machine is normal in a real register and must not cost the
+ * bench its link. Two different machines is the opposite case, and offering one
+ * for the other writes a control run against an analyser it was never run on —
+ * which CLSI C24 (a mean, an SD and a chart per instrument) and ISO 15189
+ * (comparability BETWEEN instruments) both depend on not happening.
+ */
+console.log('\n[4c] Two spellings of one machine, and a machine that is simply not it');
 
 // The laboratory registered its machine twice under slightly different names —
 // which is normal, and used to make the whole panel vanish.
 const otherEquipment = await j('/equipment', { token: A, method: 'POST', body: {
-  name: `SYSMEX XN-330 (dup) ${stamp}`, equipmentCategory: 'analyser', status: 'operational',
+  name: `SYSMEX XN330 ${stamp}`, equipmentCategory: 'analyser', status: 'operational',
 } });
 const mismatched = await j('/iqc/materials', { token: A, method: 'POST', body: {
   materialName: `Mismatched FBC ${stamp}`, testName: 'Full blood count', lotNumber: `MIS-${stamp}`,
@@ -276,11 +286,29 @@ const mismatched = await j('/iqc/materials', { token: A, method: 'POST', body: {
   analytes: [{ analyte: 'Haemoglobin', unit: 'g/dL', targetMean: 13.5, targetSd: 0.4, decimalPlaces: 1 }],
 } });
 const mismatchedStatus = await j(`/iqc/materials/${mismatched.json.id}/analyser`, { token: A });
-check('an analyser that matches nothing still offers every link to choose from',
-  (mismatchedStatus.json?.options ?? []).length > 0, JSON.stringify(mismatchedStatus.json?.why));
-check('and names the one the bench should pick from',
-  (mismatchedStatus.json?.options ?? []).some(o => o.name.includes('Haematology 2')),
+check('a second spelling of the same machine still finds its link',
+  (mismatchedStatus.json?.options ?? []).some(o => o.id === link.json.id),
   JSON.stringify((mismatchedStatus.json?.options ?? []).map(o => o.name)));
+check('and nothing belonging to another machine is offered beside it',
+  (mismatchedStatus.json?.options ?? []).every(o => o.id === link.json.id),
+  JSON.stringify((mismatchedStatus.json?.options ?? []).map(o => o.name)));
+
+// A machine that is genuinely a different machine gets nothing at all.
+const foreign = await j('/equipment', { token: A, method: 'POST', body: {
+  name: `GeneXpert IV ${stamp}`, equipmentCategory: 'analyser', status: 'operational',
+} });
+const foreignControl = await j('/iqc/materials', { token: A, method: 'POST', body: {
+  materialName: `MTB control ${stamp}`, testName: 'GeneXpert MTB', lotNumber: `GX-${stamp}`,
+  source: 'commercial', controlType: 'quantitative', qcFrequency: 'daily',
+  equipmentId: foreign.json.id,
+  analytes: [{ analyte: 'Haemoglobin', unit: 'g/dL', targetMean: 13.5, targetSd: 0.4, decimalPlaces: 1 }],
+} });
+const foreignStatus = await j(`/iqc/materials/${foreignControl.json.id}/analyser`, { token: A });
+check('a control on a different machine is offered no analyser at all',
+  (foreignStatus.json?.options ?? []).length === 0,
+  JSON.stringify((foreignStatus.json?.options ?? []).map(o => o.name)));
+check('and is told which of the two things is missing',
+  /link is registered against/i.test(String(foreignStatus.json?.why)), String(foreignStatus.json?.why));
 
 // Saying which machine it is puts the panel back.
 const chosen = await j(`/iqc/materials/${mismatched.json.id}/analyser?linkId=${link.json.id}`, { token: A });

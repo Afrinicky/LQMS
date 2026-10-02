@@ -1327,7 +1327,7 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
           onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
           {listen.waiting
             ? <><Loader2 size={13} className="pd-spin" /> Waiting… {listen.remaining}s</>
-            : <><Radio size={13} /> Fetch from analyser</>}
+            : <><Radio size={13} /> Fetch Results</>}
         </button>
       </div>
       {listen.waiting && (
