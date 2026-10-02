@@ -348,6 +348,40 @@ function identifier(value: string): string {
 }
 
 /**
+ * The analyser's own mnemonic for a parameter, out of the universal test ID.
+ *
+ * ASTM gives field 3 of a result record four components — the test id, its
+ * name, its type, and the manufacturer's own code — and vendors use them as
+ * they please. Most haematology analysers leave the first three empty and put
+ * the mnemonic last: `^^^WBC`. A Sysmex XN does not. It writes `^^^^WBC^1`,
+ * with a numeric sub-identifier after the mnemonic, and some clients write the
+ * repeat delimiter around it as well: `^^^^\WBC\1`.
+ *
+ * Taking the last component, as this did, therefore read every parameter of a
+ * Sysmex XbarM transmission as `1`. Sixteen parameters arrived, sixteen were
+ * stored, and the control screen filled in none of them and reported that the
+ * analyser had sent "1", which this control does not measure — perfectly
+ * accurately, and uselessly.
+ *
+ * So the mnemonic is the last component that actually contains a LETTER, with
+ * a preference for one carrying no spaces, since a component with spaces in it
+ * is a test NAME and the one beside it is the code. A test id that is genuinely
+ * numeric all the way through keeps the old answer, because then the number is
+ * all there is.
+ */
+function testCode(universalTestId: string): string {
+  const raw = String(universalTestId ?? '').trim();
+  // Both ASTM separators: components are ^, repeats are \.
+  const parts = raw.split(/[\^\\]/).map(p => p.trim()).filter(Boolean);
+  if (!parts.length) return raw;
+  const named = parts.filter(p => /[A-Za-z]/.test(p));
+  if (!named.length) return parts[parts.length - 1];
+  const tight = named.filter(p => !/\s/.test(p));
+  const chosen = tight.length ? tight : named;
+  return chosen[chosen.length - 1];
+}
+
+/**
  * Did the analyser itself say "this is a control"?
  *
  * ASTM's order record has a field for it — the action code, 'Q', meaning treat
@@ -435,11 +469,9 @@ export function parseAstm(text: string): AnalyserMessage[] {
 
     if (type === 'R') {
       if (!current) current = blankMessage(instrument, text);
-      // Field 3 is the universal test ID: ^^^WBC or ^^^^WBC depending on
-      // vendor, so take the last non-empty component rather than a fixed one.
-      const testId = field(record, 3);
-      const parts = testId.split('^').map(p => p.trim()).filter(Boolean);
-      const code = parts.length ? parts[parts.length - 1] : testId;
+      // Field 3 is the universal test ID, and which component holds the
+      // mnemonic is a vendor decision. See `testCode`.
+      const code = testCode(field(record, 3));
       const value = field(record, 4);
       if (!code) continue;
       current.results.push({

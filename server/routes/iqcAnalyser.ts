@@ -26,10 +26,11 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable } from './routeHelpers.js';
 
-import { mapRows } from '../services/iqcAnalyteMatching.js';
+import { bestLabel, mapRows } from '../services/iqcAnalyteMatching.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
 import { linksForControl } from '../services/controlAnalyser.js';
+import { feedMessageValues } from '../services/feedMessageValues.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -327,7 +328,9 @@ export function iqcAnalyserRoutes() {
 
     const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
       .all(material.id) as any[];
-    const values = safeJson(message.parsed_values) ?? [];
+    // Read from the transmission itself, so a run already on the bench gets the
+    // benefit of every later improvement to the parser. See `feedMessageValues`.
+    const values = feedMessageValues(db, message);
     const source = message.feed_id
       ? db.prepare('SELECT analyte_map FROM iqc_instrument_feeds WHERE id = ?').get(message.feed_id) as any
       : message.link_id
@@ -335,7 +338,13 @@ export function iqcAnalyserRoutes() {
         : null;
     const map = safeJson(source?.analyte_map) ?? {};
 
-    const grid = (values as any[]).map(v => [String(map[String(v.analyte)] ?? v.analyte ?? ''), v.value]);
+    // Both the mapped name and the analyser's own mnemonic are offered to the
+    // matcher: a control whose parameter is called "HGB" and one whose
+    // parameter is called "Haemoglobin" are the same control to a bench, and
+    // only one of the two labels will match either of them.
+    const grid = values.map(v => [
+      bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], analytes), v.value,
+    ]);
     res.json({
       message: { ...message, parsed_values: values },
       materialId: material.id,

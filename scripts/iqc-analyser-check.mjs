@@ -370,6 +370,93 @@ const fetched = await j(`/iqc/materials/${controlId}/analyser/fetch`, { token: A
 check('asking a listening link to fetch says plainly that it cannot',
   String(fetched.json?.note ?? '').includes('sends when it is ready'));
 
+/* ========== 6. the universal test ID, and the parameter it actually names */
+/*
+ * ASTM gives a result record's field 3 four components and vendors fill them as
+ * they please. A Sysmex XN writes `^^^^WBC^1` — the mnemonic with a numeric
+ * sub-identifier after it — and a parser taking the LAST component read every
+ * parameter of every XbarM transmission as "1". Sixteen parameters arrived,
+ * sixteen were stored, and the control screen filled in none of them while
+ * reporting that the analyser had sent "1", which this control does not
+ * measure: perfectly accurate, and useless.
+ */
+console.log('\n[6] A Sysmex universal test ID, which carries more than the mnemonic');
+
+const xbarEquipment = await j('/equipment', { token: A, method: 'POST', body: {
+  name: `XN for XbarM ${stamp}`, equipmentCategory: 'analyser', status: 'operational',
+} });
+const XBAR_PORT = PORT + 11;
+const xbarLink = await j('/instrument-links', { token: A, method: 'POST', body: {
+  name: `XbarM link ${stamp}`, equipmentId: xbarEquipment.json.id, profileKey: 'sysmex_xn',
+  role: 'sechlims_only', mode: 'server', protocol: 'astm', listenPort: XBAR_PORT, autoStart: true,
+} });
+await j(`/instrument-links/${xbarLink.json.id}/start`, { token: A, method: 'POST' });
+await wait(600);
+
+// A control naming its parameters the way a Sysmex does, mnemonics and all.
+const xbarControl = await j('/iqc/materials', { token: A, method: 'POST', body: {
+  materialName: `XN CHECK ${stamp}`, testName: 'Full blood count', lotNumber: `XC-${stamp}`,
+  levelLabel: 'Level 1 (Low)', source: 'commercial', controlType: 'quantitative', qcFrequency: 'daily',
+  equipmentId: xbarEquipment.json.id,
+  analytes: [
+    { analyte: 'WBC', unit: '10^9/L', targetMean: 3.21, targetSd: 0.16, decimalPlaces: 2 },
+    { analyte: 'Haemoglobin', unit: 'g/dL', targetMean: 6.2, targetSd: 0.18, decimalPlaces: 1 },
+    { analyte: 'PLT', unit: '10^9/L', targetMean: 88, targetSd: 10, decimalPlaces: 0 },
+    { analyte: 'P-LCR', unit: '%', targetMean: 10.5, targetSd: 2.5, decimalPlaces: 1 },
+  ],
+} });
+check('a control defined with the analyser’s own mnemonics', xbarControl.status === 201,
+  JSON.stringify(xbarControl.json));
+
+await sendAstm(XBAR_PORT, [
+  `H|\\^&|||XN-550^1.0|||||||P|1|${stamp}`,
+  `O|1||^^ XbarM2^M|^^^^^FBC|||||||Q||||||||||||||F`,
+  // The shapes a real XN sends: a numeric sub-id, and a repeat delimiter.
+  'R|1|^^^^WBC^1|3.19|10*3/uL||N||F||||20261020105500',
+  'R|2|^^^^HGB^1|6.18|g/dL||N||F||||20261020105500',
+  'R|3|^^^^\\PLT\\1|87|10*3/uL||N||F||||20261020105500',
+  'R|4|^^^^P-LCR^1|10.6|%||N||F||||20261020105500',
+  'R|5|^^^^NEUT%^1|41.2|%||N||F||||20261020105500',
+  'L|1|N',
+]);
+await wait(1100);
+
+const xbarStatus = await j(`/iqc/materials/${xbarControl.json.id}/analyser`, { token: A });
+const xbarWaiting = (xbarStatus.json?.waiting ?? [])[0];
+check('the control run reaches the bench', Boolean(xbarWaiting),
+  JSON.stringify((xbarStatus.json?.waiting ?? []).map(w => w.sample_id)));
+check('and the analyser said it was quality control', xbarWaiting?.sample_id === 'XbarM2',
+  JSON.stringify(xbarWaiting?.sample_id));
+
+if (xbarWaiting) {
+  const codes = (xbarWaiting.parsed_values ?? []).map(v => String(v.code ?? ''));
+  check('every parameter keeps its own mnemonic, not the sub-identifier',
+    codes.length === 5 && !codes.some(c => c === '1'), JSON.stringify(codes));
+  check('including one wrapped in the repeat delimiter', codes.includes('PLT'), JSON.stringify(codes));
+
+  const xbarMap = await j(`/iqc/materials/${xbarControl.json.id}/analyser/messages/${xbarWaiting.id}/map`, { token: A });
+  check('and every one of the control’s parameters is filled in',
+    xbarMap.json?.matched === 4 && (xbarMap.json?.missingAnalytes ?? []).length === 0,
+    `${xbarMap.json?.matched} matched, missing ${JSON.stringify((xbarMap.json?.missingAnalytes ?? []).map(a => a.analyte))}`);
+  // PLT arrives as PLT, the link's profile renames it Platelets, and the
+  // control calls it PLT. Only one of those two labels matches, so both are tried.
+  check('a parameter the profile renames still finds the control’s own name for it',
+    (xbarMap.json?.readings ?? []).some(r => r.analyte === 'PLT' && r.value === 87),
+    JSON.stringify((xbarMap.json?.readings ?? []).map(r => `${r.analyte}=${r.value}`)));
+  check('and what the control does not measure is named rather than counted',
+    (xbarMap.json?.unmatchedLabels ?? []).some(l => /NEUT/i.test(String(l))),
+    JSON.stringify(xbarMap.json?.unmatchedLabels));
+  // The window that opens on the row needs every parameter, not only the
+  // matched ones, with the label each reading was recognised by.
+  check('the whole transmission is offered for the bench to look at first',
+    (xbarMap.json?.message?.parsed_values ?? []).length === 5,
+    `${(xbarMap.json?.message?.parsed_values ?? []).length} parameter(s)`);
+  check('each reading says which label it was recognised by',
+    (xbarMap.json?.readings ?? []).every(r => typeof r.label === 'string' && r.label),
+    JSON.stringify((xbarMap.json?.readings ?? []).map(r => r.label)));
+}
+
+await j(`/instrument-links/${xbarLink.json.id}/stop`, { token: A, method: 'POST' });
 await j(`/instrument-links/${link.json.id}/stop`, { token: A, method: 'POST' });
 
 console.log(`\n${pass} passed, ${fail} failed`);

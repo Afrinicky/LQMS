@@ -45,6 +45,7 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
 import { linksForControl } from '../services/controlAnalyser.js';
+import { feedMessageValues } from '../services/feedMessageValues.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { mayActOnUnit, leadsAnyUnit } from '../services/unitLeadership.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
@@ -57,7 +58,7 @@ import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.j
 import { effectiveTarget, withEffectiveTarget } from '../services/iqcTargets.js';
 import { chartStatistics } from '../services/iqcEvaluation.js';
 import {
-  findAnalyte, splitPasted, numberFrom, detectOrientation, mapRows, mapColumns,
+  bestLabel, findAnalyte, splitPasted, numberFrom, detectOrientation, mapRows, mapColumns,
   type Mapping,
 } from '../services/iqcAnalyteMatching.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
@@ -1058,7 +1059,9 @@ export function iqcPortalRoutes() {
     if (!materialId) return res.status(400).json({ error: 'This message is not matched to a control yet. Choose which control it belongs to.' });
 
     const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as any[];
-    const values = (safeJson(message.parsed_values) as any[]) ?? [];
+    // Read from the transmission itself, so a run already on the bench gets the
+    // benefit of every later improvement to the parser. See `feedMessageValues`.
+    const values = feedMessageValues(db, message);
     // The map that named these parameters. A message from a bridge link has no
     // feed, and reading the feed table for it returned nothing — so every
     // analyte came through under the analyser's own mnemonic and matched
@@ -1070,7 +1073,11 @@ export function iqcPortalRoutes() {
         : null;
     const map = (safeJson(source?.analyte_map) as Record<string, string> | null) ?? {};
 
-    const grid = values.map(v => [String(map[String(v.analyte)] ?? v.analyte ?? ''), v.value]);
+    // Both the mapped name and the analyser's own mnemonic, because a control
+    // may name its parameter either way and only one of the two will match.
+    const grid = values.map(v => [
+      bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], analytes), v.value,
+    ]);
     const mapped = mapRows(grid, analytes);
     res.json({ message: { ...message, parsed_values: values }, materialId, ...mapped });
   });
