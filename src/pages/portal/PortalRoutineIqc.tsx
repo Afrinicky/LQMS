@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowRight, Beaker, Check, CheckCircle2, ClipboardPaste, Clock, MonitorPlay,
   Download, FileSpreadsheet, FileUp, Keyboard, LineChart, Loader2, Lock, Plus,
-  Printer, Radio, ScanLine, ShieldAlert, Table2, Upload, X, XCircle,
+  Printer, Radio, ScanLine, Search, ShieldAlert, Table2, Upload, X, XCircle,
 } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { downloadXlsx, openPrintable } from '../../services/xlsx';
 import { usePermissions } from '../../hooks/usePermissions';
 import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 import {
   IQC_ENTRY_METHOD_LABELS, IQC_ENTRY_METHOD_HINTS, type IqcEntryMethod,
 } from '../../../shared/constants/routineWork';
@@ -612,18 +613,22 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
     arm: () => armAnalyser(`/iqc/portal/controls/${control.id}/analyser-listen`,
       feedLinkId ? { linkId: Number(feedLinkId) } : undefined),
     /*
-     * Scoped to the unit being looked at, and to the analyser being waited on.
+     * What has arrived FOR THIS CONTROL, in the unit being looked at.
      *
-     * Neither was being sent, and the unit was the bug the bench was feeling:
-     * the server scopes this list by unit, and with nothing told to it, it fell
-     * back to the READER's own unit. So a control transmitted from the
-     * haematology Sysmex arrived, was parked correctly, and was then filtered
-     * out of the very poll that was standing there waiting for it — the bench
-     * pressed Fetch Results, the LHIMS client reported success, and the boxes
-     * stayed empty.
+     * The control is named as well as the analyser, because they are not the
+     * same question and the laboratory has the case that proves it: one machine
+     * registered twice carries two links, this picker defaults to one of them,
+     * and the analyser transmits down the other. Asking only about the chosen
+     * link threw the run away — the bench pressed Fetch Results, the LHIMS
+     * client reported success, and the boxes stayed empty. The module asked
+     * about the control and never had the fault; now both ask the same thing.
+     *
+     * The unit matters for the same reason it did before: told nothing, the
+     * server scopes this list to the READER's own unit rather than the board
+     * being looked at.
      */
     poll: since => {
-      const q = new URLSearchParams({ since: String(since.control) });
+      const q = new URLSearchParams({ since: String(since.control), materialId: String(control.id) });
       if (sectionId) q.set('sectionId', String(sectionId));
       if (feedLinkId) q.set('linkId', String(feedLinkId));
       return api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?${q}`);
@@ -740,7 +745,7 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
                   </option>
                 ))}
               </select>
-              {samples.length === 0 && !addingSample && (
+              {samples.length === 0 && (
                 <span className="muted">
                   No sample is on this control&rsquo;s register yet. The register is kept per control, so a sample
                   enrolled on another control does not appear here. Add one above.
@@ -752,18 +757,11 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
                   {sample.original_run_number ? `, covered by ${sample.original_run_number}` : ''}.
                 </span>
               )}
-              {addingSample && (
-                <AddSample
-                  controlId={control.id} sectionId={sectionId} analytes={analytes} qualitative={qualitative}
-                  feedChoices={feedChoices} linkId={feedLinkId}
-                  onProblem={setProblem}
-                  onAdded={async id => {
-                    setAddingSample(false);
-                    const list = await api<any[]>(`/iqc/portal/controls/${control.id}/retained-samples`).catch(() => []);
-                    setSamples(list);
-                    setSampleId(String(id));
-                  }} />
-              )}
+              {/* The form for enrolling one opens as a window of its own. It was
+                  a card unfolding inside this dialog, which put a second
+                  bordered panel with its own Fetch button inside a panel that
+                  already had one — two windows on top of each other, and two
+                  places to press the same thing. */}
             </div>
           )}
 
@@ -786,6 +784,20 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
           {!retained && method === 'scan' && <ScanPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
 
           {mapping && <MappingReport mapping={mapping} />}
+
+          {addingSample && (
+            <AddSample
+              controlId={control.id} sectionId={sectionId} analytes={analytes} qualitative={qualitative}
+              feedChoices={feedChoices} linkId={feedLinkId}
+              onClose={() => setAddingSample(false)}
+              onProblem={setProblem}
+              onAdded={async id => {
+                setAddingSample(false);
+                const list = await api<any[]>(`/iqc/portal/controls/${control.id}/retained-samples`).catch(() => []);
+                setSamples(list);
+                setSampleId(String(id));
+              }} />
+          )}
 
           {watching && feedLinkId && (
             <LiveTransmission linkId={Number(feedLinkId)} onClose={() => setWatching(false)} />
@@ -955,18 +967,37 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
    Putting a sample on the register, from the bench
    ------------------------------------------------------------------------- */
 
-/**
- * A lot runs out mid-morning and the bench re-reads a sample it already
- * reported. For that to be a control run at all, the system has to hold what
- * the sample gave the first time — and until now that record could only be
- * made at a desktop, which is not where the person holding the tube is.
- *
- * So the same enrolment lives here, cut to what the bench actually knows: the
- * laboratory number, the day it was reported, and the result. The result can
- * come off the analyser rather than off a printout, because the original run
- * went over the same wire as everything else.
- */
-function AddSample({ controlId, sectionId, analytes, qualitative, feedChoices, linkId, onAdded, onProblem }: {
+/* ----------------------------------------------------------------------------
+   Enrolling a previously run sample
+   ----------------------------------------------------------------------------
+   A window of its own, raised over the run behind it. It used to unfold inside
+   the run dialog: a bordered card with its own Fetch button sitting inside a
+   bordered card that already had one, which read as two windows stacked on each
+   other and gave two places to press the same thing.
+
+   What it needs is the laboratory number the sample was reported under, the day
+   it was reported, and what it gave then — because the re-read is judged against
+   that and nothing else. All three can come off the analyser rather than off a
+   printout, which is the point: typing a result back in by hand is how a
+   transcription error becomes a QC record.
+
+   It listens for PATIENT samples, not control runs. A previously run sample is
+   a patient's sample; reading the control runs instead was why the sample
+   number arrived as "XbarM2" — a control's name — rather than a laboratory
+   number.
+   ------------------------------------------------------------------------- */
+
+/** A patient sample this analyser has sent, as the host hands it over. */
+type PatientSample = {
+  id: number; sample_id: string | null;
+  received_at: string; instrument_run_at: string | null;
+  result_count: number; source_name: string | null;
+  parsed_values?: Array<{ analyte?: string; code?: string; value?: number | string; unit?: string | null }>;
+  /** Already lined up against this control's parameters, by the host. */
+  readings?: Array<{ analyteId: number; analyte: string; value: number | null; qualitativeResult?: string | null }>;
+};
+
+function AddSample({ controlId, sectionId, analytes, qualitative, feedChoices, linkId, onAdded, onClose, onProblem }: {
   controlId: number;
   /** The unit whose board this is, for the same reason the run dialog needs it. */
   sectionId: number | null;
@@ -975,71 +1006,110 @@ function AddSample({ controlId, sectionId, analytes, qualitative, feedChoices, l
   feedChoices: FeedChoice[];
   linkId: string;
   onAdded: (id: number) => void | Promise<void>;
+  onClose: () => void;
   onProblem: (message: string | null) => void;
 }) {
   const [reference, setReference] = useState('');
   const [runDate, setRunDate] = useState(new Date().toISOString().slice(0, 10));
+  const [runTime, setRunTime] = useState('');
   const [originals, setOriginals] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
+  const [problem, setLocal] = useState<string | null>(null);
+  /** Watching the conversation with the analyser while standing ready for it. */
+  const [watching, setWatching] = useState(false);
+  /** The samples it has already sent, when the one wanted is not the next one. */
+  const [browsing, setBrowsing] = useState(false);
+  const [taken, setTaken] = useState<number | null>(null);
 
-  const listen = useAnalyserListen<IqcFeedMessage>({
+  const say = useCallback((message: string | null) => { setLocal(message); onProblem(message); }, [onProblem]);
+
+  /**
+   * Fill the window from one transmission.
+   *
+   * The sample number comes off the transmission's own specimen identifier,
+   * which is the laboratory number the sample was reported under — the one
+   * thing that has to be right for a re-read to trace back to a real report.
+   * The day and time come off the analyser's own stamp where it gave one,
+   * because "first tested" means when the machine ran it.
+   */
+  const takeFrom = useCallback((message: PatientSample) => {
+    setTaken(message.id);
+    setOriginals(() => {
+      // The host has already decided which of this control's parameters each
+      // reading is, with the synonyms and the link's own map — the screen only
+      // puts the numbers in the boxes.
+      const next: Record<number, string> = {};
+      for (const reading of message.readings ?? []) {
+        const value = reading.value ?? reading.qualitativeResult;
+        if (reading.analyteId == null || value === null || value === undefined || String(value) === '') continue;
+        next[reading.analyteId] = String(value);
+      }
+      return next;
+    });
+    if (message.sample_id) setReference(String(message.sample_id));
+    const at = message.instrument_run_at ?? message.received_at;
+    if (at) {
+      const day = String(at).slice(0, 10);
+      // Never stamp a sample as first tested tomorrow because an analyser's
+      // clock runs fast; the day it was reported is at the latest today.
+      setRunDate(day > new Date().toISOString().slice(0, 10) ? new Date().toISOString().slice(0, 10) : day);
+      setRunTime(String(at).slice(11, 16));
+    }
+  }, []);
+
+  const samplesUrl = useCallback((extra?: Record<string, string>) => {
+    const q = new URLSearchParams(extra ?? {});
+    if (linkId) q.set('linkId', linkId);
+    const tail = q.toString();
+    return `/iqc/portal/controls/${controlId}/patient-samples${tail ? `?${tail}` : ''}`;
+  }, [controlId, linkId]);
+
+  const listen = useAnalyserListen<PatientSample>({
     arm: () => armAnalyser(`/iqc/portal/controls/${controlId}/analyser-listen`,
       linkId ? { linkId: Number(linkId) } : undefined),
-    /*
-     * Scoped to the unit being looked at, and to the analyser being waited on.
-     *
-     * Neither was being sent, and the unit was the bug the bench was feeling:
-     * the server scopes this list by unit, and with nothing told to it, it fell
-     * back to the READER's own unit. So a control transmitted from the
-     * haematology Sysmex arrived, was parked correctly, and was then filtered
-     * out of the very poll that was standing there waiting for it — the bench
-     * pressed Fetch Results, the LHIMS client reported success, and the boxes
-     * stayed empty.
-     */
-    poll: since => {
-      const q = new URLSearchParams({ since: String(since.control) });
-      if (sectionId) q.set('sectionId', String(sectionId));
-      if (linkId) q.set('linkId', String(linkId));
-      return api<IqcFeedMessage[]>(`/iqc/portal/feed-messages?${q}`);
-    },
-    onArrival: async message => {
-      try {
-        const mapped = await api<IqcMapping>(`/iqc/portal/feed-messages/${message.id}/mapping?materialId=${controlId}`);
-        setOriginals(prev => {
-          const next = { ...prev };
-          for (const r of mapped.readings ?? []) {
-            if (r.analyteId == null) continue;
-            const v = r.value ?? r.qualitativeResult;
-            if (v !== null && v !== undefined && String(v) !== '') next[r.analyteId] = String(v);
-          }
-          return next;
-        });
-        if (!reference && message.sample_id) setReference(String(message.sample_id));
-      } catch (e) { onProblem(errorText(e)); }
-    },
+    // Patient samples are numbered in their own table, so the patient mark is
+    // the one to come back after — the control mark is a different sequence.
+    poll: since => api<PatientSample[]>(samplesUrl({ since: String(since.patient) })),
+    onArrival: message => { takeFrom(message); say(null); },
   });
 
+  const entered = analytes.filter(a => String(originals[a.id] ?? '').trim() !== '').length;
+
   async function save() {
+    if (!reference.trim()) return say('Give the laboratory number the sample was reported under.');
     const values = analytes
       .filter(a => String(originals[a.id] ?? '').trim() !== '')
       .map(a => (qualitative
         ? { analyteId: a.id, originalQualitativeResult: String(originals[a.id]).trim() }
         : { analyteId: a.id, originalValue: Number(String(originals[a.id]).trim()) }));
-    if (!reference.trim()) return onProblem('Give the laboratory number the sample was reported under.');
-    if (!values.length) return onProblem('Record what the sample originally gave for at least one parameter.');
-    setBusy(true); onProblem(null);
+    if (!values.length) return say('Record what the sample originally gave for at least one parameter.');
+    setBusy(true); say(null);
     try {
       const created = await api<{ id: number }>('/iqc/retained-samples', {
         method: 'POST',
-        body: JSON.stringify({ iqcMaterialId: controlId, sampleReference: reference.trim(), originalRunDate: runDate, values }),
+        body: JSON.stringify({
+          iqcMaterialId: controlId, sampleReference: reference.trim(),
+          originalRunDate: runDate, originalRunTime: runTime || undefined,
+          // Said the same way the module says it, so a sample enrolled on the
+          // bench and one enrolled at a desktop are the same record afterwards.
+          source: taken ? 'instrument' : 'entered',
+          instrumentMessageId: taken ?? undefined,
+          values,
+        }),
       });
       await onAdded(created.id);
-    } catch (e) { onProblem(errorText(e)); }
+    } catch (e) { say(errorText(e)); }
     finally { setBusy(false); }
   }
 
   return (
-    <div className="iqc-addsample">
+    <Modal onClose={onClose} title="Add a previously run sample">
+      <p className="iqc-modal-lead">
+        The laboratory number it was reported under, the day it was reported, and what it gave then. The re-read is
+        judged against those readings, so they are taken off the analyser rather than typed wherever that is possible.
+      </p>
+      {problem && <Notice kind="error">{problem}</Notice>}
+
       <div className="iqc-addsample-top">
         <label>
           <span>Sample number</span>
@@ -1050,24 +1120,52 @@ function AddSample({ controlId, sectionId, analytes, qualitative, feedChoices, l
           <input type="date" value={runDate} max={new Date().toISOString().slice(0, 10)}
             onChange={e => setRunDate(e.target.value)} />
         </label>
+        <label>
+          <span>Time</span>
+          <input type="time" value={runTime} onChange={e => setRunTime(e.target.value)} />
+        </label>
+      </div>
+
+      {/* The same three things the control run offers, because this is the same
+          act: take it off the analyser, watch it arrive, or go and find the one
+          that arrived earlier. */}
+      <div className="iqc-entry-head">
+        <span>What it gave the first time</span>
         <button type="button" className={`iqc-fetch tiny${listen.waiting ? ' is-waiting' : ''}`}
           disabled={feedChoices.length === 0}
           onClick={() => (listen.waiting ? listen.stop() : void listen.start())}>
           {listen.waiting
             ? <><Loader2 size={11} className="pd-spin" /> Waiting… {listen.remaining}s</>
-            : <><Radio size={11} /> Fetch</>}
+            : <><Radio size={11} /> Fetch Results</>}
         </button>
+        {linkId && (
+          <button type="button" className="iqc-watch" title="Watch the conversation with this analyser as it happens"
+            onClick={() => setWatching(true)}>
+            <MonitorPlay size={11} /> Watch live
+          </button>
+        )}
+        <button type="button" className="pq-link" onClick={() => setBrowsing(true)}>Earlier results</button>
+        <span className="muted">{entered} of {analytes.length} entered</span>
       </div>
+
       {listen.waiting && (
-        <p className="iqc-listening">
+        <p className="iqc-listening in-head">
           <span className="iqc-pulse" />
-          Ready. Send the sample from the analyser and what it gave drops in below.
+          Ready. Send the sample from the analyser and its number and results drop in above and below.
         </p>
       )}
-      {!listen.waiting && listen.note && <p className="iqc-hint">{listen.note}</p>}
-      {listen.problem && <p className="iqc-hint crit">{listen.problem}</p>}
+      {!listen.waiting && feedChoices.length === 0 && (
+        <p className="iqc-hint in-head">
+          No analyser link is registered against this control&rsquo;s instrument, so there is nothing to fetch from.
+          Enter what the sample gave below.
+        </p>
+      )}
+      {!listen.waiting && listen.note && <p className="iqc-hint in-head">{listen.note}</p>}
+      {listen.problem && <p className="iqc-hint in-head crit">{listen.problem}</p>}
+      {taken !== null && !listen.waiting && (
+        <p className="iqc-hint in-head ok">Filled in from the analyser&rsquo;s own transmission.</p>
+      )}
 
-      <p className="iqc-hint">What it gave the first time — the re-read is compared with this.</p>
       <div className="iqc-addsample-grid">
         {analytes.map(a => (
           <label key={a.id}>
@@ -1077,10 +1175,93 @@ function AddSample({ controlId, sectionId, analytes, qualitative, feedChoices, l
           </label>
         ))}
       </div>
-      <button type="button" className="iqc-addsample-save" disabled={busy} onClick={save}>
-        {busy ? 'Saving…' : 'Add this sample'}
-      </button>
-    </div>
+
+      <div className="pr-btns">
+        <button type="button" disabled={busy} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Add this sample'}
+        </button>
+        <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+      </div>
+
+      {watching && linkId && (
+        <LiveTransmission linkId={Number(linkId)} onClose={() => setWatching(false)} />
+      )}
+      {browsing && (
+        <PatientSampleBrowser
+          url={samplesUrl} onClose={() => setBrowsing(false)}
+          onUse={message => { takeFrom(message); setBrowsing(false); }} />
+      )}
+    </Modal>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   The samples this analyser has already sent
+   ----------------------------------------------------------------------------
+   The counterpart, for a patient sample, of the control transmissions register:
+   the sample being enrolled was usually reported hours or days ago, so the one
+   wanted is rarely the next one to arrive.
+   ------------------------------------------------------------------------- */
+function PatientSampleBrowser({ url, onUse, onClose }: {
+  url: (extra?: Record<string, string>) => string;
+  onUse: (message: PatientSample) => void;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<PatientSample[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      api<PatientSample[]>(url(search.trim() ? { search: search.trim() } : undefined))
+        .then(next => { if (live) { setRows(next); setProblem(null); } })
+        .catch(e => { if (live) setProblem(errorText(e)); })
+        .finally(() => { if (live) setLoading(false); });
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [url, search]);
+
+  return (
+    <Modal onClose={onClose} title="Samples this analyser has sent">
+      {problem && <Notice kind="error">{problem}</Notice>}
+      <div className="il-tx-filters">
+        <label className="il-tx-search">
+          <Search size={13} />
+          <TextField value={search} onValue={setSearch} placeholder="Laboratory number" />
+        </label>
+      </div>
+      <p className="il-tx-count">
+        {loading ? <><Loader2 size={12} className="pd-spin" /> Looking…</>
+          : rows.length === 0 ? 'Nothing matches that.'
+          : `${rows.length} sample${rows.length === 1 ? '' : 's'}`}
+      </p>
+      {rows.length > 0 && (
+        <ul className="il-tx-list">
+          {rows.map(row => (
+            <li key={row.id}>
+              <div className="il-tx-main">
+                <strong>{row.sample_id || 'sample'}</strong>
+                <span className="muted">
+                  received {String(row.received_at).slice(0, 16).replace('T', ' ')}
+                  {row.instrument_run_at
+                    && String(row.instrument_run_at).slice(0, 16) !== String(row.received_at).slice(0, 16)
+                    ? ` · analyser stamped ${String(row.instrument_run_at).slice(0, 16).replace('T', ' ')}` : ''}
+                  {' · '}{row.result_count} parameter{row.result_count === 1 ? '' : 's'}
+                  {row.source_name ? ` · ${row.source_name}` : ''}
+                </span>
+              </div>
+              <button type="button" className="pq-link" onClick={() => onUse(row)}>
+                <ArrowRight size={12} /> Use these
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="pr-btns"><button type="button" className="secondary" onClick={onClose}>Close</button></div>
+    </Modal>
   );
 }
 

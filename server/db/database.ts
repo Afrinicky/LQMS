@@ -7098,6 +7098,26 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
     }
   }
 
+  /*
+   * Which transmission a previously run sample was enrolled from.
+   *
+   * `feed_message_id` points at iqc_feed_messages, which holds CONTROL runs —
+   * and a previously run sample is a patient's sample, whose transmission lives
+   * in instrument_messages. Enrolling one from the analyser therefore wrote a
+   * patient message's id into a column whose foreign key names the other table,
+   * and the insert failed outright: "FOREIGN KEY constraint failed", with the
+   * sample number and every reading already filled in correctly on the screen.
+   *
+   * So the provenance gets the column it was always about. The old one stays
+   * for the control-run case and for what is already recorded.
+   */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_retained_samples)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('instrument_message_id')) {
+      database.exec('ALTER TABLE iqc_retained_samples ADD COLUMN instrument_message_id INTEGER REFERENCES instrument_messages(id)');
+    }
+  }
+
   // ── A placement has an end, and the end has to arrive on its own ──────────
   //
   // A student, an intern, a national service person or a locum is in the

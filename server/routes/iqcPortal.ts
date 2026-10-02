@@ -355,10 +355,27 @@ export function iqcPortalRoutes() {
     }
 
     const section = db.prepare('SELECT id, name FROM sections WHERE id = ?').get(sectionId) as any;
+    /*
+     * The tests this unit reports — panels and standalone tests, NOT a panel's
+     * own parameters.
+     *
+     * A full blood count is one test. The analyser reports sixteen numbers for
+     * it and the menu holds each of them so a report can be laid out, but
+     * nobody runs a control "for MCHC": the control is run for the FBC, on the
+     * Sysmex, and it judges every parameter of it at once. Listing the
+     * parameters here alongside their own panel made haematology look like
+     * seventeen uncontrolled tests when it has nine, and invited somebody to
+     * define a second control for HCT that would duplicate the first.
+     *
+     * So a test that belongs to a panel is represented by its panel. A test
+     * that belongs to no panel is itself, exactly as before — a malaria RDT and
+     * a sickling test are not components of anything and are not touched.
+     */
     const tests = db.prepare(`SELECT t.id, t.test_code, t.test_name, t.method_name, t.equipment_id, t.status,
           e.name AS equipment_name, e.equipment_number
         FROM lab_test_catalog t LEFT JOIN equipment_items e ON e.id = t.equipment_id
         WHERE t.section_id = ? AND COALESCE(t.status, 'active') = 'active'
+          AND t.parent_test_id IS NULL
         ORDER BY t.test_name`).all(sectionId) as any[];
 
     const controls = db.prepare(`SELECT m.id, m.material_name, m.test_name, m.level_label, m.lot_number,
@@ -978,10 +995,27 @@ export function iqcPortalRoutes() {
     const db = getDb();
     const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     const status = typeof req.query.status === 'string' ? req.query.status : null;
-    // Which analyser, when the screen knows. A bench standing at one machine
-    // waiting for the control it has just run should not be handed the run that
-    // a different machine in the same unit happened to send a second earlier.
+    /*
+     * WHICH CONTROL, and which analyser — asked together, and answered the way
+     * the module answers it.
+     *
+     * Narrowing on the link alone is what stopped Fetch Results working on the
+     * bench while it went on working in the module. This laboratory registers
+     * one machine twice — "SYSMEX XN-550" for the link and "Sysmex XN550" for
+     * the control — so one instrument carries two links. The bench's picker
+     * defaults to one of them; the analyser transmits down the other; the run
+     * is parked against the right control perfectly correctly, and a poll
+     * narrowed by link id then threw it away. The bench pressed the button, the
+     * LHIMS client reported success, and the boxes stayed empty.
+     *
+     * So the question is the module's question: what has arrived FOR THIS
+     * CONTROL — matched to it, or on a link or feed it is listened to on —
+     * since the watermark. Given neither, nothing is narrowed and the unit
+     * scope below is the only limit, which is what the bench's inbox wants.
+     */
     const linkId = parseIntNullable(req.query.linkId);
+    const materialId = parseIntNullable(req.query.materialId);
+    const feedId = parseIntNullable(req.query.feedId);
     // Everything after the watermark somebody armed with, so a run that was
     // already sitting there is never taken for the one just transmitted.
     const since = parseIntNullable(req.query.since);
@@ -1005,11 +1039,14 @@ export function iqcPortalRoutes() {
         LEFT JOIN iqc_materials mat ON mat.id = m.iqc_material_id
         WHERE (COALESCE(f.section_id, l.section_id) IS NULL
                OR COALESCE(f.section_id, l.section_id) = ? OR ? IS NULL)
-          AND (? IS NULL OR m.link_id = ?)
+          AND ((? IS NULL AND ? IS NULL AND ? IS NULL)
+               OR m.iqc_material_id = ? OR m.link_id = ? OR m.feed_id = ?)
           AND (? IS NULL OR m.status = ?)
           AND (? IS NULL OR m.id > ?)
         ORDER BY m.received_at DESC LIMIT 200`)
-      .all(sectionId, sectionId, linkId, linkId, status, status, since, since) as any[];
+      .all(sectionId, sectionId,
+        materialId, linkId, feedId, materialId, linkId, feedId,
+        status, status, since, since) as any[];
     res.json(rows.map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) })));
   });
 
@@ -1137,6 +1174,69 @@ export function iqcPortalRoutes() {
   });
 
   /**
+   * The PATIENT samples this analyser has sent, for enrolling one to re-read.
+   *
+   * A previously run sample is a patient's sample, not a control: the whole
+   * point of it is that this laboratory already reported a result for it, so
+   * the result to compare against is the one that went out on a report. The
+   * bench's enrolment was reading the CONTROL runs instead, which is why the
+   * sample number came through as "XbarM2" — a control's name — rather than the
+   * laboratory number the sample was reported under.
+   *
+   * The module has had this route since enrolment was built; this is its
+   * counterpart on the bench, scoped by the unit whose board the control is on
+   * rather than by the Quality Control view right, which a technician running
+   * the morning's controls does not hold.
+   */
+  router.get('/portal/controls/:id/patient-samples', numericOnly, (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'Control not found' });
+    if (!reachableControl(db, req, Number(req.params.id))) {
+      return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
+    }
+    // The link the bench is standing in front of, where it said; otherwise the
+    // control's own. A link belonging to another instrument is ignored rather
+    // than obeyed, exactly as it is when standing ready.
+    const asked = parseIntNullable(req.query.linkId);
+    const mine = linkRowsForControl(db, material);
+    const link: any = (asked ? mine.find(l => Number(l.id) === Number(asked)) : undefined)
+      ?? linkForControl(db, material);
+    if (!link) return res.json([]);
+
+    const since = parseIntNullable(req.query.since);
+    const search = String(req.query.search ?? '').trim().toLowerCase();
+    const rows = db.prepare(`SELECT id, sample_id, received_at, instrument_run_at, parsed_values, result_count
+        FROM instrument_messages
+        WHERE link_id = ? AND kind = 'patient' AND result_count > 0
+          AND (? IS NULL OR id > ?)
+          AND (? IS NULL OR LOWER(IFNULL(sample_id, '')) LIKE ?)
+        ORDER BY id DESC LIMIT 60`)
+      .all(link.id, since, since, search || null, search ? `%${search}%` : null) as any[];
+
+    const map = (safeJson(link.analyte_map) as Record<string, string> | null) ?? {};
+    /*
+     * Lined up against this control's parameters HERE, not in the browser.
+     *
+     * The screen was matching the analyser's label to the control's parameter
+     * by comparing the two strings, and a Sysmex sends PLT while the link maps
+     * it to Platelets and the control calls it PLT — so the platelet count
+     * arrived, was displayed, and silently filled nothing. The host already
+     * owns that question for control runs, synonyms and all; asking it the same
+     * way for a patient sample is the only way the two screens can agree.
+     */
+    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
+      .all(material.id) as any[];
+    res.json(rows.map(r => {
+      const values = (safeJson(r.parsed_values) ?? []) as any[];
+      const named = values.map(v => ({ ...v, analyte: map[String(v.analyte)] ?? v.analyte }));
+      const grid = named.map(v => [bestLabel([v.analyte, v.code], analytes), v.value]);
+      const { readings } = mapRows(grid, analytes);
+      return { ...r, source_name: link.name, parsed_values: named, readings };
+    }));
+  });
+
+  /**
    * The previously run samples this control may be re-read against.
    *
    * Scoped the way the bench is scoped — by the unit whose board the control is
@@ -1192,9 +1292,18 @@ export function iqcPortalRoutes() {
     const named = asked ? mine.find(l => Number(l.id) === Number(asked)) : undefined;
     const link: any = named ?? linkForControl(db, material);
 
+    /*
+     * The mark spans everything the waiting screen will look at.
+     *
+     * It polls for what has arrived for this CONTROL — matched to it, or on a
+     * link or feed it listens on — so a mark taken over one link alone sits
+     * below runs the screen can already see, and the first poll hands back
+     * yesterday's run as if it had just been transmitted.
+     */
     const newestId = () => Number((db.prepare(`SELECT MAX(id) AS id FROM iqc_feed_messages
-        WHERE (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)
-      .get(link?.id ?? null, link?.id ?? null, material.feed_id, material.feed_id) as { id: number | null })?.id ?? 0);
+        WHERE iqc_material_id = ?
+           OR (? IS NOT NULL AND link_id = ?) OR (? IS NOT NULL AND feed_id = ?)`)
+      .get(material.id, link?.id ?? null, link?.id ?? null, material.feed_id, material.feed_id) as { id: number | null })?.id ?? 0);
     // A pair, so the module and the bench speak the same shape. The bench only
     // ever watches control runs, so the patient mark stays at zero.
     const since = { control: newestId(), patient: 0 };

@@ -412,13 +412,18 @@ export function iqcAnalyserRoutes() {
         ORDER BY id DESC LIMIT 60`).all(link.id, since, since) as any[];
 
     const map = safeJson(link.analyte_map) ?? {};
+    // Lined up against this control's parameters here rather than in the
+    // browser — see the note on the bench's own copy of this route. A Sysmex
+    // sends PLT, the link maps it to Platelets, and the control calls it PLT;
+    // comparing the two strings on the screen filled nothing.
+    const analytes = getDb().prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
+      .all(found.material.id) as any[];
     res.json(rows.map(r => {
       const values = (safeJson(r.parsed_values) ?? []) as any[];
-      return {
-        ...r,
-        source_name: link.name,
-        parsed_values: values.map(v => ({ ...v, analyte: map[String(v.analyte)] ?? v.analyte })),
-      };
+      const named = values.map(v => ({ ...v, analyte: map[String(v.analyte)] ?? v.analyte }));
+      const grid = named.map(v => [bestLabel([v.analyte, v.code], analytes), v.value]);
+      const { readings } = mapRows(grid, analytes);
+      return { ...r, source_name: link.name, parsed_values: named, readings };
     }));
   });
 

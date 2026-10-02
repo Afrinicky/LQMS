@@ -143,17 +143,39 @@ export function iqcRetainedRoutes() {
     const sampleCode = generateRecordNumber(db, 'iqc_retained_samples', 'QCS', createdAt, 'sample_code');
     const source = req.body?.source === 'instrument' ? 'instrument' : 'entered';
 
+    /*
+     * Which transmission this came off, filed under the table it is really in.
+     *
+     * A previously run sample is a PATIENT's sample, and a patient transmission
+     * lives in instrument_messages; control runs live in iqc_feed_messages.
+     * Both screens send the id of whatever they took the readings from under
+     * one name, and writing a patient message's id into the control column
+     * failed the foreign key outright — the whole enrolment refused with
+     * "FOREIGN KEY constraint failed" after the bench had watched the sample
+     * number and every reading arrive correctly.
+     *
+     * So the id is looked up rather than assumed, and stored where it belongs.
+     * An id that is in neither table is simply not recorded: the provenance is
+     * worth keeping, and worth nothing at all if it points at the wrong row.
+     */
+    const offered = parseIntNullable(req.body?.instrumentMessageId) ?? parseIntNullable(req.body?.feedMessageId);
+    const fromControlRun = offered
+      && db.prepare('SELECT 1 FROM iqc_feed_messages WHERE id = ?').get(offered) ? offered : null;
+    const fromPatientSample = offered && !fromControlRun
+      && db.prepare('SELECT 1 FROM instrument_messages WHERE id = ?').get(offered) ? offered : null;
+
     let sampleId = 0;
     const tx = db.transaction(() => {
       const r = db.prepare(`INSERT INTO iqc_retained_samples (sample_code, iqc_material_id, sample_reference, sample_type,
-          section_id, equipment_id, original_run_date, original_run_time, original_iqc_run_id, source, feed_message_id,
+          section_id, equipment_id, original_run_date, original_run_time, original_iqc_run_id, source,
+          feed_message_id, instrument_message_id,
           reason, notes, created_by, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(sampleCode, materialId, reference, req.body?.sampleType ?? null,
           parseIntNullable(req.body?.sectionId) ?? material.performing_section_id ?? material.section_id,
           parseIntNullable(req.body?.equipmentId) ?? material.equipment_id,
           originalRunDate, req.body?.originalRunTime ?? null, originalIqcRunId, source,
-          parseIntNullable(req.body?.feedMessageId), req.body?.reason ?? null, req.body?.notes ?? null,
+          fromControlRun, fromPatientSample, req.body?.reason ?? null, req.body?.notes ?? null,
           req.user!.id, createdAt);
       sampleId = Number(r.lastInsertRowid);
 
