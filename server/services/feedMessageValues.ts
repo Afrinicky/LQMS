@@ -70,3 +70,47 @@ export function feedMessageValues(db: any, message: any): FeedValue[] {
     return stored;
   }
 }
+
+/**
+ * What a transmission is, said in the names a bench uses.
+ *
+ * The row in `iqc_feed_messages` carries ids: which link, which control. A
+ * preview of it has to say "Haematology Sysmex XN-550" and "XN CHECK — Level 1",
+ * and reading those off the ids is the same two joins wherever it is done. So
+ * it is done once, here, and the module and the bench show the same words.
+ */
+export function messageFacts(db: any, message: any): {
+  source_name: string | null; equipment_name: string | null;
+  material_name: string | null; level_label: string | null; test_name: string | null;
+} {
+  const blank = {
+    source_name: null, equipment_name: null,
+    material_name: null, level_label: null, test_name: null,
+  };
+  if (!message) return blank;
+  try {
+    const source = message.feed_id
+      ? db.prepare(`SELECT f.name, e.name AS equipment_name FROM iqc_instrument_feeds f
+            LEFT JOIN equipment_items e ON e.id = f.equipment_id WHERE f.id = ?`).get(message.feed_id)
+      : message.link_id
+        ? db.prepare(`SELECT l.name, e.name AS equipment_name FROM instrument_links l
+            LEFT JOIN equipment_items e ON e.id = l.equipment_id WHERE l.id = ?`).get(message.link_id)
+        : null;
+    // The control it was READ as, which is not always the control it is being
+    // looked at against — and saying so is the whole point of showing it.
+    const material = message.iqc_material_id
+      ? db.prepare('SELECT material_name, level_label, test_name FROM iqc_materials WHERE id = ?')
+        .get(message.iqc_material_id)
+      : null;
+    return {
+      source_name: source?.name ?? null,
+      equipment_name: source?.equipment_name ?? null,
+      material_name: material?.material_name ?? null,
+      level_label: material?.level_label ?? null,
+      test_name: material?.test_name ?? null,
+    };
+  } catch {
+    // Names are a courtesy; the readings are the answer.
+    return blank;
+  }
+}

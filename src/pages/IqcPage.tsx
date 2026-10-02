@@ -35,6 +35,7 @@ import { Notice } from '../components/ui/Feedback';
 import InstrumentLinksTab from './InstrumentLinksTab';
 import LiveTransmission from '../components/instruments/LiveTransmission';
 import TransmissionsDialog from '../components/instruments/TransmissionsDialog';
+import TransmissionPreview from '../components/instruments/TransmissionPreview';
 import DefineControlForm from '../components/iqc/DefineControlForm';
 
 /* ============================================================================
@@ -1397,8 +1398,13 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
                   said — before the numbers go anywhere near a control record. */}
               <button type="button" className="iqc-analyser-open" onClick={() => setPreview(message)}>
                 <strong>{message.sample_id || 'control sample'}</strong>
+                {/* WHEN IT ARRIVED, said as such. Showing the analyser's own
+                    stamp unlabelled was read as the arrival time, so a control
+                    sent this morning off a stored moving average looked like a
+                    run from three weeks ago — and the bench concluded the
+                    transmission had never come. */}
                 <span className="muted">
-                  {' · '}{String(message.instrument_run_at ?? message.received_at).slice(5, 16).replace('T', ' ')}
+                  {' · received '}{String(message.received_at).slice(5, 16).replace('T', ' ')}
                   {' · '}{message.parsed_values?.length ?? 0} parameters
                   {message.matched_elsewhere ? ` · read as ${message.matched_elsewhere}` : ''}
                 </span>
@@ -1411,24 +1417,26 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
         </ul>
       )}
 
-      {/* The rest of them, when the newest few are not the one. */}
-      {all.length > waiting.length && (
-        <button type="button" className="pq-link iqc-see-all" onClick={() => setBrowsing(true)}>
-          See all transmissions
-        </button>
-      )}
+      {/* The rest of them, when the newest few are not the one. Always offered:
+          a run from a fortnight ago that has to be accounted for is looked up
+          here, and whether five happen to be showing above is no answer to
+          whether somebody needs to look. */}
+      <button type="button" className="pq-link iqc-see-all" onClick={() => setBrowsing(true)}>
+        {all.length > waiting.length ? `See all ${all.length} transmissions` : 'See all transmissions'}
+      </button>
 
       {preview && (
         <TransmissionPreview
-          materialId={materialId} message={preview}
+          mapUrl={`/iqc/materials/${materialId}/analyser/messages/${preview.id}/map`}
+          message={{ ...preview, source_name: preview.source_name }}
           onClose={() => setPreview(null)}
-          onUse={async () => { const m = preview; setPreview(null); await bringIn(m); }}
-          onError={onError} />
+          onUse={async () => { const m = preview; setPreview(null); await bringIn(m); }} />
       )}
 
       {browsing && (
         <TransmissionsDialog
           endpoint="/iqc/analyser/transmissions"
+          mapUrl={row => `/iqc/materials/${materialId}/analyser/messages/${row.id}/map`}
           busyId={busy}
           onClose={() => setBrowsing(false)}
           onUse={async row => {
@@ -1453,130 +1461,6 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
         </div>
       )}
     </div>
-  );
-}
-
-/* ----------------------------------------------------------------------------
-   What the analyser actually sent
-   ----------------------------------------------------------------------------
-   The waiting list said "16 parameters", which is a count. A bench standing at
-   the machine has two questions it cannot answer from a count — is this the run
-   I just put on, and is what it sent sensible — and the only way to answer them
-   was to take the numbers into the control form and look at them there, which
-   is one press away from a control record.
-
-   So the transmission opens first. Every parameter the analyser sent, its
-   value, and which of this control's parameters it will fill: the ones that
-   match, and the ones the control does not measure, named rather than
-   silently dropped. Nothing is taken from it until somebody says so.
-   ------------------------------------------------------------------------- */
-function TransmissionPreview({ materialId, message, onUse, onClose, onError }: {
-  materialId: number; message: AnalyserWaiting;
-  onUse: () => void | Promise<void>; onClose: () => void; onError: (m: string) => void;
-}) {
-  const [detail, setDetail] = useState<AnalyserMapping | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const next = await api<AnalyserMapping>(`/iqc/materials/${materialId}/analyser/messages/${message.id}/map`);
-        if (live) setDetail(next);
-      } catch (e) { if (live) onError(errorText(e)); }
-    })();
-    return () => { live = false; };
-    // onError is written inline at the call site; depending on it would refetch
-    // on every render of the page behind this dialog.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materialId, message.id]);
-
-  /**
-   * Which of this control's parameters each transmitted line fills.
-   *
-   * Keyed on the LABEL the host recognised the reading by as well as on the
-   * control's own name for it, because the two are often different: a Sysmex
-   * sends PLT, the link maps it to Platelets, and the control calls the
-   * parameter PLT. Keying on the control's name alone showed that line as "not
-   * measured" while the summary above it counted the same line as filled.
-   */
-  const filled = new Map<string, { analyte: string; value: number | null; qualitativeResult?: string | null }>();
-  for (const reading of detail?.readings ?? []) {
-    filled.set(String(reading.analyte).toLowerCase(), reading);
-    if (reading.label) filled.set(String(reading.label).toLowerCase(), reading);
-  }
-  const sent = detail?.message?.parsed_values ?? [];
-  const total = (detail?.matched ?? 0) + (detail?.missingAnalytes.length ?? 0);
-
-  return (
-    <DetailModal
-      open onClose={onClose}
-      title={<>{message.sample_id || 'control sample'}</>}
-      subtitle={
-        <>
-          {message.source_name ? `${message.source_name} · ` : ''}
-          run {String(message.instrument_run_at ?? message.received_at).slice(0, 16).replace('T', ' ')}
-          {message.lot_number ? ` · lot ${message.lot_number}` : ''}
-        </>
-      }
-      footer={
-        <>
-          <button type="button" className="secondary" onClick={onClose}>Close</button>
-          <button type="button" disabled={busy || !detail} onClick={() => { setBusy(true); void onUse(); }}>
-            {busy ? <Loader2 size={13} className="pd-spin" /> : <ArrowRight size={13} />} Use these
-          </button>
-        </>
-      }>
-      {!detail ? <p className="muted">Reading the transmission…</p> : (
-        <>
-          <p className="iqc-tx-summary">
-            <strong>{detail.matched} of {total} of this control&rsquo;s parameters</strong> would be filled in
-            from the {sent.length} the analyser sent.
-            {detail.missingAnalytes.length > 0 && (
-              <span> Still to enter afterwards: {detail.missingAnalytes.map(a => a.analyte).join(', ')}.</span>
-            )}
-          </p>
-
-          {sent.length === 0 ? (
-            <p className="muted">
-              This transmission carries no readable parameters. Its raw text is kept in full under the
-              analyser link&rsquo;s Messages.
-            </p>
-          ) : (
-            <table className="iqc-tx-table">
-              <thead>
-                <tr><th>Parameter</th><th>Result</th><th>Fills</th></tr>
-              </thead>
-              <tbody>
-                {sent.map((value, index) => {
-                  const name = String(value.analyte ?? value.code ?? '').trim();
-                  const match = filled.get(name.toLowerCase())
-                    ?? filled.get(String(value.code ?? '').trim().toLowerCase());
-                  return (
-                    <tr key={`${name}-${index}`} className={match ? 'is-used' : ''}>
-                      <td>
-                        <strong>{name || '—'}</strong>
-                        {value.code && value.code !== name && <span className="muted"> {value.code}</span>}
-                      </td>
-                      <td>
-                        {String(value.value ?? '—')}
-                        {value.unit ? <span className="muted"> {value.unit}</span> : null}
-                        {value.flag && value.flag !== 'N' ? <span className="badge warning">{value.flag}</span> : null}
-                      </td>
-                      <td>
-                        {match
-                          ? <span className="iqc-tx-fills">{match.analyte}</span>
-                          : <span className="muted">not measured by this control</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </>
-      )}
-    </DetailModal>
   );
 }
 

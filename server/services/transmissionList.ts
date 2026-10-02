@@ -71,9 +71,22 @@ export function listTransmissions(db: any, filter: TransmissionFilter): Transmis
   if (states) { where.push(`m.status IN (${states.map(() => '?').join(', ')})`); args.push(...states); }
   if (filter.linkId) { where.push('m.link_id = ?'); args.push(filter.linkId); }
   if (filter.materialId) { where.push('m.iqc_material_id = ?'); args.push(filter.materialId); }
-  // The day the ANALYSER ran it where it said so, else the day it reached here.
-  if (from) { where.push("date(COALESCE(m.instrument_run_at, m.received_at)) >= ?"); args.push(from); }
-  if (to) { where.push("date(COALESCE(m.instrument_run_at, m.received_at)) <= ?"); args.push(to); }
+  /*
+   * A day matches if EITHER stamp falls in it.
+   *
+   * These two dates are not the same date, and on a haematology analyser they
+   * are routinely weeks apart. A Sysmex X-bar M file carries the day the stored
+   * moving average was computed; an analyser with a drifting clock stamps
+   * whatever it believes the date to be. Either way the run reached this host
+   * when it reached it, and that is the only one of the two this system
+   * witnessed.
+   *
+   * Somebody narrowing to a day could mean either — "the control we ran on
+   * Monday", or "what came in on Monday" — so both are honoured rather than
+   * silently picking one and hiding the run under the other.
+   */
+  if (from) { where.push("(date(m.received_at) >= ? OR date(m.instrument_run_at) >= ?)"); args.push(from, from); }
+  if (to) { where.push("(date(m.received_at) <= ? OR date(m.instrument_run_at) <= ?)"); args.push(to, to); }
   if (like) {
     where.push(`(LOWER(IFNULL(m.sample_id, '')) LIKE ? OR LOWER(IFNULL(m.lot_number, '')) LIKE ?
       OR LOWER(IFNULL(mat.material_name, '')) LIKE ? OR LOWER(IFNULL(mat.test_name, '')) LIKE ?
@@ -99,6 +112,13 @@ export function listTransmissions(db: any, filter: TransmissionFilter): Transmis
     // How many parameters came with it is the length of what was parsed out of
     // it; this table keeps no count of its own. Counted in SQL rather than by
     // shipping every reading of every row to a screen that only wants a number.
+    //
+    // Newest BY ARRIVAL. Ordering on the analyser's own stamp put a control
+    // transmitted this morning somewhere in the middle of a fortnight of older
+    // ones, because the machine had stamped it with the day its stored moving
+    // average was computed. The register is a record of what this host
+    // received, so it is ordered by when it received it, and both dates are
+    // returned so a screen can show the difference rather than hide it.
     rows = db.prepare(`SELECT m.id, m.sample_id, m.lot_number, m.received_at, m.instrument_run_at,
           COALESCE(json_array_length(m.parsed_values), 0) AS result_count,
           m.status, m.status_note, m.iqc_material_id,
@@ -106,7 +126,7 @@ export function listTransmissions(db: any, filter: TransmissionFilter): Transmis
           COALESCE(le.name, '') AS equipment_name,
           mat.material_name, mat.test_name, mat.level_label
         ${joins} ${clause}
-        ORDER BY COALESCE(m.instrument_run_at, m.received_at) DESC, m.id DESC
+        ORDER BY m.received_at DESC, m.id DESC
         LIMIT ? OFFSET ?`).all(...args, limit, offset) as any[];
     total = Number((db.prepare(`SELECT COUNT(*) AS n ${joins} ${clause}`).get(...args) as any)?.n ?? 0);
   } catch (error) {
@@ -121,15 +141,24 @@ export function listTransmissions(db: any, filter: TransmissionFilter): Transmis
   // shown the two that have never transmitted.
   let sources: Array<{ id: number; name: string }> = [];
   let controls: Array<{ id: number; name: string }> = [];
+  // Scoped the same way the list is. A bench narrowing its own unit's register
+  // has no business being offered another unit's analysers to narrow it by.
+  const unit = filter.sectionId ?? null;
   try {
     sources = db.prepare(`SELECT DISTINCT l.id AS id, l.name AS name
         FROM iqc_feed_messages m JOIN instrument_links l ON l.id = m.link_id
-        WHERE l.name IS NOT NULL ORDER BY l.name`).all() as any[];
+        WHERE l.name IS NOT NULL
+          AND (? IS NULL OR l.section_id IS NULL OR l.section_id = ?)
+        ORDER BY l.name`).all(unit, unit) as any[];
     controls = db.prepare(`SELECT DISTINCT mat.id AS id,
           mat.material_name || CASE WHEN mat.level_label IS NOT NULL AND mat.level_label != ''
             THEN ' — ' || mat.level_label ELSE '' END AS name
         FROM iqc_feed_messages m JOIN iqc_materials mat ON mat.id = m.iqc_material_id
-        ORDER BY name`).all() as any[];
+        LEFT JOIN iqc_instrument_feeds f ON f.id = m.feed_id
+        LEFT JOIN instrument_links l ON l.id = m.link_id
+        WHERE (? IS NULL OR COALESCE(f.section_id, l.section_id) IS NULL
+               OR COALESCE(f.section_id, l.section_id) = ?)
+        ORDER BY name`).all(unit, unit) as any[];
   } catch { /* the list is the answer; the pickers are a convenience */ }
 
   return { rows, total, sources, controls };

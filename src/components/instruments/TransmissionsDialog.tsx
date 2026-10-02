@@ -3,6 +3,7 @@ import { CalendarDays, Loader2, Search, X } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import { Notice } from '../ui/Feedback';
 import TextField from '../ui/TextField';
+import TransmissionPreview from './TransmissionPreview';
 
 /**
  * Every control run the analysers have sent, and a way through them.
@@ -45,9 +46,25 @@ const STATES = [
   { key: 'all', label: 'Every state' },
 ];
 
-export default function TransmissionsDialog({ endpoint, title, lead, onUse, onReject, onClose, busyId }: {
+export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, lead, onUse, onReject, onClose, busyId }: {
   /** Where the list comes from — the module's, or the bench's own unit-scoped one. */
   endpoint: string;
+  /**
+   * Fixed query the screen adds to every request — on the portal, the unit
+   * whose board is being looked at.
+   *
+   * Without it the bench's register fell back to the reader's OWN unit, so a
+   * senior post looking at the haematology board was handed the transmissions
+   * of whichever unit their staff record sits in, and told "nothing matches
+   * that" about a register with thousands of rows in it.
+   */
+  scope?: Record<string, string | number | null | undefined>;
+  /**
+   * Where the reading of one row is found, so a row can be opened rather than
+   * only used. Omitted where the screen cannot say which control to read it
+   * against — the row then stays a plain row.
+   */
+  mapUrl?: (row: Transmission) => string;
   title?: string;
   lead?: string;
   /** Taking one into the form underneath. Omitted where that is not on offer. */
@@ -61,6 +78,10 @@ export default function TransmissionsDialog({ endpoint, title, lead, onUse, onRe
   const [problem, setProblem] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [offset, setOffset] = useState(0);
+  // The scope is written inline at the call site, so a new object arrives on
+  // every render of the page behind this dialog; keying on its contents is what
+  // keeps that from becoming a query per render.
+  const scopeKey = JSON.stringify(scope ?? {});
 
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
@@ -68,6 +89,8 @@ export default function TransmissionsDialog({ endpoint, title, lead, onUse, onRe
   const [linkId, setLinkId] = useState('');
   const [materialId, setMaterialId] = useState('');
   const [state, setState] = useState('waiting');
+  /** The transmission being looked at, before anything is taken from it. */
+  const [preview, setPreview] = useState<Transmission | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,12 +103,17 @@ export default function TransmissionsDialog({ endpoint, title, lead, onUse, onRe
     if (state) q.set('state', state);
     q.set('limit', String(PAGE));
     q.set('offset', String(offset));
+    for (const [key, value] of Object.entries(scope ?? {})) {
+      if (value !== null && value !== undefined && value !== '') q.set(key, String(value));
+    }
     try {
       setPage(await api<Page>(`${endpoint}?${q}`));
       setProblem(null);
     } catch (e) { setProblem(errorText(e)); }
     finally { setLoading(false); }
-  }, [endpoint, search, from, to, linkId, materialId, state, offset]);
+    // `scope` itself is deliberately not a dependency: see scopeKey above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint, scopeKey, search, from, to, linkId, materialId, state, offset]);
 
   // Typing in the search box should not fire a query per keystroke.
   useEffect(() => {
@@ -160,12 +188,20 @@ export default function TransmissionsDialog({ endpoint, title, lead, onUse, onRe
 
         {rows.length > 0 && (
           <ul className="il-tx-list">
-            {rows.map(row => (
-              <li key={row.id}>
-                <div className="il-tx-main">
+            {rows.map(row => {
+              /* Both stamps, labelled, and never the one dressed as the other.
+                 Showing the analyser's own date alone was read as the day the
+                 run came in — so a register of this morning's transmissions
+                 looked like a register of September. */
+              const received = String(row.received_at).slice(0, 16).replace('T', ' ');
+              const ran = row.instrument_run_at
+                ? String(row.instrument_run_at).slice(0, 16).replace('T', ' ') : null;
+              const facts = (
+                <>
                   <strong>{row.sample_id || 'control sample'}</strong>
                   <span className="muted">
-                    {String(row.instrument_run_at ?? row.received_at).slice(0, 16).replace('T', ' ')}
+                    received {received}
+                    {ran && ran !== received ? ` · analyser stamped ${ran}` : ''}
                     {' · '}{row.result_count} parameter{row.result_count === 1 ? '' : 's'}
                     {row.source_name ? ` · ${row.source_name}` : ''}
                   </span>
@@ -175,7 +211,17 @@ export default function TransmissionsDialog({ endpoint, title, lead, onUse, onRe
                       : 'not matched to a control'}
                     {row.test_name ? ` · ${row.test_name}` : ''}
                   </span>
-                </div>
+                </>
+              );
+              return (
+              <li key={row.id}>
+                {/* The row opens the transmission, the same as it does in the
+                    newest-few list on the form behind this window. A count of
+                    parameters is not enough to decide whether this is the run
+                    somebody just put on the analyser. */}
+                {mapUrl
+                  ? <button type="button" className="il-tx-main il-tx-open" onClick={() => setPreview(row)}>{facts}</button>
+                  : <div className="il-tx-main">{facts}</div>}
                 <span className={`badge${row.status === 'accepted' ? ' done' : row.status === 'rejected' ? ' failed' : ''}`}>
                   {row.status === 'matched' || row.status === 'unmatched' ? 'waiting' : row.status}
                 </span>
@@ -190,8 +236,16 @@ export default function TransmissionsDialog({ endpoint, title, lead, onUse, onRe
                     onClick={async () => { await onReject(row); void load(); }}>Reject</button>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
+        )}
+
+        {preview && (
+          <TransmissionPreview
+            mapUrl={mapUrl!(preview)} message={preview}
+            onClose={() => setPreview(null)}
+            onUse={onUse ? async () => { const row = preview; setPreview(null); await onUse(row); } : undefined} />
         )}
 
         <div className="il-tx-foot">
