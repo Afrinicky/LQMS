@@ -62,6 +62,7 @@ import { notificationsRoutes, computeSummary } from './routes/notifications.js';
 import { recordsReportsRoutes } from './routes/recordsReports.js';
 import { processManagementRoutes } from './routes/processManagement.js';
 import { informationManagementRoutes } from './routes/informationManagement.js';
+import { communicationsRoutes } from './routes/communications.js';
 import { environmentalRoutes } from './routes/environmental.js';
 import { dennisRoutes } from './routes/dennis.js';
 import { syncRoutes } from './routes/sync.js';
@@ -190,6 +191,11 @@ export function createApiServer() {
   app.use('/api/process-management', analyserFeedRoutes('process_management.critical'));
   app.use('/api/process-management', processManagementRoutes());
   app.use('/api/information-management', informationManagementRoutes());
+  // The central Communication Service. Every message, memo, notice and
+  // system-raised communication passes through here, whichever module asked
+  // for it, so the Communication register is the whole record of what the
+  // laboratory has said and been told.
+  app.use('/api/communications', communicationsRoutes());
   app.use('/api/environmental', environmentalRoutes());
   app.use('/api/sync', syncRoutes());
   app.use('/api/remote-access', remoteAccessRoutes());

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
-import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, FlaskConical, KeyRound, PenLine } from 'lucide-react';
+import { Bell, ChevronDown, Database, Server, LogOut, MessageSquare, PanelLeftClose, PanelLeftOpen, FlaskConical, KeyRound, PenLine } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
@@ -15,6 +15,8 @@ import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { SignatureModal } from '../components/SignatureModal';
 import DailyBriefing from '../components/DailyBriefing';
+import CommunicationPopup from '../components/CommunicationPopup';
+import { useCommunications } from '../hooks/useCommunications';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 
 const API_HOST = (() => {
@@ -91,6 +93,14 @@ export default function AppLayout() {
   // it is not the Notifications workspace, and no longer asks for its rights.
   const showInbox = canView('staff_portal');
 
+  // The envelope is the communication hub: conversations addressed to this
+  // person. It sits beside the bell rather than inside it because an alert
+  // about work and a message from a colleague are answered differently, and
+  // merging them is how messages get lost among reminders. It is drawn only
+  // for somebody who may actually open the hub.
+  const { unreadCount: unreadMessages, available: communicationsAvailable } = useCommunications();
+  const showMessages = communicationsAvailable && can('information_management.communication', 'view');
+
   useEffect(() => {
     if (!user || !showInbox) { setUnread(null); return; }
     let cancelled = false;
@@ -110,6 +120,7 @@ export default function AppLayout() {
   if (location.pathname === '/home') return <>
     <Outlet />
     <DailyBriefing />
+    <CommunicationPopup />
     <DennisFloatingWidget user={user} dennisEnabled={isEnabled('dennis')} />
   </>;
 
@@ -195,6 +206,14 @@ export default function AppLayout() {
           />
           <div className="topbar-actions">
             <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
+            {showMessages && (
+              <button className="icon-btn" type="button" aria-label="Communication"
+                title="Communication — messages, memos and notices"
+                onClick={() => navigate('/information-management?tab=Communication')}>
+                <MessageSquare size={18} />
+                {unreadMessages > 0 && <span className="icon-badge">{unreadMessages > 99 ? '99+' : unreadMessages}</span>}
+              </button>
+            )}
             {showInbox && (
               <button className="icon-btn" type="button" aria-label="My inbox"
                 title="My inbox" onClick={() => navigate('/my-portal?tab=My%20Inbox')}>
@@ -233,6 +252,10 @@ export default function AppLayout() {
         <section className="content"><Outlet /></section>
 
         <DailyBriefing />
+        {/* A new message arrives as a small popup in the corner, over whatever
+            the person is doing, and never as a dialog they must deal with
+            first. See components/CommunicationPopup.tsx. */}
+        <CommunicationPopup />
         <DennisFloatingWidget user={user} dennisEnabled={isEnabled('dennis')} />
 
         <footer className="statusbar">

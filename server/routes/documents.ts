@@ -16,6 +16,7 @@ import { ATTESTATION_STAFF_IN_SCOPE } from '../services/attestationScope.js';
 import { buildDocxFromHtml } from '../utils/documentBuild.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { recordCentralArchive } from './archives.js';
+import { recordModuleCommunication } from '../services/communicationService.js';
 import {
   createOfficeSession, closeOfficeSession, getOfficeSession, publicBaseUrl,
   officeUriFor, officeAppNameFor, OFFICE_EDITABLE, OFFICE_SESSION_HOURS,
@@ -120,7 +121,24 @@ function activeStaffIds(db: any): number[] {
 // Assign attestation + distribution to a set of staff for a version, notify them,
 // and skip anyone who already has a live (pending/overdue/signed) attestation for
 // that version. Returns the staff actually newly assigned.
-function distributeToStaff(db: any, doc: any, versionId: number, staffIds: number[], assignedBy: number | null, userId: number, dueDate: string | null): number[] {
+/**
+ * Distribute a controlled document for attestation.
+ *
+ * Two things happen, and they are deliberately different records:
+ *
+ *  · each member of staff gets an attestation TASK in their inbox, which is
+ *    work waiting on them and clears when they sign;
+ *  · the laboratory gets one release NOTICE in the Communication Log, which is
+ *    the evidence that the document was announced — numbered, addressed, and
+ *    beside every other thing the laboratory has said.
+ *
+ * The notice is raised through the central Communication Service rather than
+ * written here, so a document release appears in the Communication register
+ * like any other notice. `req` is optional because the notice is a record of
+ * the release, not a prerequisite for it: a caller that cannot supply the
+ * request still distributes the document.
+ */
+function distributeToStaff(db: any, doc: any, versionId: number, staffIds: number[], assignedBy: number | null, userId: number, dueDate: string | null, req?: any): number[] {
   const notified: number[] = [];
   const tx = db.transaction(() => {
     for (const staffId of staffIds) {
@@ -150,6 +168,43 @@ function distributeToStaff(db: any, doc: any, versionId: number, staffIds: numbe
       severity: 'medium',
     });
   }
+
+  // The release notice. One per version, however many times the version is
+  // redistributed — a document issued once was announced once.
+  if (notified.length > 0) {
+    const version = db.prepare('SELECT version_label, version_number, effective_date FROM document_versions WHERE id = ?').get(versionId) as
+      { version_label?: string | null; version_number?: string | null; effective_date?: string | null } | undefined;
+    recordModuleCommunication(req, {
+      type: 'notice',
+      direction: 'internal',
+      channel: 'in_app',
+      subject: `Controlled document issued: ${doc.document_code ? `${doc.document_code} — ` : ''}${doc.title}`,
+      body: [
+        'The following controlled document has been issued and is in force:',
+        '',
+        `Document: ${doc.document_code ? `${doc.document_code} — ` : ''}${doc.title}`,
+        `Version: ${version?.version_label || version?.version_number || '—'}`,
+        version?.effective_date ? `Effective date: ${String(version.effective_date).slice(0, 10)}` : null,
+        dueDate ? `Attestation due: ${dueDate}` : null,
+        '',
+        `All affected staff (${notified.length}) are to read the document and record their attestation in SECH_LIMS.`,
+      ].filter(Boolean).join('\n'),
+      priority: 'normal',
+      confidentiality: 'internal',
+      // The attestation IS the acknowledgement, and it is already a task in
+      // everybody's inbox. Asking for a second confirmation of the notice
+      // would be two signatures for one act of reading.
+      requiresAcknowledgement: false,
+      acknowledgementDue: dueDate,
+      audiences: [{ kind: 'audience_group', ref: 'AUD-LAB-ALL', label: 'All laboratory staff' }],
+      memoReference: doc.document_code ?? null,
+      sourceModule: 'documents',
+      sourceRecordType: 'document_versions',
+      sourceRecordId: versionId,
+      once: true,
+    });
+  }
+
   return notified;
 }
 
@@ -1147,7 +1202,7 @@ td.sig .nosig { color: #9aa5b1; font-size: 10px; font-style: italic; }
     const versionId = resolveVersionId(db, doc.id, req.body.versionId);
     if (!versionId) return res.status(400).json({ error: 'No current version to distribute. Approve a version first.' });
     const assignedBy = getStaffIdOrCurrent(req, req.body.assignedByStaffId);
-    const assigned = distributeToStaff(db, doc, versionId, activeStaffIds(db), assignedBy, req.user!.id, req.body.dueDate ?? null);
+    const assigned = distributeToStaff(db, doc, versionId, activeStaffIds(db), assignedBy, req.user!.id, req.body.dueDate ?? null, req);
     audit(req, { action: 'distribute_all', entity: 'documents', entityId: doc.id, newValue: { versionId, assigned: assigned.length } });
     res.status(201).json({ ok: true, assigned: assigned.length });
   });
@@ -1214,7 +1269,7 @@ td.sig .nosig { color: #9aa5b1; font-size: 10px; font-style: italic; }
     let distributed = 0;
     if (req.body.distribute !== false) {
       const freshDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
-      distributed = distributeToStaff(db, freshDoc, versionId, activeStaffIds(db), approvedBy, req.user!.id, req.body.attestationDueDate ?? null).length;
+      distributed = distributeToStaff(db, freshDoc, versionId, activeStaffIds(db), approvedBy, req.user!.id, req.body.attestationDueDate ?? null, req).length;
     }
     audit(req, { action: 'approve', entity: 'documents', entityId: req.params.id, oldValue: { status: doc.status, currentVersionId: doc.current_version_id }, newValue: { versionId, status: 'current', approvedByStaffId: approvedBy, distributed } });
     res.json({ ok: true, versionId, distributed });

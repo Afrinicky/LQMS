@@ -7,6 +7,7 @@ import { ThemeProvider } from './hooks/useTheme';
 import { ModuleProvider } from './hooks/useModules';
 import { PermissionProvider, usePermissions } from './hooks/usePermissions';
 import { DutyReminderProvider } from './hooks/useDutyReminders';
+import { CommunicationsProvider } from './hooks/useCommunications';
 import { RequirePermission, RequireAnyPermission } from './components/RequirePermission';
 import { SETTINGS_TABS, visibleSettingsTabs } from './constants/settingsAccess';
 import { API_BASE, getSetupStatus } from './services/api';
@@ -188,7 +189,7 @@ function AppRoutes() {
   return <Routes>
     <Route path="/setup" element={<SetupPage/>}/>
     <Route path="/login" element={<LoginPage/>}/>
-    <Route element={<ModuleProvider><PermissionProvider><DutyReminderProvider><AppLayout/></DutyReminderProvider></PermissionProvider></ModuleProvider>}>
+    <Route element={<ModuleProvider><PermissionProvider><DutyReminderProvider><CommunicationsProvider><AppLayout/></CommunicationsProvider></DutyReminderProvider></PermissionProvider></ModuleProvider>}>
       <Route index element={<Navigate to="/home"/>}/>
       <Route path="/home" element={<Home/>}/>
       {/* The Main Dashboard is the laboratory's management view and is granted

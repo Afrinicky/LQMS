@@ -99,7 +99,10 @@ export function seedDefaults() {
     // note beside the application loop for why this exists.
     // Both the routine-work tiers and the bulk-import reservation below have to
     // reach a laboratory that is already running, so the marker moves past both.
-    const ROLE_DEFAULTS_VERSION = '2026.09-features.11-unit-supervisors';
+    // The communication hub moves it again: a laboratory already in service has
+    // to receive the baseline communication right, or nobody but the
+    // administrator can read a message addressed to them.
+    const ROLE_DEFAULTS_VERSION = '2026.10-features.12-communication';
 
     // ── Bulk export and import ─────────────────────────────────────────────
     // Downloading a whole register as a spreadsheet, or loading one back in,
@@ -182,6 +185,12 @@ export function seedDefaults() {
         // does it, so the general tier is part of the baseline; the technical
         // and supervisory tiers belong to the jobs that carry them, below.
         'routine_work.general',
+        // The communication hub. Everybody is written to, so everybody must be
+        // able to read what is addressed to them, reply to it and acknowledge
+        // it — a message nobody but a manager can open is not a message. The
+        // feature is `personal`, so this reaches their own correspondence and
+        // nobody else's; reading the register is a separate right, below.
+        'information_management.communication',
       ],
     };
 
@@ -257,6 +266,11 @@ export function seedDefaults() {
           'nc_capa', 'risks', 'complaints', 'actions', 'quality_indicators',
           'continual_improvement', 'blood_bank_handover', 'poct',
           'documents.authoring', 'documents.records',
+          // A unit head writes notices for their own unit and prepares copies
+          // for a ward or a supplier. Releasing a memo that carries the
+          // laboratory's name stays with the manager and with quality, which
+          // is why this is Manage and stops short of approve.
+          'information_management.communication_memos',
           'customer_focus.feedback', 'customer_focus.communication', 'customer_focus.advisory',
           'facilities_safety.incidents', 'facilities_safety.equipment', 'facilities_safety.inspections',
           // A unit head adds what their own room needs to the laboratory-wide
@@ -329,6 +343,11 @@ export function seedDefaults() {
           'records_reports.audit', 'records_reports.retention',
           'organisation.quality_config', 'organisation.records_review',
           'notifications.calendar', 'notifications.rules',
+          // Communication: quality releases the laboratory's memos and notices,
+          // reads the whole register and keeps the audiences and templates.
+          'information_management.communication_memos',
+          'information_management.communication_log',
+          'information_management.communication_audiences',
           // The audit of the system itself, and the programme of unit
           // activities the audit measures against — both are quality's.
           'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
@@ -377,6 +396,11 @@ export function seedDefaults() {
           'measurement_uncertainty', 'poct', 'blood_bank_handover',
           'documents.library', 'documents.authoring', 'documents.workflow',
           'documents.records', 'documents.masterlist', 'documents.archive',
+          // Communication: the manager signs the laboratory's memos, so the
+          // formal end, the register and its configuration are all theirs.
+          'information_management.communication_memos',
+          'information_management.communication_log',
+          'information_management.communication_audiences',
           'organisation.structure', 'organisation.quality_config', 'organisation.budget',
           'organisation.records_review', 'organisation.licences',
           'customer_focus.feedback', 'customer_focus.surveys', 'customer_focus.communication',
@@ -442,6 +466,10 @@ export function seedDefaults() {
           'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
           'records_reports.audit', 'records_reports.retention',
           'notifications.calendar', 'notifications.rules',
+          // Acting for the manager includes signing and releasing his memos.
+          'information_management.communication_memos',
+          'information_management.communication_log',
+          'information_management.communication_audiences',
           'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
         ],
         manage: [
@@ -487,6 +515,9 @@ export function seedDefaults() {
         manage: [
           'information_management.assets', 'information_management.data',
           'information_management.downtime', 'information_management.reports',
+          // The communication register is an information-management record like
+          // the rest, and reporting on it is this post's work.
+          'information_management.communication_log',
           'records_reports.generate', 'actions',
         ],
         view: [
@@ -543,6 +574,9 @@ export function seedDefaults() {
           'process_management.critical', 'process_management.rejections', 'process_management.reviews',
           'information_management.assets', 'information_management.access', 'information_management.security',
           'information_management.change', 'information_management.reviews',
+          // What the laboratory has communicated, and to whom, is part of what
+          // an audit reads. View only: an auditor does not send the memos.
+          'information_management.communication_log',
           'monitoring.readings', 'monitoring.reports',
           'facilities_safety.incidents', 'facilities_safety.equipment', 'facilities_safety.inspections',
           'facilities_safety.waste',

@@ -253,6 +253,35 @@ export const FEATURES: FeatureDef[] = [
   { key: 'information_management.reports', module: 'information_management', label: 'Information reports',
     desc: 'Information management registers and summaries.', tabs: ['Reports'] },
 
+  // ── Communication — the central hub ─────────────────────────────────────
+  // Four keys, because "may send a message to a colleague" and "may approve a
+  // memo to the whole hospital" are not the same decision, and nor is "may
+  // read everybody else's communications".
+  //
+  // The granularity the design asks for is expressed through the ACTIONS on
+  // these keys rather than through a new vocabulary, so the existing resolver,
+  // the access matrix and every route guard keep working unchanged:
+  //
+  //   view    — open the hub, read what is addressed to you
+  //   create  — compose, send, reply, forward
+  //   edit    — amend a draft, manage audiences and templates
+  //   approve — release a memo or notice that requires approval
+  //   export  — prepare a copy for an external channel, export the register
+  //   print   — print a memo or the log
+  //   void_archive — withdraw or archive a communication
+  { key: 'information_management.communication', module: 'information_management', label: 'Communication', personal: true,
+    desc: 'The communication hub: messages, conversations and replies. Every member of staff needs this — a person always reaches what is addressed to them.',
+    tabs: ['Communication'] },
+  { key: 'information_management.communication_memos', module: 'information_management', label: 'Memos & notices',
+    desc: 'Preparing, approving, dispatching and externally sharing formal memos and notices.',
+    tabs: ['Memos & Notices'] },
+  { key: 'information_management.communication_log', module: 'information_management', label: 'Communication log', sensitive: true,
+    desc: 'The register of every communication the laboratory has sent or received, with its dispatch and audit trail. Reaches other people\u2019s communications.',
+    tabs: ['Communication Log'] },
+  { key: 'information_management.communication_audiences', module: 'information_management', label: 'Audiences & templates',
+    desc: 'The audiences communications may be addressed to, and the standard memo and notice templates.',
+    tabs: ['Audiences & Templates'] },
+
   // ── Facilities & Safety ─────────────────────────────────────────────────
   { key: 'facilities_safety.incidents', module: 'facilities_safety', label: 'Safety incidents',
     desc: 'Reporting and following up safety incidents. Every member of staff needs this.',
