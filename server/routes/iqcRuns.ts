@@ -28,13 +28,15 @@ import {
   effectiveTarget, withEffectiveTarget, establishTargets, establishForMaterial, refreshEstablishedTargets,
   DEFINITIVE_POINTS, DEFINITIVE_DAYS, INTERIM_POINTS, INTERIM_DAYS,
 } from '../services/iqcTargets.js';
-import { effectiveTolerance, parseTolerance } from '../../shared/constants/iqc.js';
+import { effectiveTolerance, parseTolerance, lotExpired } from '../../shared/constants/iqc.js';
 import type { IqcControlType, IqcRuleProfile } from '../../shared/constants/iqc.js';
 
 type MaterialRow = {
   id: number; material_name: string; lot_number: string; test_name: string;
   control_type: IqcControlType; rule_profile: IqcRuleProfile; source: string;
   level_label: string | null; expiry_date: string | null; is_active: number;
+  /** 'prospective' (a lot in use) or 'retrospective' (history being entered). */
+  recording_basis?: string | null;
 };
 
 export function iqcRunRoutes() {
@@ -274,8 +276,12 @@ export function iqcRunRoutes() {
     // A previously run sample is used precisely BECAUSE the control material is
     // finished or out of date, so the lot's expiry does not refuse it.
     const runKind = req.body?.runKind === 'retained_sample' ? 'retained_sample' : 'control';
-    if (runKind === 'control' && material.expiry_date && material.expiry_date < runDate) {
-      return res.status(400).json({ error: `That control lot expired on ${material.expiry_date}. Use a current lot.` });
+    // A retrospective lot is not held to its expiry either: the laboratory is
+    // entering runs that already happened, on the dates they happened, for a
+    // lot that was finished long before this system held it. Refusing those is
+    // refusing the history it is being asked to record.
+    if (runKind === 'control' && lotExpired(material.expiry_date, runDate, material.recording_basis)) {
+      return res.status(400).json({ error: `That control lot expired on ${material.expiry_date}. Use a current lot, or register this one as a retrospective record.` });
     }
 
     const isCs = material.control_type === 'culture_sensitivity';

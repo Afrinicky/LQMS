@@ -1018,6 +1018,8 @@ export type IqcBoardControl = {
   controlType:string; ruleProfile:string; frequency?:string|null;
   equipmentId?:number|null; equipmentName?:string|null; equipmentNumber?:string|null;
   expiryDate?:string|null; expired:boolean;
+  /** 'prospective' (a lot in use) or 'retrospective' (history being entered). */
+  recordingBasis?:string|null;
   analyteCount:number;
   entryMethods:string[]; preferredEntryMethod?:string|null;
   feedId?:number|null; importLayoutId?:number|null;
@@ -1054,6 +1056,8 @@ export type IqcCoverageControl = {
   id:number; materialName:string; testName:string; levelLabel:string|null;
   lotNumber:string; controlType:string; equipmentName:string|null;
   expiryDate:string|null; expired:boolean;
+  /** 'prospective' (a lot in use) or 'retrospective' (history being entered). */
+  recordingBasis?:string|null;
   analytes:number;
   /** Parameters with no SD: recorded, but not yet judged by Westgard. */
   analytesWithoutLimits:number;

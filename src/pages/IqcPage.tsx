@@ -24,6 +24,7 @@ import {
   RULE_LABELS, RULE_MEANING, isRejection, scaleForOutcome,
   CONTINUITY_TOLERANCE_KINDS, CONTINUITY_TOLERANCE_KIND_LABELS, DEFAULT_CONTINUITY_TOLERANCE,
   IQC_RUN_KINDS, IQC_RUN_KIND_LABELS, RETAINED_SOURCE_LABELS,
+  IQC_RECORDING_BASES, IQC_RECORDING_BASIS_LABELS, IQC_RECORDING_BASIS_CHIPS, lotExpired,
   effectiveTolerance, formatTolerance,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome, type IqcRunKind,
 } from '../../shared/constants/iqc';
@@ -68,6 +69,8 @@ type Material = {
   expected_organism: string | null; cs_scope: string | null;
   performing_section_id: number | null;
   continuity_tolerance_kind: string | null; continuity_tolerance_value: number | null;
+  /** 'prospective' (a lot in use) or 'retrospective' (history being entered). */
+  recording_basis: string | null;
   analyte_count: number; run_count: number; last_run_date: string | null;
 };
 
@@ -319,7 +322,9 @@ function ControlReadiness({ materials, runs, onOpen }: { materials: Material[]; 
   const today = new Date().toISOString().slice(0, 10);
   const issues = materials.filter(m => m.is_active).map(m => {
     if (m.analyte_count === 0) return { m, issue: 'No analytes defined — cannot be run yet', tone: 'bad' as const };
-    if (m.expiry_date && m.expiry_date < today) return { m, issue: `Lot expired ${m.expiry_date}`, tone: 'bad' as const };
+    // A retrospective lot's expiry is history, not a fault: the laboratory is
+    // entering runs that already happened, on the dates they happened.
+    if (lotExpired(m.expiry_date, today, m.recording_basis)) return { m, issue: `Lot expired ${m.expiry_date}`, tone: 'bad' as const };
     if (m.control_type === 'quantitative' && m.run_count < 20) {
       return { m, issue: `${m.run_count} of 20 runs — target mean and SD not yet established from own data`, tone: 'warn' as const };
     }
@@ -417,7 +422,11 @@ function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, ownUni
                 <td><span className={`chip type-${m.control_type}`}>{IQC_CONTROL_TYPE_LABELS[m.control_type]}</span></td>
                 <td><span className={`chip src-${m.source}`}>{m.source === 'in_house' ? 'In-house' : 'Commercial'}</span></td>
                 <td>{m.lot_number}</td>
-                <td>{m.expiry_date || '—'}</td>
+                <td>
+                  {m.expiry_date || '—'}
+                  {m.recording_basis === 'retrospective'
+                    && <div className="cell-sub">{IQC_RECORDING_BASIS_CHIPS.retrospective}</div>}
+                </td>
                 <td>{m.analyte_count === 0 ? <span className="chip bad">none</span> : `${m.analyte_count} analyte${m.analyte_count === 1 ? '' : 's'}`}</td>
                 <td>{m.last_run_date || <span className="muted">never</span>}</td>
                 <td><button type="button" className="tiny" onClick={() => expand(m)}>{open === m.id ? 'Close' : 'Details'}</button></td>
@@ -464,6 +473,7 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
         {material.section_name && <div><dt>Section</dt><dd>{material.section_name}</dd></div>}
         {material.source === 'commercial' && material.manufacturer && <div><dt>Manufacturer</dt><dd>{material.manufacturer}</dd></div>}
         {material.open_vial_expiry && <div><dt>Open-vial expiry</dt><dd>{material.open_vial_expiry}</dd></div>}
+        <div><dt>Recording basis</dt><dd>{IQC_RECORDING_BASIS_LABELS[(material.recording_basis ?? 'prospective') as never]}</dd></div>
       </div>
 
       {material.source === 'in_house' && (
@@ -649,6 +659,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     materialName: material.material_name, testName: material.test_name, lotNumber: material.lot_number,
     levelLabel: material.level_label ?? '', manufacturer: material.manufacturer ?? '',
     expiryDate: material.expiry_date ?? '', openVialExpiry: material.open_vial_expiry ?? '',
+    recordingBasis: material.recording_basis ?? 'prospective',
     storageCondition: (material as Record<string, any>).storage_condition ?? '',
     sectionId: material.section_id ? String(material.section_id) : '',
     equipmentId: material.equipment_id ? String(material.equipment_id) : '',
@@ -741,6 +752,14 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         {material.source === 'commercial' && <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => set('manufacturer', nextValue)} /></label>}
         <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
         <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
+        {/* Beside the expiry it governs. Correctable at any time: a lot
+            registered as current and then found to be a historical one is a
+            correction, not a reason to retire it and start again. */}
+        <label>Recording basis
+          <select value={form.recordingBasis} onChange={e => set('recordingBasis', e.target.value)}>
+            {IQC_RECORDING_BASES.map(b => <option key={b} value={b}>{IQC_RECORDING_BASIS_LABELS[b]}</option>)}
+          </select>
+        </label>
         <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
         <label>Section<select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
