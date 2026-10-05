@@ -7099,6 +7099,24 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
   }
 
   /*
+   * Prospective or retrospective: is this lot in use, or is its history being
+   * entered after the fact?
+   *
+   * A laboratory bringing years of existing quality control onto this system
+   * registers lots that were procured, run and finished long ago. Held to their
+   * expiry dates they are refused outright — a run that genuinely happened in
+   * 2023 cannot be recorded, and the bench board fills with lots nobody is
+   * being asked to use. Everything recorded before this is a lot in current
+   * use, which is what the default reads.
+   */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_materials)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('recording_basis')) {
+      database.exec("ALTER TABLE iqc_materials ADD COLUMN recording_basis TEXT NOT NULL DEFAULT 'prospective'");
+    }
+  }
+
+  /*
    * Which transmission a previously run sample was enrolled from.
    *
    * `feed_message_id` points at iqc_feed_messages, which holds CONTROL runs —

@@ -56,6 +56,7 @@ import {
   type IqcEntryMethod,
 } from '../../shared/constants/routineWork.js';
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
+import { IQC_RECORDING_BASES, lotExpired } from '../../shared/constants/iqc.js';
 import { effectiveTarget, withEffectiveTarget } from '../services/iqcTargets.js';
 import { chartStatistics } from '../services/iqcEvaluation.js';
 import {
@@ -244,13 +245,17 @@ export function iqcPortalRoutes() {
     const rows = usable.map(m => {
       const runs = runsToday.get(Number(m.id)) ?? [];
       const latest = runs[0] ?? null;
-      const expired = m.expiry_date && m.expiry_date < date;
+      // A retrospective lot is not held to its expiry: the dates its runs carry
+      // are the dates the laboratory actually ran it, and the lot itself was
+      // finished long before this system held it.
+      const expired = lotExpired(m.expiry_date, date, m.recording_basis);
       return {
         id: m.id, materialName: m.material_name, materialCode: m.material_code,
         testName: m.test_name, levelLabel: m.level_label, lotNumber: m.lot_number,
         controlType: m.control_type, ruleProfile: m.rule_profile, frequency: m.frequency,
         equipmentId: m.equipment_id, equipmentName: m.equipment_name, equipmentNumber: m.equipment_number,
         expiryDate: m.expiry_date, expired: Boolean(expired),
+        recordingBasis: m.recording_basis ?? 'prospective',
         analyteCount: analytesByMaterial.get(Number(m.id)) ?? 0,
         entryMethods: parseEntryMethods(m.entry_methods),
         preferredEntryMethod: m.preferred_entry_method || null,
@@ -379,7 +384,7 @@ export function iqcPortalRoutes() {
         ORDER BY t.test_name`).all(sectionId) as any[];
 
     const controls = db.prepare(`SELECT m.id, m.material_name, m.test_name, m.level_label, m.lot_number,
-          m.control_type, m.expiry_date, m.equipment_id, m.is_active,
+          m.control_type, m.expiry_date, m.recording_basis, m.equipment_id, m.is_active,
           e.name AS equipment_name
         FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id
         WHERE m.is_active = 1 AND COALESCE(m.performing_section_id, m.section_id, e.section_id) = ?
@@ -411,7 +416,8 @@ export function iqcPortalRoutes() {
       return {
         id: c.id, materialName: c.material_name, testName: c.test_name, levelLabel: c.level_label,
         lotNumber: c.lot_number, controlType: c.control_type, equipmentName: c.equipment_name ?? null,
-        expiryDate: c.expiry_date, expired: Boolean(c.expiry_date && c.expiry_date < today),
+        expiryDate: c.expiry_date, expired: lotExpired(c.expiry_date, today, c.recording_basis),
+        recordingBasis: c.recording_basis ?? 'prospective',
         analytes,
         // A quantitative control whose parameters have no SD records results
         // and judges nothing. It is "set up" and not yet working, and that
@@ -540,8 +546,9 @@ export function iqcPortalRoutes() {
       const result = db.prepare(`INSERT INTO iqc_materials (material_code, material_name, section_id, performing_section_id,
           test_name, analyte, lot_number, manufacturer, expiry_date, open_vial_expiry, storage_condition,
           equipment_id, is_active, created_by, created_at, source, control_type, level_label, qc_frequency, rule_profile,
-          prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary, instructions)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary, instructions,
+          recording_basis)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(materialCode, materialName, sectionId, sectionId, testName,
           String(analytes[0].analyte).trim(), lotNumber,
           req.body?.manufacturer ?? null, req.body?.expiryDate ?? null, req.body?.openVialExpiry ?? null,
@@ -550,7 +557,10 @@ export function iqcPortalRoutes() {
           req.body?.qcFrequency ?? 'each_run', ruleProfile,
           parseIntNullable(req.body?.preparedByStaffId), req.body?.preparationDate ?? null,
           req.body?.preparationMethod ?? null, req.body?.baseMaterial ?? null,
-          req.body?.validationSummary ?? null, req.body?.instructions ?? null);
+          req.body?.validationSummary ?? null, req.body?.instructions ?? null,
+          // A lot in current use, unless the bench says it is entering one that
+          // was run and finished before this system held it.
+          IQC_RECORDING_BASES.includes(req.body?.recordingBasis) ? req.body.recordingBasis : 'prospective');
       materialId = Number(result.lastInsertRowid);
 
       const insert = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd,

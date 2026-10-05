@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, X } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import DefineControlForm from '../../components/iqc/DefineControlForm';
+import { IQC_RECORDING_BASIS_CHIPS } from '../../../shared/constants/iqc';
 import type {
   IqcCoverage, IqcCoverageTest, Section, Staff, EquipmentItem,
 } from '../../../shared/types/api';
@@ -114,6 +115,11 @@ export default function PortalIqcCoverage({ onChanged, sectionId }: { onChanged?
                             <span key={c.id}>
                               {c.materialName}{c.levelLabel ? ` · ${c.levelLabel}` : ''}
                               {c.expired && <span className="badge overdue">expired</span>}
+                              {/* A lot whose runs are being entered after the
+                                  fact. Said here too, so a coverage table does
+                                  not read as current cover it is not. */}
+                              {c.recordingBasis === 'retrospective'
+                                && <span className="badge">{IQC_RECORDING_BASIS_CHIPS.retrospective}</span>}
                               {c.analytesWithoutLimits > 0 && <span className="badge warning">limits pending</span>}
                             </span>
                           ))}

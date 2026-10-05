@@ -8,7 +8,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
-import { parseTolerance } from '../../shared/constants/iqc.js';
+import { parseTolerance, IQC_RECORDING_BASES } from '../../shared/constants/iqc.js';
 
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const IQC_MATERIAL_HEADERS = ['Material name', 'Test', 'Analyte', 'Lot number', 'Manufacturer', 'Expiry date', 'Storage condition', 'Target mean', 'Target SD', 'Acceptable low', 'Acceptable high', 'Section'] as const;
@@ -174,8 +174,8 @@ export function iqcRoutes() {
           source, control_type, level_label, unit, qc_frequency, rule_profile,
           prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary,
           stability_period, open_vial_expiry, instructions, expected_organism, cs_scope,
-          continuity_tolerance_kind, continuity_tolerance_value)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          continuity_tolerance_kind, continuity_tolerance_value, recording_basis)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           materialCode, req.body.materialName, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
           req.body.testName,
@@ -197,6 +197,9 @@ export function iqcRoutes() {
             : null,
           req.body.continuityToleranceKind === 'absolute' ? 'absolute' : (n(req.body.continuityToleranceValue) === null ? null : 'percent'),
           n(req.body.continuityToleranceValue),
+          // A lot in current use, unless the laboratory says it is entering an
+          // already-run one for the record.
+          IQC_RECORDING_BASES.includes(req.body.recordingBasis) ? req.body.recordingBasis : 'prospective',
         );
       materialId = Number(result.lastInsertRowid);
 

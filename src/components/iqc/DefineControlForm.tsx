@@ -12,6 +12,7 @@ import {
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, AST_METHODS, AST_METHOD_LABELS,
   CS_SCOPES, CS_SCOPE_LABELS, CS_SCOPE_HINTS, csNeedsOrganism, csNeedsPanel,
   CONTINUITY_TOLERANCE_KINDS, CONTINUITY_TOLERANCE_KIND_LABELS, DEFAULT_CONTINUITY_TOLERANCE,
+  IQC_RECORDING_BASES, IQC_RECORDING_BASIS_LABELS, IQC_RECORDING_BASIS_HINTS,
   type IqcSource, type IqcControlType, type IqcRuleProfile,
 } from '../../../shared/constants/iqc';
 import type { Section, Staff, EquipmentItem } from '../../../shared/types/api';
@@ -78,7 +79,7 @@ export default function DefineControlForm({
   const [controlType, setControlType] = useState<IqcControlType>('quantitative');
   const [form, setForm] = useState({
     materialName: '', testName: defaultTestName ?? '', lotNumber: '', levelLabel: '', manufacturer: '',
-    expiryDate: '', openVialExpiry: '', storageCondition: '',
+    expiryDate: '', openVialExpiry: '', storageCondition: '', recordingBasis: 'prospective',
     sectionId: mySectionId != null ? String(mySectionId) : '',
     equipmentId: defaultEquipmentId != null ? String(defaultEquipmentId) : '',
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
@@ -202,6 +203,14 @@ export default function DefineControlForm({
           {source === 'commercial' && <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => set('manufacturer', nextValue)} /></label>}
           <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
           <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
+          {/* Sits beside the expiry it governs, because that is the one thing
+              it changes: a lot already run and finished is being recorded, not
+              used, and its expiry date is history rather than a limit. */}
+          <label>Recording basis
+            <select value={form.recordingBasis} onChange={e => set('recordingBasis', e.target.value)}>
+              {IQC_RECORDING_BASES.map(b => <option key={b} value={b}>{IQC_RECORDING_BASIS_LABELS[b]}</option>)}
+            </select>
+          </label>
           <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
           <label>Unit that runs it
             <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
@@ -211,6 +220,7 @@ export default function DefineControlForm({
           </label>
           <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         </div>
+        <p className="iqc-note">{IQC_RECORDING_BASIS_HINTS[form.recordingBasis as 'prospective' | 'retrospective']}</p>
         {!form.sectionId && (
           <p className="iqc-note warn">
             Name the unit that runs this control. Until it has one it appears on nobody&rsquo;s bench board,

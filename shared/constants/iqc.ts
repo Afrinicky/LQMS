@@ -31,6 +31,65 @@ export const IQC_SOURCE_HINTS: Record<IqcSource, string> = {
   in_house: 'Prepared in this laboratory. Its preparation and validation must be recorded here.',
 };
 
+/* ----------------------------------------------------------------------------
+   Prospective and retrospective control records
+   ----------------------------------------------------------------------------
+   Quality control is normally recorded as it happens: the lot is in the fridge,
+   the bench runs it this morning, the result is entered this morning. That is a
+   PROSPECTIVE record, and everything about the lot — above all its expiry —
+   describes material the laboratory is still using.
+
+   A laboratory bringing years of existing work onto a new system is doing
+   something else. The controls were procured, run and acted upon, each on its
+   own date; the lots have long since been finished and thrown away. Entering
+   that history is a RETROSPECTIVE record, and holding it to the same expiry
+   rule is simply wrong: it refuses a run that genuinely happened, and it lights
+   up a board with lots nobody is being asked to use.
+
+   The distinction changes one thing and one thing only. A retrospective lot is
+   not held to its expiry date, because the dates its runs carry are the dates
+   the laboratory actually ran it. Everything else is identical — the same
+   rules, the same Levey-Jennings chart, the same nonconformities and the same
+   corrective actions, recorded in retrospect as the laboratory is recording
+   everything else about that period.
+   ------------------------------------------------------------------------- */
+export const IQC_RECORDING_BASES = ['prospective', 'retrospective'] as const;
+export type IqcRecordingBasis = (typeof IQC_RECORDING_BASES)[number];
+
+export const IQC_RECORDING_BASIS_LABELS: Record<IqcRecordingBasis, string> = {
+  prospective: 'Prospective — in current use',
+  retrospective: 'Retrospective — historical record',
+};
+
+export const IQC_RECORDING_BASIS_HINTS: Record<IqcRecordingBasis, string> = {
+  prospective: 'A lot the laboratory is using now. Its expiry date applies, and a run cannot be recorded against it after that date.',
+  retrospective: 'A lot already run and being entered after the fact, so that earlier work appears on the charts and the record. Its expiry is recorded but not enforced; every rule, nonconformity and corrective action applies exactly as it does to a current lot.',
+};
+
+/** Short, for a chip beside a control's name. */
+export const IQC_RECORDING_BASIS_CHIPS: Record<IqcRecordingBasis, string> = {
+  prospective: 'In current use',
+  retrospective: 'Retrospective',
+};
+
+/** Is this control held to its expiry date? */
+export function enforcesExpiry(recordingBasis?: string | null): boolean {
+  return String(recordingBasis ?? 'prospective') !== 'retrospective';
+}
+
+/**
+ * Whether a lot should be shown as expired.
+ *
+ * One rule, used by the bench board, the coverage table, the module's alerts
+ * and the run itself — so a lot cannot be refused on one screen and offered on
+ * another.
+ */
+export function lotExpired(expiryDate: string | null | undefined, on: string, recordingBasis?: string | null): boolean {
+  if (!enforcesExpiry(recordingBasis)) return false;
+  const expiry = String(expiryDate ?? '').trim();
+  return Boolean(expiry && expiry < on);
+}
+
 export const IQC_CONTROL_TYPES = ['quantitative', 'qualitative', 'semi_quantitative', 'culture_sensitivity'] as const;
 export type IqcControlType = (typeof IQC_CONTROL_TYPES)[number];
 

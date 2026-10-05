@@ -33,7 +33,7 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { evaluateRun, type AnalyteDef, type History } from '../services/iqcEvaluation.js';
 import {
-  IQC_SOURCES, IQC_CONTROL_TYPES, IQC_FREQUENCIES, IQC_RULE_PROFILES,
+  IQC_SOURCES, IQC_CONTROL_TYPES, IQC_FREQUENCIES, IQC_RULE_PROFILES, IQC_RECORDING_BASES,
   QUALITATIVE_OUTCOMES, PROFILES_FOR_TYPE, parseTolerance,
   type IqcControlType, type IqcRuleProfile,
 } from '../../shared/constants/iqc.js';
@@ -157,6 +157,12 @@ export function iqcAdminRoutes() {
       manufacturer: given(req.body?.manufacturer, before.manufacturer),
       expiry_date: given(req.body?.expiryDate, before.expiry_date),
       open_vial_expiry: given(req.body?.openVialExpiry, before.open_vial_expiry),
+      // Whether this lot is in current use or its history is being entered
+      // after the fact. Correctable at any time: a lot registered as current
+      // and then found to be a historical one is a correction, not a new lot.
+      recording_basis: IQC_RECORDING_BASES.includes(String(req.body?.recordingBasis) as never)
+        ? String(req.body.recordingBasis)
+        : (before.recording_basis ?? 'prospective'),
       storage_condition: given(req.body?.storageCondition, before.storage_condition),
       section_id: req.body?.sectionId === undefined ? before.section_id : parseIntNullable(req.body.sectionId),
       equipment_id: req.body?.equipmentId === undefined ? before.equipment_id : parseIntNullable(req.body.equipmentId),
@@ -184,14 +190,14 @@ export function iqcAdminRoutes() {
     const tx = db.transaction(() => {
       db.prepare(`UPDATE iqc_materials SET material_name = ?, test_name = ?, lot_number = ?, level_label = ?,
           source = ?, control_type = ?, rule_profile = ?, qc_frequency = ?, manufacturer = ?, expiry_date = ?,
-          open_vial_expiry = ?, storage_condition = ?, section_id = ?, equipment_id = ?, prepared_by_staff_id = ?,
+          open_vial_expiry = ?, recording_basis = ?, storage_condition = ?, section_id = ?, equipment_id = ?, prepared_by_staff_id = ?,
           preparation_date = ?, preparation_method = ?, base_material = ?, validation_summary = ?,
           stability_period = ?, instructions = ?, expected_organism = ?, cs_scope = ?,
           continuity_tolerance_kind = ?, continuity_tolerance_value = ?,
           is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(after.material_name, after.test_name, after.lot_number, after.level_label, after.source,
           after.control_type, after.rule_profile, after.qc_frequency, after.manufacturer, after.expiry_date,
-          after.open_vial_expiry, after.storage_condition, after.section_id, after.equipment_id,
+          after.open_vial_expiry, after.recording_basis, after.storage_condition, after.section_id, after.equipment_id,
           after.prepared_by_staff_id, after.preparation_date, after.preparation_method, after.base_material,
           after.validation_summary, after.stability_period, after.instructions, after.expected_organism, after.cs_scope,
           after.continuity_tolerance_kind, after.continuity_tolerance_value, after.is_active, req.params.id);

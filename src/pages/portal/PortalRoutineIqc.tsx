@@ -14,7 +14,7 @@ import {
 } from '../../../shared/constants/routineWork';
 import {
   QUALITATIVE_LABELS, RULE_LABELS, scaleForOutcome,
-  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS,
+  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, IQC_RECORDING_BASIS_CHIPS,
 } from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
 import { useAnalyserListen, armAnalyser } from '../../hooks/useAnalyserListen';
@@ -390,6 +390,7 @@ function ControlRow({ control, canPerform, onOpen, onChart }: {
   control: IqcBoardControl; canPerform: boolean; onOpen: () => void; onChart: () => void;
 }) {
   const latest = control.runsToday[0];
+  const retrospective = control.recordingBasis === 'retrospective';
   const tone = control.expired ? 'crit'
     : control.statusToday === 'out_of_control' ? 'crit'
     : control.statusToday === 'warning' ? 'warn'
@@ -403,13 +404,17 @@ function ControlRow({ control, canPerform, onOpen, onChart }: {
           {control.materialName}
           {control.levelLabel && <span className="badge">{control.levelLabel}</span>}
           {control.analyteCount > 1 && <span className="badge">{control.analyteCount} parameters</span>}
+          {/* Said plainly on the row, because otherwise a lot whose expiry is
+              two years past reads as a mistake rather than as the history it
+              is. The bench is entering runs that already happened. */}
+          {retrospective && <span className="badge">{IQC_RECORDING_BASIS_CHIPS.retrospective}</span>}
         </span>
         <span className="iqc-row-meta">
           <span>{control.testName}</span>
           <span>Lot {control.lotNumber}</span>
           {control.expiryDate && (
             <span className={control.expired ? 'crit' : ''}>
-              {control.expired ? 'Lot expired ' : 'Expires '}{control.expiryDate}
+              {control.expired ? 'Lot expired ' : retrospective ? 'Lot expiry ' : 'Expires '}{control.expiryDate}
             </span>
           )}
           {control.lastRunDate && !control.doneToday && <span>Last run {control.lastRunDate}</span>}
@@ -553,6 +558,14 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
   const analytes = detail?.analytes ?? [];
   const qualitative = detail?.material.control_type === 'qualitative';
   const retained = runKind === 'retained_sample';
+  /*
+   * A lot whose runs are being entered after the fact.
+   *
+   * The date is the whole point of such an entry: these runs happened on their
+   * own days, sometimes years ago, and a form that quietly stamps today would
+   * put every one of them on one day of the Levey-Jennings chart.
+   */
+  const retrospective = detail?.material?.recording_basis === 'retrospective';
   const sample = samples.find(x => String(x.id) === sampleId);
   /** What the chosen sample originally gave for one parameter. */
   const originalFor = (analyteId: number) => sample?.values?.find(v => v.iqc_analyte_id === analyteId);
@@ -933,6 +946,12 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
             <label><span>Time run</span><input type="time" value={runTime} onChange={e => setRunTime(e.target.value)} /></label>
             <label><span>Reagent lot</span><TextField value={reagentLot} onValue={setReagentLot} placeholder="optional" /></label>
           </div>
+          {retrospective && runDate === new Date().toISOString().slice(0, 10) && (
+            <p className="iqc-backdated">
+              <AlertTriangle size={12} /> This is a retrospective record. Set the date and time to when the control
+              was actually run — every run entered under today&rsquo;s date lands on one point of the chart.
+            </p>
+          )}
           {runDate !== new Date().toISOString().slice(0, 10) && (
             <p className="iqc-backdated">
               <AlertTriangle size={12} /> This run will be recorded against {runDate}, not today. The rules are
