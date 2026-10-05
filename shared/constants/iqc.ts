@@ -453,3 +453,49 @@ export function effectiveTolerance(
     ?? pick(material?.continuity_tolerance_kind, material?.continuity_tolerance_value)
     ?? DEFAULT_CONTINUITY_TOLERANCE;
 }
+
+
+/* ----------------------------------------------------------------------------
+   When the analyser says it ran the control
+   ----------------------------------------------------------------------------
+   An ASTM or HL7 transmission carries the moment the instrument completed the
+   test. The run form was ignoring it and stamping the moment somebody pressed
+   Fetch, which is a different thing: a control run at 06:15 on the night shift
+   and brought in at the morning handover was recorded as a morning run, and a
+   stored moving average carrying its own date was recorded as today. Both put
+   the point on the wrong place of the Levey-Jennings chart, and the second
+   turns a fortnight of history into a single day.
+
+   So the date and time come off the transmission where it gave one. The host's
+   own arrival time is the fallback, because a transmission that states no
+   completion time still arrived at a knowable moment, and that is nearer the
+   truth than whenever the form happened to be opened.
+   ------------------------------------------------------------------------- */
+
+/** What a transmission has to carry for its run time to be read off it. */
+export interface TransmissionStamp {
+  instrument_run_at?: string | null;
+  received_at?: string | null;
+}
+
+/**
+ * The run date and time a transmission states, or null when it states neither.
+ *
+ * `today` is passed in rather than read here so the caller decides what "now"
+ * means — and so an analyser whose clock runs fast cannot stamp a control run
+ * in the future, which the form would refuse and the record could not justify.
+ */
+export function runStampFrom(
+  message: TransmissionStamp | null | undefined,
+  today: string,
+): { date: string; time: string } | null {
+  const raw = String(message?.instrument_run_at ?? message?.received_at ?? '').trim();
+  const found = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(raw);
+  if (!found) {
+    // A date with no time is still the right day to file the run under.
+    const dayOnly = /^(\d{4}-\d{2}-\d{2})$/.exec(raw);
+    return dayOnly ? { date: dayOnly[1] > today ? today : dayOnly[1], time: '' } : null;
+  }
+  const [, date, time] = found;
+  return date > today ? { date: today, time } : { date, time };
+}
