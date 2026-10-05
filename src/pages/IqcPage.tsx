@@ -24,7 +24,7 @@ import {
   RULE_LABELS, RULE_MEANING, isRejection, scaleForOutcome,
   CONTINUITY_TOLERANCE_KINDS, CONTINUITY_TOLERANCE_KIND_LABELS, DEFAULT_CONTINUITY_TOLERANCE,
   IQC_RUN_KINDS, IQC_RUN_KIND_LABELS, RETAINED_SOURCE_LABELS,
-  IQC_RECORDING_BASES, IQC_RECORDING_BASIS_LABELS, IQC_RECORDING_BASIS_CHIPS, lotExpired,
+  IQC_RECORDING_BASES, IQC_RECORDING_BASIS_LABELS, IQC_RECORDING_BASIS_CHIPS, lotExpired, runStampFrom,
   effectiveTolerance, formatTolerance,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome, type IqcRunKind,
 } from '../../shared/constants/iqc';
@@ -1174,7 +1174,15 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
             <AnalyserPanel
               materialId={Number(materialId)} status={analyser} mapping={mapping}
               linkId={linkId} onLink={setLinkId} equipmentId={meta.equipmentId}
-              onStatus={setAnalyser} onMapping={setMapping}
+              onStatus={setAnalyser}
+              onMapping={next => {
+                setMapping(next);
+                // The analyser states when it ran the control. Taking its word
+                // for it is the difference between a night-shift run filed on
+                // the night shift and one filed at the handover that fetched it.
+                const stamp = runStampFrom(next?.message, new Date().toISOString().slice(0, 10));
+                if (stamp) setMeta(m => ({ ...m, runDate: stamp.date, runTime: stamp.time || m.runTime }));
+              }}
               onReadings={rows => setValues(v => {
                 const next = { ...v };
                 for (const r of rows) {

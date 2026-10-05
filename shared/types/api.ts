@@ -958,6 +958,17 @@ export type IqcMapping = {
   unmatchedLabels:string[];
   missingAnalytes:Array<{ analyteId:number; analyte:string }>;
   matched:number;
+  /**
+   * The transmission these readings came off, when they came off one.
+   *
+   * Absent for a pasted sheet, an uploaded file or a photographed printout —
+   * which is how the run form knows whether there is a stated run time to take.
+   */
+  message?:{
+    id:number; sample_id?:string|null; lot_number?:string|null;
+    received_at?:string|null; instrument_run_at?:string|null;
+    [key:string]:unknown;
+  };
   preview?:unknown[][];
   totalRows?:number;
   skipRows?:number;

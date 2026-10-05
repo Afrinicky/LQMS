@@ -14,7 +14,7 @@ import {
 } from '../../../shared/constants/routineWork';
 import {
   QUALITATIVE_LABELS, RULE_LABELS, scaleForOutcome,
-  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, IQC_RECORDING_BASIS_CHIPS,
+  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, IQC_RECORDING_BASIS_CHIPS, runStampFrom,
 } from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
 import { useAnalyserListen, armAnalyser } from '../../hooks/useAnalyserListen';
@@ -580,6 +580,17 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
       }
       return merged;
     });
+    /*
+     * The analyser states when it ran the control; the form was stamping when
+     * somebody pressed Fetch. Only a transmission carries that, so a mapping
+     * from a pasted sheet or a photographed printout leaves the date alone —
+     * there is nothing there to take it from.
+     */
+    const stamp = runStampFrom(next.message, new Date().toISOString().slice(0, 10));
+    if (stamp) {
+      setRunDate(stamp.date);
+      if (stamp.time) setRunTime(stamp.time);
+    }
   }, []);
 
   const filled = analytes.filter(a => String(values[a.id] ?? '').trim() !== '').length;
