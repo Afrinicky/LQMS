@@ -62,6 +62,38 @@ export function startBackgroundServices(getDb: DbGetter): void {
     .then(({ getBridge }) => getBridge(getDb).start())
     .catch(e => console.error('[jobs] analyser bridge failed to start:', e));
 
+  // The middleware engine, and the seam between it and the bridge above.
+  //
+  // Two separate things on purpose. The engine's queue is in the database, so
+  // starting it picks up whatever the last run of this host left behind; the
+  // observer is what hands it a transmission the bridge has just recorded. The
+  // bridge keeps working whether or not this registers at all, and the engine
+  // transmits nothing until a laboratory has configured a destination, routed
+  // to it, and approved and activated it.
+  Promise.all([
+    import('./middleware/engine.js'),
+    import('./instrumentBridge/index.js'),
+  ]).then(([{ getEngine }, { observeMessages }]) => {
+    const engine = getEngine(getDb);
+    engine.start();
+    observeMessages(message => {
+      engine.ingest({
+        linkId: message.linkId,
+        instrumentMessageId: message.instrumentMessageId,
+        protocol: message.protocol,
+        kind: message.kind,
+        sampleId: message.sampleId,
+        lotNumber: message.lotNumber,
+        instrument: message.instrument,
+        runAt: message.runAt,
+        results: message.results,
+        raw: message.raw,
+        source: 'bridge',
+      });
+    });
+    console.log('[jobs] middleware engine started');
+  }).catch(e => console.error('[jobs] middleware engine failed to start:', e));
+
   // Synchronization engine (stub). Self-gates on SECH_LIMS_SYNC_ENABLED.
   import('../sync/syncEngine.js')
     .then(({ getSyncEngine }) => getSyncEngine().start())

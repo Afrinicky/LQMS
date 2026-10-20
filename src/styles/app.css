@@ -7821,3 +7821,249 @@ button.il-tx-open:focus-visible { outline: 2px solid var(--accent); outline-offs
   .cm-split { grid-template-columns: 1fr; }
   .cm-threads { max-height: 320px; }
 }
+
+/* ============================================================================
+   Analyser Transmission & Middleware
+   ----------------------------------------------------------------------------
+   One visual language across twelve sections, built on the application's own
+   tokens so a theme switch repaints it with everything else.
+
+   Three decisions carry the weight:
+
+     A PANEL is the unit. Every section is a stack of panels with a heading, a
+     one-line subtitle and a body — so twelve screens of very different content
+     read as one workspace rather than twelve layouts.
+
+     A STATUS has exactly one appearance. `Degraded` must look identical on the
+     dashboard, the destination register and the queue, because a word that
+     looks different in two places is read as two different words.
+
+     PROTECTED has its own language, and it is the one thing that must never be
+     mistaken for something actionable. A protected row is tinted, locked and
+     carries no buttons at all.
+   ========================================================================= */
+.mw { display: flex; flex-direction: column; gap: 14px; }
+
+/* ---- Panels ------------------------------------------------------------- */
+.mw-panel {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+  overflow: hidden;
+}
+.mw-panel > header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.mw-panel > header h3 {
+  margin: 0; font-size: 12.5px; font-weight: 650; letter-spacing: 0.01em; color: var(--text);
+}
+.mw-panel > header p { margin: 3px 0 0; font-size: 11px; color: var(--muted); line-height: 1.5; max-width: 110ch; }
+.mw-panel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 0 0 auto; }
+.mw-panel-actions label { margin: 0; }
+.mw-panel-actions label > span { display: none; }
+.mw-panel-body { padding: 13px 14px; display: flex; flex-direction: column; gap: 11px; }
+.mw-panel-body > :first-child { margin-top: 0; }
+
+.mw-panel.t-warn > header { background: var(--warning-bg); border-bottom-color: var(--warning-line); }
+.mw-panel.t-warn > header h3 { color: var(--warning); }
+.mw-panel.t-crit > header { background: var(--danger-bg); border-bottom-color: var(--danger-line); }
+.mw-panel.t-crit > header h3 { color: var(--danger); }
+/* Protected: a quiet, locked band. Not an alarm — it is working, and must be
+   left alone. */
+.mw-panel.t-lock { border-color: var(--info-line); }
+.mw-panel.t-lock > header { background: var(--info-bg); border-bottom-color: var(--info-line); }
+.mw-panel.t-lock > header h3 { color: var(--info); display: flex; align-items: center; gap: 6px; }
+
+.mw-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; align-items: start; }
+
+/* ---- Status, in its one appearance ------------------------------------- */
+.mw-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap;
+  background: var(--neutral-bg); color: var(--muted); border: 1px solid transparent;
+}
+.mw-chip + .mw-chip { margin-left: 5px; }
+.mw-chip.t-ok { background: var(--success-bg); color: var(--success); border-color: var(--success-line); }
+.mw-chip.t-warn { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-line); }
+.mw-chip.t-crit { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line); }
+.mw-chip.t-info { background: var(--info-bg); color: var(--info); border-color: var(--info-line); }
+.mw-chip.t-lock { background: var(--info-bg); color: var(--info); border-color: var(--info-line); }
+.mw-chip.t-idle { background: var(--overlay-2); color: var(--faint); }
+button.mw-chip { cursor: pointer; }
+button.mw-chip:hover:not(:disabled) { filter: brightness(0.96); }
+button.mw-chip:disabled { cursor: default; opacity: 0.65; }
+
+.mw-mark {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; white-space: nowrap;
+}
+.mw-mark.t-ok { color: var(--success); }
+.mw-mark.t-warn { color: var(--warning); }
+.mw-mark.t-crit { color: var(--danger); }
+.mw-mark.t-info { color: var(--info); }
+.mw-mark.t-idle { color: var(--faint); }
+
+.mw-live {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 650; color: var(--faint);
+}
+.mw-live.on { color: var(--success); }
+.mw-live.on svg { animation: mwPulse 2s ease-in-out infinite; }
+@keyframes mwPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ---- Facts, notes, bullets --------------------------------------------- */
+.mw-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 16px; margin: 0; }
+.mw-facts > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mw-facts dt { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+.mw-facts dd {
+  margin: 0; font-size: 12px; color: var(--text); line-height: 1.5;
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap; word-break: break-word;
+}
+
+.mw-note {
+  margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--muted);
+  display: flex; align-items: flex-start; gap: 6px; max-width: 115ch;
+}
+.mw-note svg { flex: 0 0 auto; margin-top: 2px; }
+.mw-note.t-ok { color: var(--success); }
+.mw-note.t-warn { color: var(--warning); }
+.mw-note.t-crit { color: var(--danger); }
+
+.mw-bullets { margin: 0; padding-left: 18px; font-size: 11.5px; line-height: 1.65; color: var(--muted); display: grid; gap: 3px; }
+.mw-bullets strong { color: var(--text); }
+
+.mw-sub { display: block; font-size: 10.5px; color: var(--faint); line-height: 1.5; margin-top: 2px; }
+.mw-sub.t-warn { color: var(--warning); }
+.mw-sub.t-crit { color: var(--danger); }
+.mw-sub.t-remedy { color: var(--info); }
+.mw-side-head {
+  margin: 4px 0 0; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--faint);
+}
+
+/* ---- Lists -------------------------------------------------------------- */
+.mw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mw-list > li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+  font-size: 12px;
+}
+.mw-list.is-compact > li { padding: 6px 9px; }
+.mw-list > li.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.mw-list-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.mw-list-main strong { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 620; }
+.mw-list-button {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer; color: inherit; font: inherit;
+}
+.mw-list > li:has(.mw-list-button) { padding: 0; }
+.mw-list > li > .mw-list-button { padding: 8px 11px; }
+.mw-list.is-compact > li > .mw-list-button { padding: 6px 9px; }
+.mw-list-button:hover { background: var(--row-hover); }
+
+.mw-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* ---- Tables ------------------------------------------------------------- */
+.mw-table { font-size: 11.5px; }
+.mw-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.mw-table td { vertical-align: top; }
+.mw-table td.num, .mw-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mw-table td.mono, .mw-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; word-break: break-all; }
+.mw-table td strong { font-weight: 620; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.mw-table .t-warn { color: var(--warning); }
+.mw-table .t-crit { color: var(--danger); }
+.mw-row-actions { white-space: nowrap; display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+.mw-table tr.is-selected { background: var(--accent-soft); }
+.mw-table tr.mw-row-off { opacity: 0.6; }
+.mw-table tr.mw-row-warn > td:first-child { box-shadow: inset 2px 0 0 var(--warning); }
+.mw-table tr.mw-row-fail > td:first-child { box-shadow: inset 2px 0 0 var(--danger); }
+.mw-table tr.mw-row-ok > td:first-child { box-shadow: inset 2px 0 0 var(--success); }
+/* A protected row carries no actions, and looks like it. */
+.mw-table tr.mw-row-lock { background: var(--info-bg); }
+.mw-table tr.mw-row-lock > td:first-child { box-shadow: inset 2px 0 0 var(--info); }
+
+/* ---- Forms -------------------------------------------------------------- */
+.mw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 11px 14px; align-items: start; }
+.mw-grid > label { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
+.mw-grid > label > span { font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
+.mw-grid > label.mw-wide { grid-column: 1 / -1; }
+.mw-hint { font-size: 10.5px; color: var(--faint); font-style: normal; line-height: 1.5; }
+.mw-switch { flex-direction: row !important; align-items: center; gap: 7px !important; flex-wrap: wrap; }
+.mw-switch input { width: auto; }
+.mw-switch > span { text-transform: none !important; letter-spacing: 0 !important; font-size: 12px !important; color: var(--text) !important; }
+.mw-switch .mw-hint { flex: 1 0 100%; }
+.mw-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+.mw-inset {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+  padding: 12px 13px; display: grid; gap: 11px 14px;
+}
+
+/* ---- The setup wizard --------------------------------------------------- */
+.mw-steps {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 9px 11px;
+}
+.mw-steps > li { display: flex; align-items: center; gap: 7px; }
+.mw-steps > li + li::before { content: ''; width: 14px; height: 1px; background: var(--border-strong); }
+.mw-steps button {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 11.5px; color: var(--muted);
+  cursor: pointer; text-align: left;
+}
+.mw-steps > li.is-current button { color: var(--text); font-weight: 650; }
+.mw-steps > li.is-done button { color: var(--success); }
+.mw-step-no {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+  border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: var(--overlay-2); color: var(--faint); flex: 0 0 auto;
+}
+.mw-steps > li.is-current .mw-step-no { background: var(--accent); color: var(--on-accent); }
+.mw-steps > li.is-done .mw-step-no { background: var(--success-bg); color: var(--success); }
+
+/* ---- Diagnostics: a subject list beside the findings ------------------- */
+.mw-split { display: grid; grid-template-columns: 290px 1fr; gap: 14px; align-items: start; }
+.mw-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 8px; }
+.mw-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---- Live monitoring ---------------------------------------------------- */
+.mw-monitor-bar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 8px 12px;
+}
+.mw-monitor-bar .mw-sub { margin: 0; flex: 1; }
+.mw-stream {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px;
+  max-height: 460px; overflow-y: auto;
+}
+.mw-stream > li {
+  display: flex; align-items: flex-start; gap: 9px; padding: 6px 9px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 11.5px;
+}
+.mw-stream > li.k-control { box-shadow: inset 2px 0 0 var(--c3); }
+.mw-stream > li.k-unknown { box-shadow: inset 2px 0 0 var(--warning); }
+.mw-stream-time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--faint); flex: 0 0 auto; padding-top: 1px; }
+.mw-stream-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mw-stream-body .mw-sub { margin: 0; }
+
+/* ---- Raw protocol, and Dennis's prose ---------------------------------- */
+.mw-reveal { border: 1px solid var(--border); border-radius: 9px; background: var(--panel); overflow: hidden; }
+.mw-reveal > summary { padding: 7px 11px; cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.mw-reveal > summary:hover { background: var(--overlay-1); }
+.mw-reveal[open] > summary { border-bottom: 1px solid var(--border); }
+.mw-pre {
+  margin: 0; padding: 10px 12px; background: var(--bg); color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-all; max-height: 340px; overflow: auto;
+}
+.mw-answer {
+  margin: 0; padding: 12px 14px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  font-family: inherit; font-size: 12.5px; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word; max-height: 520px; overflow-y: auto;
+}
+
+/* ---- The inline tab bar on the queue ----------------------------------- */
+.tabs.is-inline { margin: 0; border: 0; padding: 0; }
+.tabs.is-inline button { font-size: 11px; padding: 3px 10px; }
+
+@media (max-width: 1100px) {
+  .mw-split { grid-template-columns: 1fr; }
+  .mw-side { position: static; }
+  .mw-grid-2 { grid-template-columns: 1fr; }
+}

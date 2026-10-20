@@ -38,6 +38,13 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'supplier_inventory', label: 'Supplier & Inventory Management', path: '/supplier-inventory' },
   { key: 'process_management', label: 'Process Management', path: '/process-management' },
   { key: 'information_management', label: 'Information Management', path: '/information-management' },
+  // Analyser Transmission & Middleware — the engine that carries results from
+  // the analysers to SECHLIMS and to whichever information systems a facility
+  // runs. It sits under Information Management because it is the laboratory's
+  // interface layer, and it is a module of its own because activating an
+  // interface that carries patient results is not the same decision as reading
+  // the asset register.
+  { key: 'analyser_middleware', label: 'Analyser Transmission & Middleware', path: '/analyser-middleware' },
   { key: 'continual_improvement', label: 'Continual Improvement', path: '/continual-improvement' },
   { key: 'meetings', label: 'Meetings & Minutes', path: '/meetings' },
   { key: 'management_review', label: 'Management Review', path: '/management-review' },
