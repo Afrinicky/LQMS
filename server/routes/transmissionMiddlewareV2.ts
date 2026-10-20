@@ -170,7 +170,7 @@ export function transmissionMiddlewareV2Routes() {
       VALUES(?,?,?,?,?,0,'draft',?,?,?)`).run(routeKey, name, sourceLinkId, destinationKey, messageKind,
       JSON.stringify(b.mapping ?? {}), actor, actor);
     addEvent('route.created', 'info', { routeKey, name, sourceLinkId, destinationKey, messageKind, initialState: 'draft' }, actor, Number(result.lastInsertRowid));
-    try { audit('transmission_v2.route.created', { routeId: Number(result.lastInsertRowid), routeKey, sourceLinkId, destinationKey }, req as any); } catch { /* event log remains authoritative */ }
+    try { audit(req, { action: 'create', entity: 'transmission_v2_routes', entityId: Number(result.lastInsertRowid), newValue: { routeKey, name, sourceLinkId, destinationKey, messageKind } }); } catch { /* v2 event log remains available */ }
     res.status(201).json({ id: Number(result.lastInsertRowid), routeKey, state: 'draft', enabled: false, productionDeliveryEnabled: false });
   });
 
