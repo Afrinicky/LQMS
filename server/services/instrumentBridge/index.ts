@@ -157,6 +157,43 @@ export interface BridgeEvent {
 
 const EVENT_RING = 400;
 
+/* ============================================================================
+   Handing a recorded transmission on
+   ----------------------------------------------------------------------------
+   The bridge's job ends when a message is written down. Where that message
+   goes next — a hospital information system, a second laboratory system, a
+   folder somebody imports from — is the middleware's job, and the two are kept
+   apart deliberately: the bridge must keep working whether or not anything is
+   listening here.
+
+   So this is an OBSERVER, not a dependency. It is registered by the middleware
+   engine at startup, it is called after the message is safely recorded, and it
+   is wrapped so that nothing it does can affect the transmission that produced
+   it. A middleware that throws, hangs or is simply absent costs the bridge
+   nothing at all.
+   ========================================================================= */
+export interface RecordedMessage {
+  linkId: number;
+  instrumentMessageId: number;
+  protocol: string;
+  kind: string;
+  sampleId: string | null;
+  lotNumber: string | null;
+  instrument: string | null;
+  runAt: string | null;
+  results: Array<{ analyte: string; code: string; value: string; unit: string | null; flag: string | null }>;
+  raw: string;
+}
+
+type MessageObserver = (message: RecordedMessage) => void;
+
+let messageObserver: MessageObserver | null = null;
+
+/** Register the one observer. Passing null removes it. */
+export function observeMessages(observer: MessageObserver | null): void {
+  messageObserver = observer;
+}
+
 type DB = any;
 type DbGetter = () => DB;
 
@@ -972,6 +1009,29 @@ class Link {
       }
 
       if (kind === 'control') this.routeControl(db, messageId, message, values);
+
+      // Recorded, so the middleware may have it. Nothing below this line can
+      // affect the transmission: the message is already in the database, and an
+      // observer that fails is an observer's problem.
+      if (messageObserver) {
+        try {
+          messageObserver({
+            linkId: this.id,
+            instrumentMessageId: messageId,
+            protocol,
+            kind,
+            sampleId: message.sampleId ?? null,
+            lotNumber: message.lotNumber ?? null,
+            instrument: message.instrument ?? null,
+            runAt: message.runAt ?? null,
+            results: values,
+            raw: text,
+          });
+        } catch (error) {
+          this.emit('warn', `The middleware could not take this message on: ${(error as Error).message}. It is recorded here in full.`);
+        }
+      }
+
       recorded++;
       // Counted here rather than on arrival, so "3 message(s) read" means three
       // runs are on the bench — not three transmissions seen and two of them

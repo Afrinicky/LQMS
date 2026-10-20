@@ -975,3 +975,197 @@ export function splitTransmissions(
   if (closedAt === -1) return { complete: [], remainder: text };
   return { complete, remainder: text.slice(closedAt) };
 }
+
+/* ============================================================================
+   Speaking, as well as listening
+   ----------------------------------------------------------------------------
+   Everything above reads what an analyser says. The middleware has to be able
+   to SAY it — to a hospital information system expecting HL7, to a laboratory
+   system expecting the analyser's own dialect, to a folder somebody imports
+   from. These builders are here rather than in the middleware because they are
+   the same protocol, with the same framing, the same checksum and the same
+   escaping as the parsers directly above them; two files that each know half of
+   ASTM is how an escape rule gets fixed in one of them.
+
+   They build from one canonical shape — a sample identifier, a run time and a
+   list of results — so every transport renders the same message and a
+   destination's format is a rendering choice rather than a different message.
+   ========================================================================= */
+
+/** The canonical outbound message every builder below renders. */
+export interface OutboundMessage {
+  sampleId: string;
+  patientId?: string | null;
+  runAt?: string | null;
+  instrument?: string | null;
+  /** 'control' marks a quality-control run, where the protocol can say so. */
+  kind?: string | null;
+  results: Array<{
+    code: string;
+    name?: string | null;
+    value: string;
+    unit?: string | null;
+    flag?: string | null;
+  }>;
+}
+
+export interface OutboundHeader {
+  sendingApplication?: string | null;
+  sendingFacility?: string | null;
+  receivingApplication?: string | null;
+  receivingFacility?: string | null;
+  /** The message's own identifier, which the acknowledgement must echo. */
+  controlId: string;
+}
+
+/** `20260420153000`, which is what both protocols want. */
+export function protocolTimestamp(value?: string | null): string {
+  const when = value ? new Date(String(value).replace(' ', 'T')) : new Date();
+  const at = Number.isNaN(when.getTime()) ? new Date() : when;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}`
+    + `${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
+}
+
+/**
+ * HL7 v2 escaping.
+ *
+ * A reagent name with an ampersand in it, or a comment carrying a pipe, breaks
+ * every segment after it unless it is escaped — and the receiving system reads
+ * the wreckage as fields that happen to be in the wrong places, which is worse
+ * than a rejection.
+ */
+export function hl7Escape(value: string | null | undefined): string {
+  return String(value ?? '')
+    .replace(/\\/g, '\\E\\')
+    .replace(/\|/g, '\\F\\')
+    .replace(/\^/g, '\\S\\')
+    .replace(/~/g, '\\R\\')
+    .replace(/&/g, '\\T\\')
+    .replace(/[\r\n]+/g, ' ');
+}
+
+/**
+ * One ORU^R01, unframed.
+ *
+ * MSH, PID, OBR and one OBX per result — the segments a result message is
+ * actually required to carry. A control run is marked in OBR-25 as 'Q', which
+ * is how a receiving system is told this is quality control and not a patient,
+ * rather than it having to guess from the sample identifier.
+ */
+export function buildHl7Oru(message: OutboundMessage, header: OutboundHeader): string {
+  const now = protocolTimestamp();
+  const observed = protocolTimestamp(message.runAt ?? null);
+  const control = String(message.kind ?? '') === 'control';
+  const sample = hl7Escape(message.sampleId);
+
+  const segments: string[] = [];
+  segments.push([
+    'MSH', '^~\\&',
+    hl7Escape(header.sendingApplication || 'SECHLIMS'),
+    hl7Escape(header.sendingFacility || 'SECHLIMS'),
+    hl7Escape(header.receivingApplication || ''),
+    hl7Escape(header.receivingFacility || ''),
+    now, '', 'ORU^R01', hl7Escape(header.controlId), 'P', '2.3.1',
+  ].join('|'));
+  // A control run has no patient. The segment is still required, so it carries
+  // the sample identifier and nothing that could be read as a person.
+  segments.push(['PID', '1', '', control ? sample : hl7Escape(message.patientId || message.sampleId), '', '', '', '', '', ''].join('|'));
+  segments.push([
+    'OBR', '1', sample, sample,
+    hl7Escape(message.instrument || ''), '', '', observed,
+    '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+    control ? 'Q' : 'F',
+  ].join('|'));
+
+  let index = 0;
+  for (const result of message.results) {
+    index++;
+    segments.push([
+      'OBX', String(index),
+      // Numeric where it is a number, string where it is not, so a receiving
+      // system is not handed 'POSITIVE' in a numeric field.
+      /^-?\d+(\.\d+)?$/.test(String(result.value).trim()) ? 'NM' : 'ST',
+      `${hl7Escape(result.code)}^${hl7Escape(result.name || result.code)}^L`,
+      '', hl7Escape(result.value), hl7Escape(result.unit || ''),
+      '', hl7Escape(result.flag || ''), '', '',
+      control ? 'F' : 'F', '', '', observed,
+    ].join('|'));
+  }
+  return segments.join('\r');
+}
+
+/** Frame a message for MLLP: VT, the message, FS CR. */
+export function frameMllp(message: string): Buffer {
+  return Buffer.concat([Buffer.from([VT]), Buffer.from(message, 'latin1'), Buffer.from([FS, CR])]);
+}
+
+/** Strip MLLP framing off an acknowledgement. */
+export function unframeMllp(raw: Buffer | string): string {
+  const text = typeof raw === 'string' ? raw : raw.toString('latin1');
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/^\x0b/, '').replace(/\x1c\r?$/, '').trim();
+}
+
+export interface Hl7AckVerdict {
+  /** AA accepted, AE application error, AR rejected, '' nothing recognisable. */
+  code: string;
+  accepted: boolean;
+  /** Whether the far end rejected it outright, which is not worth retrying. */
+  rejected: boolean;
+  text: string;
+  controlId: string | null;
+}
+
+/**
+ * What the far end said.
+ *
+ * The distinction that decides the delivery's fate: AA is acceptance, AE is
+ * the receiving application failing — usually temporary, worth another go — and
+ * AR is a refusal, which will be refused identically for ever and belongs in
+ * front of a person instead of in a retry loop.
+ */
+export function readHl7Ack(raw: Buffer | string): Hl7AckVerdict {
+  const text = unframeMllp(raw);
+  const msa = text.split(/[\r\n]+/).find(line => line.startsWith('MSA')) ?? '';
+  const fields = msa.split('|');
+  const code = (fields[1] ?? '').trim().toUpperCase();
+  return {
+    code,
+    accepted: code === 'AA' || code === 'CA',
+    rejected: code === 'AR' || code === 'CR',
+    text: (fields[3] ?? text).slice(0, 400),
+    controlId: fields[2] ? fields[2].trim() : null,
+  };
+}
+
+/**
+ * The ASTM records for one transmission, unframed.
+ *
+ * H, P, O, one R per result, L — the shape every analyser in this laboratory
+ * emits, built in the same order so a receiving system written against an
+ * analyser accepts it unchanged.
+ */
+export function buildAstmRecords(message: OutboundMessage, header: OutboundHeader): string[] {
+  const now = protocolTimestamp();
+  const observed = protocolTimestamp(message.runAt ?? null);
+  const control = String(message.kind ?? '') === 'control';
+  const clean = (value: string | null | undefined) => String(value ?? '').replace(/[|^&\\\r\n]/g, ' ').trim();
+
+  const records: string[] = [];
+  records.push(`H|\\^&|||${clean(header.sendingApplication || 'SECHLIMS')}^1|||||${clean(header.receivingApplication || '')}||P|1|${now}`);
+  records.push(`P|1|||${clean(message.patientId || '')}`);
+  records.push(`O|1|${clean(message.sampleId)}|${clean(message.sampleId)}|^^^ALL|R|${observed}|||||${control ? 'Q' : 'N'}||||${clean(message.instrument || '')}`);
+  let index = 0;
+  for (const result of message.results) {
+    index++;
+    records.push(`R|${index}|^^^${clean(result.code)}|${clean(result.value)}|${clean(result.unit || '')}||${clean(result.flag || '')}||${control ? 'Q' : 'F'}||||${observed}`);
+  }
+  records.push('L|1|N');
+  return records;
+}
+
+/** Every record of a transmission, framed, numbered and checksummed in order. */
+export function frameAstmRecords(records: string[]): Buffer[] {
+  return records.map((record, index) => buildAstmFrame((index + 1) % 8, `${record}\r`));
+}

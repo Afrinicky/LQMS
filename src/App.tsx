@@ -27,6 +27,7 @@ import './styles/app.css';
 const DocumentControlPage = lazy(() => import('./pages/DocumentControlPage').then(m => ({ default: m.DocumentControlPage })));
 const DennisPage = lazy(() => import('./pages/DennisPage').then(m => ({ default: m.DennisPage })));
 const InstrumentLinksTab = lazy(() => import('./pages/InstrumentLinksTab'));
+const MiddlewarePage = lazy(() => import('./pages/MiddlewarePage'));
 const PersonnelManagementPage = lazy(() => import('./pages/PersonnelManagementPage').then(m => ({ default: m.PersonnelManagementPage })));
 const AssessmentsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.AssessmentsPage })));
 const MeetingsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.MeetingsPage })));
@@ -241,6 +242,7 @@ function AppRoutes() {
       <Route path="/system-audit" element={<RequirePermission module="system_audit"><Suspense fallback={<ModuleFallback/>}><SystemAuditPage/></Suspense></RequirePermission>}/>
       <Route path="/process-management" element={<RequirePermission module="process_management"><Suspense fallback={<ModuleFallback/>}><ProcessManagementPage/></Suspense></RequirePermission>}/>
       <Route path="/information-management" element={<RequirePermission module="information_management"><Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense></RequirePermission>}/>
+      <Route path="/analyser-middleware" element={<RequirePermission module="analyser_middleware"><Suspense fallback={<ModuleFallback/>}><MiddlewarePage/></Suspense></RequirePermission>}/>
       {/* A placeholder module is still a module: it is gated like every other
           one, so a workspace nobody has been given does not open just because
           it has no content yet. */}

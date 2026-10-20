@@ -253,6 +253,35 @@ export const FEATURES: FeatureDef[] = [
   { key: 'information_management.reports', module: 'information_management', label: 'Information reports',
     desc: 'Information management registers and summaries.', tabs: ['Reports'] },
 
+  // ── Analyser Transmission & Middleware ──────────────────────────────────
+  // Seven keys, because the decisions here are genuinely different from one
+  // another. Reading the transmission log is an operational need most of the
+  // laboratory has; scanning the hospital's network, activating an interface
+  // that carries patient results, and replaying a clinical result into a
+  // hospital system are not, and granting them together is how an interface
+  // gets changed by somebody who only needed to look at it.
+  { key: 'analyser_middleware.overview', module: 'analyser_middleware', label: 'Transmission overview',
+    desc: 'The middleware dashboard, live transmission monitoring, the message explorer and the connection register. Read-only.',
+    tabs: ['Overview', 'Active Connections', 'Live Monitoring', 'Message Explorer'] },
+  { key: 'analyser_middleware.discovery', module: 'analyser_middleware', label: 'Analyser discovery', sensitive: true,
+    desc: 'Scanning the laboratory\u2019s own network for analyser endpoints. Scope-limited and recorded against the person who ran it.',
+    tabs: ['Discovery'] },
+  { key: 'analyser_middleware.configuration', module: 'analyser_middleware', label: 'Connections & routing', sensitive: true,
+    desc: 'Configuring analyser connections, LIS/HIS destinations, routing rules and mappings, and approving and activating an interface that carries results.',
+    tabs: ['Connection Setup', 'Destinations', 'Routing & Mappings'] },
+  { key: 'analyser_middleware.diagnostics', module: 'analyser_middleware', label: 'Diagnostics & test messages',
+    desc: 'Running layered diagnostics, testing a destination in isolation and playing a message through the engine.',
+    tabs: ['Diagnostics'] },
+  { key: 'analyser_middleware.queues', module: 'analyser_middleware', label: 'Queues & replay', sensitive: true,
+    desc: 'The delivery queues and the dead-letter queue, including replaying, re-routing and cancelling a clinical result.',
+    tabs: ['Queues & Failed Deliveries'] },
+  { key: 'analyser_middleware.dennis', module: 'analyser_middleware', label: 'Dennis middleware assistant',
+    desc: 'Asking Dennis about transmission faults, protocols, mappings and routing, and approving the configurations it proposes.',
+    tabs: ['Dennis Assistant'] },
+  { key: 'analyser_middleware.audit', module: 'analyser_middleware', label: 'Audit & rollback', sensitive: true,
+    desc: 'The configuration history of every interface, and rolling one back to a recorded version.',
+    tabs: ['Audit & Rollback'] },
+
   // ── Communication — the central hub ─────────────────────────────────────
   // Four keys, because "may send a message to a colleague" and "may approve a
   // memo to the whole hospital" are not the same decision, and nor is "may

@@ -690,6 +690,74 @@ export function seedDefaults() {
       if (role) role.view = [...(role.view ?? []), 'dashboard'];
     }
 
+    // ---- Who runs the analyser interfaces ----------------------------------
+    // Carrying a patient result from an analyser into a hospital system is an
+    // engineering job with a clinical consequence, and the rights split along
+    // that line rather than by seniority:
+    //
+    //   LOOKING is operational. A unit head or a scientist watching a sample
+    //   run has to be able to answer "did it transmit?" without asking
+    //   anybody, so the overview, the message explorer and the diagnostics are
+    //   granted widely and change nothing.
+    //
+    //   CONFIGURING is not. Scanning the hospital's network, pointing an
+    //   interface somewhere new, replaying a clinical result into a hospital
+    //   system and rolling a configuration back belong to the posts
+    //   accountable for the laboratory's data, and are withheld from everyone
+    //   else whatever level they otherwise work at.
+    //
+    //   APPROVING AND ACTIVATING is a third thing again, and sits at Full:
+    //   one person signs that the interface is correct, and activation is the
+    //   moment it starts carrying results. The System Administrator holds
+    //   everything and is not listed.
+    const MIDDLEWARE_ACCESS: Array<[string, Partial<Record<AccessLevel, string[]>>]> = [
+      ['Laboratory Manager', {
+        full: ['analyser_middleware.configuration', 'analyser_middleware.dennis', 'analyser_middleware.audit'],
+        manage: ['analyser_middleware.queues'],
+        contribute: ['analyser_middleware.discovery', 'analyser_middleware.diagnostics'],
+        view: ['analyser_middleware.overview'],
+      }],
+      ['Deputy Laboratory Manager', {
+        full: ['analyser_middleware.configuration', 'analyser_middleware.dennis'],
+        manage: ['analyser_middleware.queues'],
+        contribute: ['analyser_middleware.discovery', 'analyser_middleware.diagnostics'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.audit'],
+      }],
+      // The post that actually sets the interfaces up. Configures and runs
+      // them, and stops short of approving its own work.
+      ['Data Officer', {
+        manage: ['analyser_middleware.configuration', 'analyser_middleware.queues', 'analyser_middleware.dennis'],
+        contribute: ['analyser_middleware.discovery', 'analyser_middleware.diagnostics'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.audit'],
+      }],
+      // Audits the interfaces, operates none of them.
+      ['Quality Manager', {
+        view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics', 'analyser_middleware.audit', 'analyser_middleware.dennis'],
+      }],
+      ['Internal Auditor', {
+        view: ['analyser_middleware.overview', 'analyser_middleware.audit'],
+      }],
+      // The bench, answering "did it transmit?" for itself.
+      ['Unit Supervisor', {
+        contribute: ['analyser_middleware.diagnostics'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.dennis'],
+      }],
+      ['Blood Bank Unit Supervisor', {
+        contribute: ['analyser_middleware.diagnostics'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.dennis'],
+      }],
+      ['Biomedical Scientist', {
+        view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics'],
+      }],
+    ];
+    for (const [roleName, levels] of MIDDLEWARE_ACCESS) {
+      const role = ROLE_ACCESS[roleName];
+      if (!role) continue;
+      for (const [level, keys] of Object.entries(levels) as [AccessLevel, string[]][]) {
+        role[level] = [...(role[level] ?? []), ...keys];
+      }
+    }
+
     // Fold the shared baseline into every role without overwriting a role's own,
     // higher, level for the same key.
     const LEVEL_RANK: Record<AccessLevel, number> = { none: 0, view: 1, contribute: 2, manage: 3, full: 4 };

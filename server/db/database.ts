@@ -8014,6 +8014,331 @@ CREATE TABLE IF NOT EXISTS communication_templates (
   // keeps its decision across upgrades.
   seedCommunicationDefaults(database);
 
+
+  /* ==========================================================================
+     Analyser transmission and middleware
+     --------------------------------------------------------------------------
+     The analyser bridge above receives from an analyser and records what it
+     said. These tables are the second half of the journey: where a message
+     goes, how it got there, and what the receiving system did with it.
+
+     Everything here is ADDITIVE. The existing Sysmex XN-550 to LHIMS path is
+     recorded in `mw_baselines` as a read-only observation and declared
+     protected, which is what the engine tests before it binds a port, dials an
+     address, probes a host or activates a destination. Nothing in this section
+     writes to `instrument_links` or `instrument_messages`; the source message
+     stays exactly as the bridge recorded it and is referenced, never rewritten.
+     ======================================================================= */
+  database.exec(`
+-- An information system this laboratory transmits to. One row per destination,
+-- each with its OWN connection profile, mapping, acknowledgement policy and
+-- delivery state, so one destination failing can never mark another's delivery
+-- successful. LHIMS is one platform among several here and is deliberately not
+-- a default.
+CREATE TABLE IF NOT EXISTS mw_destinations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  dest_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'lis',        -- sechlims | lhims | lis | his | other
+  transport TEXT NOT NULL DEFAULT 'hl7_mllp',  -- internal | hl7_mllp | astm_tcp | http_lhims | http_json | file_export
+  payload_format TEXT NOT NULL DEFAULT 'hl7v2',
+  host TEXT,
+  port INTEGER,
+  base_url TEXT,
+  use_tls INTEGER NOT NULL DEFAULT 0,
+  username TEXT,
+  -- Encrypted at rest with a key held in the data directory, never returned by
+  -- any endpoint and never written to a log or a diagnostic report.
+  secret_cipher TEXT,
+  auth_scheme TEXT NOT NULL DEFAULT 'none',    -- none | basic | bearer | query
+  export_dir TEXT,
+  file_template TEXT,
+  sending_facility TEXT,
+  receiving_facility TEXT,
+  receiving_application TEXT,
+  ack_policy TEXT NOT NULL DEFAULT 'protocol_ack',
+  ack_timeout_ms INTEGER NOT NULL DEFAULT 20000,
+  retry_max INTEGER NOT NULL DEFAULT 6,
+  retry_base_ms INTEGER NOT NULL DEFAULT 15000,
+  retry_factor REAL NOT NULL DEFAULT 2,
+  transform TEXT,                              -- JSON: unit conversion, code system, header overrides
+  state TEXT NOT NULL DEFAULT 'configured',    -- discovered | configured | testing | awaiting_approval | active | degraded | disconnected | failed
+  state_detail TEXT,
+  -- A protected destination is one the engine must not touch: the live
+  -- patient-results path. It is held here so it is VISIBLE, not so it can be
+  -- driven.
+  is_protected INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  auto_deliver INTEGER NOT NULL DEFAULT 1,
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  activated_by INTEGER REFERENCES users(id),
+  activated_at TEXT,
+  last_test_at TEXT,
+  last_test_outcome TEXT,
+  last_delivery_at TEXT,
+  last_error TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mw_destinations_state ON mw_destinations(is_active, state);
+
+-- Which messages go to which destination. Rules are ordered, every matching
+-- rule produces its own delivery, and a blank criterion matches everything so
+-- a rule only ever narrows.
+CREATE TABLE IF NOT EXISTS mw_routes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  destination_id INTEGER NOT NULL REFERENCES mw_destinations(id) ON DELETE CASCADE,
+  priority INTEGER NOT NULL DEFAULT 100,
+  source_link_id INTEGER REFERENCES instrument_links(id) ON DELETE CASCADE,
+  source_profile_key TEXT,
+  message_kind TEXT NOT NULL DEFAULT 'patient',  -- any | patient | control | unknown
+  test_codes TEXT,                               -- JSON array; empty is every test
+  section_id INTEGER REFERENCES sections(id),
+  facility TEXT,
+  department TEXT,
+  transform TEXT,
+  -- A rule that stops the list, for a laboratory that wants one destination
+  -- to take a class of message exclusively.
+  stop_on_match INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mw_routes_active ON mw_routes(is_active, priority);
+
+-- What one destination calls each test. Per destination, because two systems
+-- that both receive a haemoglobin do not agree on what to call it, and a
+-- result filed under the wrong code is worse than one not filed at all.
+CREATE TABLE IF NOT EXISTS mw_mappings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  destination_id INTEGER NOT NULL REFERENCES mw_destinations(id) ON DELETE CASCADE,
+  source_code TEXT NOT NULL,
+  target_code TEXT,
+  target_name TEXT,
+  target_unit TEXT,
+  -- A linear conversion, for a destination that stores a different unit.
+  factor REAL,
+  offset_value REAL,
+  decimals INTEGER,
+  value_map TEXT,                 -- JSON: coded value -> coded value
+  is_required INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(destination_id, source_code)
+);
+
+-- One ingested message, normalised. The SOURCE message is not copied here: it
+-- stays in instrument_messages, and this row points at it, so the original is
+-- preserved exactly as received however many times it is routed or replayed.
+CREATE TABLE IF NOT EXISTS mw_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_uid TEXT NOT NULL UNIQUE,
+  link_id INTEGER REFERENCES instrument_links(id) ON DELETE SET NULL,
+  instrument_message_id INTEGER REFERENCES instrument_messages(id) ON DELETE SET NULL,
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  source TEXT NOT NULL DEFAULT 'bridge',   -- bridge | simulator | replay
+  protocol TEXT,
+  kind TEXT NOT NULL DEFAULT 'unknown',
+  sample_id TEXT,
+  lot_number TEXT,
+  instrument_name TEXT,
+  instrument_run_at TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  facility TEXT,
+  department TEXT,
+  result_count INTEGER NOT NULL DEFAULT 0,
+  normalised TEXT,                          -- JSON: the canonical form every transport builds from
+  validation TEXT,                          -- JSON: findings, errors and warnings alike
+  status TEXT NOT NULL DEFAULT 'ingested',  -- ingested | invalid | no_route | routed | partial | complete | failed
+  routes_matched INTEGER NOT NULL DEFAULT 0,
+  -- What makes this transmission itself, for duplicate detection on ingestion.
+  dedupe_key TEXT,
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mw_messages_received ON mw_messages(received_at);
+CREATE INDEX IF NOT EXISTS idx_mw_messages_status ON mw_messages(status, received_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mw_messages_dedupe ON mw_messages(link_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
+
+-- One delivery of one message to one destination. The unit of reliability:
+-- its own identifier, its own attempts, its own acknowledgement, its own
+-- outcome. The idempotency key is unique per destination, so a retry or an
+-- authorised replay is the same delivery attempted again and never a second
+-- result at the far end.
+CREATE TABLE IF NOT EXISTS mw_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  delivery_uid TEXT NOT NULL UNIQUE,
+  message_id INTEGER NOT NULL REFERENCES mw_messages(id) ON DELETE CASCADE,
+  destination_id INTEGER NOT NULL REFERENCES mw_destinations(id) ON DELETE CASCADE,
+  route_id INTEGER REFERENCES mw_routes(id) ON DELETE SET NULL,
+  idempotency_key TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'queued',
+  attempt INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 6,
+  next_attempt_at TEXT,
+  last_attempt_at TEXT,
+  delivered_at TEXT,
+  payload_format TEXT,
+  payload TEXT,
+  payload_hash TEXT,
+  ack_expected INTEGER NOT NULL DEFAULT 0,
+  ack_code TEXT,
+  ack_text TEXT,
+  ack_at TEXT,
+  results_sent INTEGER NOT NULL DEFAULT 0,
+  results_unmapped TEXT,
+  error TEXT,
+  dead_letter_reason TEXT,
+  replay_count INTEGER NOT NULL DEFAULT 0,
+  replayed_by INTEGER REFERENCES users(id),
+  replayed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(destination_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_mw_deliveries_due ON mw_deliveries(state, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_mw_deliveries_message ON mw_deliveries(message_id);
+CREATE INDEX IF NOT EXISTS idx_mw_deliveries_dest ON mw_deliveries(destination_id, state);
+
+-- Every stage of every transmission, in order. This is the traceability the
+-- module is for: ingestion, parsing, validation, mapping, queuing, routing,
+-- delivery, acknowledgement and final outcome, each with what was observed.
+CREATE TABLE IF NOT EXISTS mw_trace (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  message_id INTEGER REFERENCES mw_messages(id) ON DELETE CASCADE,
+  delivery_id INTEGER REFERENCES mw_deliveries(id) ON DELETE CASCADE,
+  destination_id INTEGER REFERENCES mw_destinations(id) ON DELETE SET NULL,
+  stage TEXT NOT NULL,
+  outcome TEXT NOT NULL DEFAULT 'ok',   -- ok | warn | error | info
+  detail TEXT,
+  duration_ms INTEGER,
+  actor_user_id INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_mw_trace_message ON mw_trace(message_id, id);
+CREATE INDEX IF NOT EXISTS idx_mw_trace_delivery ON mw_trace(delivery_id, id);
+
+-- Every configuration change, with the row before and after it, so a change
+-- can be read, explained and undone. Rollback writes a new version rather
+-- than erasing one: the history of a clinical interface is a record.
+CREATE TABLE IF NOT EXISTS mw_config_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope TEXT NOT NULL,              -- destination | route | mapping
+  entity_id INTEGER,
+  entity_code TEXT,
+  entity_name TEXT,
+  action TEXT NOT NULL,             -- create | update | delete | activate | deactivate | rollback | approve
+  before_json TEXT,
+  after_json TEXT,
+  reason TEXT,
+  dennis_action_id INTEGER,
+  rolled_back_from INTEGER REFERENCES mw_config_versions(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mw_versions_entity ON mw_config_versions(scope, entity_id, id);
+
+-- An authorised, scope-limited scan and what it found. Kept because the next
+-- person setting an analyser up should not have to scan again, and because a
+-- scan of the laboratory's network is a privileged operation with an actor.
+CREATE TABLE IF NOT EXISTS mw_discovery_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scan_code TEXT NOT NULL UNIQUE,
+  target TEXT NOT NULL,
+  ports TEXT NOT NULL,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  hosts_scanned INTEGER NOT NULL DEFAULT 0,
+  endpoints_found INTEGER NOT NULL DEFAULT 0,
+  protected_skipped INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'running',
+  note TEXT,
+  created_by INTEGER REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS mw_discovery_endpoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scan_id INTEGER NOT NULL REFERENCES mw_discovery_scans(id) ON DELETE CASCADE,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  latency_ms INTEGER,
+  banner TEXT,
+  protocol_guess TEXT,
+  profile_guess TEXT,
+  confidence TEXT,
+  conflict TEXT NOT NULL DEFAULT 'none',   -- none | protected | in_use
+  proposal TEXT,                            -- JSON: a connection profile to review
+  state TEXT NOT NULL DEFAULT 'discovered',
+  note TEXT,
+  found_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(scan_id, host, port)
+);
+
+-- The existing transmission, written down without being touched.
+--
+-- A baseline is an OBSERVATION: the configuration and health of a working link
+-- at a moment in time, with a checksum, so drift is detectable and so the
+-- engine knows which endpoints it must refuse. Capturing one changes nothing
+-- about the link it describes.
+CREATE TABLE IF NOT EXISTS mw_baselines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  link_id INTEGER REFERENCES instrument_links(id) ON DELETE SET NULL,
+  host TEXT,
+  port INTEGER,
+  protocol TEXT,
+  destination_summary TEXT,
+  baseline_json TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  captured_by INTEGER REFERENCES users(id),
+  last_verified_at TEXT,
+  last_verdict TEXT,
+  last_drift TEXT,
+  is_protected INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  UNIQUE(label)
+);
+
+-- Dennis, on the record. Every recommendation, every proposal, who approved or
+-- rejected it, and which configuration version carried it out. An assistant
+-- that cannot be audited has no business near clinical traffic.
+CREATE TABLE IF NOT EXISTS mw_dennis_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  user_id INTEGER REFERENCES users(id),
+  tool TEXT NOT NULL,
+  intent TEXT,
+  subject_kind TEXT,
+  subject_id INTEGER,
+  request_json TEXT,                -- sanitised: what was handed to the assistant
+  findings TEXT,                    -- JSON: deterministic evidence gathered first
+  answer TEXT,
+  evidence_grade TEXT,              -- verified | inferred | hypothesis
+  confidence TEXT,
+  proposal TEXT,                    -- JSON: the change proposed, if any
+  validation TEXT,                  -- JSON: the deterministic validation of that proposal
+  state TEXT NOT NULL DEFAULT 'advisory',
+  blocked_reason TEXT,
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TEXT,
+  review_note TEXT,
+  applied_version_id INTEGER REFERENCES mw_config_versions(id),
+  online_used INTEGER NOT NULL DEFAULT 0,
+  redaction_applied INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mw_dennis_state ON mw_dennis_actions(state, id);
+`);
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an
