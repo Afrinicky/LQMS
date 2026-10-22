@@ -9,6 +9,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { unitsLedByRequest, individuallyDenied, mayActOnUnit } from '../services/unitLeadership.js';
+import { recordModuleCommunication, recordDispatch, findModuleCommunication } from '../services/communicationService.js';
 
 // ==========================================================================
 // Duty Roster & Scheduling
@@ -542,13 +543,60 @@ export function schedulingRoutes() {
     }
     return moved.length;
   }
+  /**
+   * The reassignment memo's dispatch, in both senses.
+   *
+   * Publishing moves the staff register AND tells the laboratory, and the
+   * second half used to be a printed sheet pinned to a board with nothing on
+   * file to say it had gone out. It now goes through the central Communication
+   * Service: one numbered memo addressed to all laboratory staff, in their
+   * inboxes and in the Communication Log, with the printed copy recorded
+   * against it as a dispatch when somebody prints it.
+   *
+   * `once: true` because a schedule can be published again after an edit, and
+   * that is the same memo dispatched twice rather than two memos.
+   */
   router.post('/reassignments/:id/publish', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
-    if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
+    const schedule = db.prepare('SELECT * FROM reassignment_schedules WHERE id = ?').get(req.params.id) as any;
+    if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
     db.prepare("UPDATE reassignment_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     const moved = applyReassignmentToRegister(db, req.params.id);
-    audit(req, { action: 'publish', entity: 'reassignment_schedules', entityId: req.params.id, newValue: { staffReassigned: moved } });
-    res.json({ ok: true, staffReassigned: moved });
+
+    const rows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ? ORDER BY display_order, id').all(req.params.id) as any[];
+    const unitLines = rows.map(r => r.is_span
+      ? `${r.unit_label}: ${r.span_text || r.members_text || ''}`
+      : `${r.unit_label} — Supervisor: ${r.supervisor_text || r.supervisor_name || '—'}; Deputy: ${r.deputy_text || r.deputy_name || '—'}; Members: ${r.members_text || '—'}`);
+    const communication = recordModuleCommunication(req, {
+      type: 'memo',
+      direction: 'internal',
+      channel: 'in_app',
+      subject: schedule.subject || 'Re-assignment of Laboratory Staff',
+      body: [
+        schedule.intro_text || '',
+        '',
+        ...unitLines,
+        '',
+        schedule.nb_notes ? `NB:\n${schedule.nb_notes}` : '',
+      ].filter(line => line !== null).join('\n').trim(),
+      priority: 'normal',
+      confidentiality: 'internal',
+      requiresAcknowledgement: true,
+      audiences: [{ kind: 'audience_group', ref: 'AUD-LAB-ALL', label: schedule.memo_to || 'All Laboratory Staff' }],
+      memoToText: schedule.memo_to,
+      memoFromText: schedule.memo_from,
+      memoDate: schedule.memo_date,
+      memoReference: schedule.schedule_number,
+      signatoryStaffId: schedule.signatory_staff_id,
+      signatoryName: schedule.signatory_name,
+      sourceModule: 'personnel',
+      sourceRecordType: 'reassignment_schedules',
+      sourceRecordId: req.params.id,
+      once: true,
+    });
+
+    audit(req, { action: 'publish', entity: 'reassignment_schedules', entityId: req.params.id, newValue: { staffReassigned: moved, communicationNumber: communication?.communicationNumber ?? null } });
+    res.json({ ok: true, staffReassigned: moved, communicationNumber: communication?.communicationNumber ?? null });
   });
   // Apply the unit reassignment to the master register on demand, without
   // (re)publishing — useful after editing a linked row.
@@ -637,6 +685,20 @@ export function schedulingRoutes() {
     </div>`;
     // Reassignment memo keeps a portrait layout; override the landscape default.
     const head = `<style>@page{size:A4 landscape;margin:12mm}</style>`;
+    // A printed copy of a published memo is one of its dispatches, so it is
+    // recorded against the communication rather than only in the audit trail.
+    // A memo not yet published has no communication, and nothing is invented.
+    const linked = findModuleCommunication(db, {
+      type: 'memo', sourceModule: 'personnel',
+      sourceRecordType: 'reassignment_schedules', sourceRecordId: req.params.id,
+    });
+    if (linked) {
+      recordDispatch(req, {
+        communicationId: linked.id, channel: 'print', dispatchMethod: 'prepared', shareFormat: 'pdf',
+        recipientLabel: s.memo_to,
+        notes: `Printable copy of ${s.schedule_number} opened for printing or saving as PDF. No delivery confirmation is claimed.`,
+      });
+    }
     audit(req, { action: 'print', entity: 'reassignment_schedules', entityId: req.params.id });
     res.send(printShell(`${s.schedule_number} — Reassignment`, head, body, req.query.autoprint !== '0'));
   });

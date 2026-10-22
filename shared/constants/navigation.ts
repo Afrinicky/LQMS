@@ -104,7 +104,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Information Management',
     desc: 'Systems, data protection, access and downtime',
     group: 'essential',
-    modules: ['information_management'],
+    modules: ['information_management', 'analyser_middleware'],
   },
   {
     key: 'nonconforming_events',

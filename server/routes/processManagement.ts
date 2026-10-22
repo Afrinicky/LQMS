@@ -6,6 +6,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell } from '../utils/xlsxRegister.js';
+import { recordModuleCommunication, recordDispatch, markRecipientState, recipientRowFor } from '../services/communicationService.js';
 
 const riXlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const RI_HEADERS = ['Analyte', 'Sample type', 'Population', 'Lower limit', 'Upper limit', 'Unit', 'Clinical decision limit', 'Source', 'Effective date', 'Review date', 'Status'] as const;
@@ -336,7 +337,66 @@ export function processManagementRoutes() {
       .run(notifNumber, req.body.eventDate, req.body.eventTime, req.body.requestReference ?? null, req.body.patientReference ?? null, req.body.patientType ?? null, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), parseIntNullable(req.body.testCatalogId), req.body.analyteName, String(req.body.resultValue), req.body.unit ?? null, parseIntNullable(req.body.criticalRuleId), req.body.notifiedTo ?? null, req.body.notificationMethod ?? null, notifiedBy, req.body.notificationTime ?? null, req.body.readBackConfirmed ? 1 : 0, escalationRequired, req.body.escalationNotes ?? null, status, req.user!.id, createdAt);
     const id = Number(result.lastInsertRowid);
     audit(req, { action: 'create', entity: 'critical_result_notifications', entityId: id, newValue: { notifNumber, escalationRequired, status, ...req.body } });
-    res.status(201).json({ id, notificationNumber: notifNumber, escalationRequired: !!escalationRequired, status });
+
+    // A critical value telephoned to a ward IS a communication, and it was the
+    // one kind SECH_LIMS recorded nowhere a reader could find it. The central
+    // service now carries it: the record below is numbered, addressed to the
+    // ward that was called, and in the Communication Log beside everything
+    // else the laboratory has said.
+    //
+    // The clinician holds no SECH_LIMS account, so the channel is the one the
+    // caller actually used — usually the telephone — and the dispatch is
+    // recorded as MANUAL. Nothing claims the ward received it beyond the
+    // read-back the operator confirmed, which is the only evidence there is.
+    const unit = parseIntNullable(req.body.sectionId);
+    const resultText = `${req.body.analyteName} = ${String(req.body.resultValue)}${req.body.unit ? ` ${req.body.unit}` : ''}`;
+    const method = String(req.body.notificationMethod ?? 'phone');
+    const channel = ['phone', 'email', 'whatsapp', 'sms', 'hand_delivery'].includes(method) ? method : 'phone';
+    const communication = recordModuleCommunication(req, {
+      type: 'alert',
+      direction: 'outbound',
+      channel,
+      subject: `Critical result — ${resultText}`,
+      body: [
+        `Critical result communicated: ${resultText}`,
+        req.body.requestReference ? `Request: ${req.body.requestReference}` : null,
+        req.body.patientReference ? `Patient reference: ${req.body.patientReference}` : null,
+        `Communicated to: ${req.body.notifiedTo ?? 'not recorded'}`,
+        `Method: ${method}`,
+        req.body.notificationTime ? `Time communicated: ${req.body.eventDate} ${req.body.notificationTime}` : 'Not yet communicated.',
+        `Read-back confirmed: ${req.body.readBackConfirmed ? 'yes' : 'no'}`,
+        escalationRequired ? 'Escalation required — the notification timeframe was exceeded.' : null,
+        req.body.escalationNotes ? `Escalation notes: ${req.body.escalationNotes}` : null,
+      ].filter(Boolean).join('\n'),
+      priority: escalationRequired ? 'urgent' : 'high',
+      confidentiality: 'confidential',
+      requiresAcknowledgement: true,
+      // Addressed in-app to the unit that owns the result, so the bench and its
+      // head can see what was said; the ward itself is the external recipient.
+      audiences: [
+        ...(unit ? [{ kind: 'section', ref: unit }] : []),
+        ...(req.body.notifiedTo ? [{ kind: 'external', ref: String(req.body.notifiedTo) }] : []),
+      ],
+      sourceModule: 'process_management',
+      sourceRecordType: 'critical_result_notifications',
+      sourceRecordId: id,
+      memoReference: notifNumber,
+      once: true,
+    });
+    if (communication) {
+      recordDispatch(req, {
+        communicationId: communication.id,
+        channel,
+        dispatchMethod: 'manual',
+        recipientLabel: req.body.notifiedTo ?? null,
+        notes: `Critical result ${notifNumber} communicated by ${method}${req.body.readBackConfirmed ? ' with read-back confirmed' : ' — read-back NOT confirmed'}. Recorded by the member of staff who made the call.`,
+      });
+    }
+
+    res.status(201).json({
+      id, notificationNumber: notifNumber, escalationRequired: !!escalationRequired, status,
+      communicationNumber: communication?.communicationNumber ?? null,
+    });
   });
 
   router.get('/critical-results/:id', requirePermission('process_management.critical', 'view'), (req, res) => {
@@ -362,6 +422,16 @@ export function processManagementRoutes() {
     const c = db.prepare('SELECT * FROM critical_result_notifications WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Notification not found' });
     db.prepare("UPDATE critical_result_notifications SET acknowledgement_status = 'acknowledged', status = 'acknowledged', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    // The communication record carries the same acknowledgement, so the
+    // register and this register cannot disagree about whether the ward
+    // confirmed the call.
+    const linked = db.prepare(`SELECT id FROM communications
+      WHERE source_module = 'process_management' AND source_record_type = 'critical_result_notifications'
+        AND source_record_id = ? AND status <> 'void' ORDER BY id DESC LIMIT 1`).get(String(c.id)) as { id: number } | undefined;
+    if (linked) {
+      const own = recipientRowFor(db, linked.id, req.user!.id);
+      if (own) markRecipientState(req, linked.id, own.id, 'acknowledged', `Critical result ${c.notification_number} acknowledged`);
+    }
     audit(req, { action: 'acknowledge', entity: 'critical_result_notifications', entityId: req.params.id, oldValue: { status: c.status }, newValue: { status: 'acknowledged' } });
     res.json({ ok: true });
   });
