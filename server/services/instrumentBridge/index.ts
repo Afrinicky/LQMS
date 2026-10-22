@@ -49,6 +49,7 @@ import {
   LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_MAX_CATCHUP_BYTES, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
+import { fillTemplate, safeTemplateUrl } from '../../../shared/constants/receivers.js';
 
 /* ============================================================================
    Where the client's log actually is
@@ -1326,6 +1327,7 @@ export class InstrumentBridge {
     try {
       pending = this.getDb().prepare(`SELECT m.*, l.forward_host, l.forward_port, l.forward_target,
             l.lhims_url, l.lhims_username, l.lhims_password, l.lhims_map_key, l.measure_map,
+            l.forward_template, l.forward_skip,
             l.name AS link_name, l.role
           FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
           WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND m.forward_attempts < ?
@@ -1350,7 +1352,9 @@ export class InstrumentBridge {
       try {
         const outcome = message.forward_target === 'tcp'
           ? await this.deliverByTcp(message)
-          : await this.deliverToLhims(message);
+          : message.forward_target === 'http_template'
+            ? await this.deliverByTemplate(message)
+            : await this.deliverToLhims(message);
         this.markForward(message.id, this.settle(outcome, message), outcome.note);
       } catch (error) {
         this.markForward(message.id, this.settle({ status: 'retry', note: null }, message), (error as Error).message);
@@ -1391,7 +1395,7 @@ export class InstrumentBridge {
       return { status: 'failed', note: 'This message carries no specimen identifier, so LHIMS has nothing to file it under.' };
     }
 
-    const values: any[] = json<any[]>(message.parsed_values, []);
+    const values: any[] = this.deliverable(message);
     if (!values.length) return { status: 'not_required', note: 'Nothing in this message to deliver.' };
 
     const overrides = json<Record<string, number>>(message.measure_map, {});
@@ -1421,7 +1425,7 @@ export class InstrumentBridge {
 
     const notes: string[] = [];
     if (delivered) notes.push(`${delivered} result(s) delivered`);
-    if (unmapped.length) notes.push(`no LHIMS measure id for ${unmapped.slice(0, 8).join(', ')}${unmapped.length > 8 ? '…' : ''} — map these on the link`);
+    if (unmapped.length) notes.push(`no LHIMS measure id for ${unmapped.slice(0, 8).join(', ')}${unmapped.length > 8 ? '…' : ''} — set these under What the receiving system calls each parameter`);
     if (refused.length) notes.push(`LHIMS refused ${refused.slice(0, 4).join('; ')}`);
 
     // Nothing got through, but every parameter was mapped and addressed: that
@@ -1437,6 +1441,101 @@ export class InstrumentBridge {
     }
     const status = (unmapped.length || refused.length) ? 'partial' : 'sent';
     return { status, note: notes.join('. ') || null };
+  }
+
+  /**
+   * The parameters of this message that are offered onward at all.
+   *
+   * Not everything an analyser transmits is a result. A Humacount 5D sends Take
+   * Mode, Blood Mode, Test Mode, Age, Remark and Ref Group in the same segments
+   * it sends WBC in, and SECHLIMS keeps every one of them, which is right: the
+   * record is the whole transmission. But offering them to a receiving system,
+   * and then reporting six of the analyser's own settings as parameters that
+   * still need an identifier, buries the two that genuinely do.
+   *
+   * So the laboratory names them once on the link, and they are dropped here —
+   * from the delivery and from the complaint alike.
+   */
+  private deliverable(message: any): any[] {
+    const values = json<any[]>(message.parsed_values, []);
+    const skip = json<string[]>(message.forward_skip, []);
+    if (!Array.isArray(skip) || !skip.length) return values;
+    const skipped = new Set(skip.map(c => String(c).trim().toUpperCase()).filter(Boolean));
+    return values.filter(v => !skipped.has(String(v.code ?? v.analyte ?? '').trim().toUpperCase()));
+  }
+
+  /**
+   * One message, delivered to a receiving system that is not LHIMS.
+   *
+   * The laboratory has written its system's address once, with placeholders
+   * where each result's details go, so this is the same store-and-forward with
+   * the same mapping discipline — a parameter with no identifier in the
+   * receiving system is named rather than sent under a guess — against whatever
+   * interface that system happens to offer.
+   */
+  private async deliverByTemplate(message: any): Promise<{ status: string; note: string | null }> {
+    const template = String(message.forward_template ?? '').trim();
+    if (!template) {
+      return { status: 'failed', note: 'No address template is set on this link for the receiving system.' };
+    }
+    const specimenId = String(message.sample_id ?? '').trim();
+    if (!specimenId) {
+      return { status: 'failed', note: 'This message carries no specimen identifier, so the receiving system has nothing to file it under.' };
+    }
+
+    const values = this.deliverable(message);
+    if (!values.length) return { status: 'not_required', note: 'Nothing in this message to deliver.' };
+
+    // Here the map holds whatever the receiving system calls the parameter,
+    // which need not be a number — a system keyed on "wbc_count" is as ordinary
+    // as one keyed on 23.
+    const overrides = json<Record<string, string | number>>(message.measure_map, {});
+    const lookup = new Map(Object.entries(overrides)
+      .map(([from, to]) => [String(from).trim().toUpperCase(), String(to ?? '').trim()]));
+
+    let delivered = 0;
+    const unmapped: string[] = [];
+    const refused: string[] = [];
+
+    for (const value of values) {
+      const own = String(value.code ?? value.analyte ?? '').trim();
+      const code = lookup.get(own.toUpperCase()) ?? '';
+      if (!code) { unmapped.push(own || '?'); continue; }
+
+      const raw = String(value.value ?? '').trim();
+      if (!raw) continue;
+      const decimals = raw.includes('.') ? Math.min(4, raw.split('.')[1].length) : 0;
+
+      const url = fillTemplate(template, {
+        specimen: specimenId, code, analyser_code: own, value: raw,
+        decimals: String(decimals), unit: String(value.unit ?? ''), flag: String(value.flag ?? ''),
+        username: String(message.lhims_username ?? ''), password: String(message.lhims_password ?? ''),
+        run_at: String(message.instrument_run_at ?? message.received_at ?? ''),
+      });
+      let answer: string;
+      try { answer = await this.httpGet(url); }
+      catch (error) { refused.push(`${own}: ${(error as Error).message.slice(0, 60)}`); continue; }
+      // Anything but an outright refusal counts: a receiving system that
+      // answers "1", "OK", "{"status":"ok"}" or an empty 200 has stored it, and
+      // insisting on one wording would refuse most of them.
+      if (/^(0|error|fail(ed|ure)?|refused|invalid|unauthori[sz]ed)\b/i.test(answer)) {
+        refused.push(`${own}: ${answer.slice(0, 40)}`);
+      } else delivered++;
+    }
+
+    const notes: string[] = [];
+    if (delivered) notes.push(`${delivered} result(s) delivered`);
+    if (unmapped.length) {
+      notes.push(`the receiving system has no identifier for ${unmapped.slice(0, 8).join(', ')}${unmapped.length > 8 ? '\u2026' : ''}`
+        + ' \u2014 set these under What the receiving system calls each parameter');
+    }
+    if (refused.length) notes.push(`refused ${refused.slice(0, 4).join('; ')}`);
+
+    if (delivered === 0 && refused.length) return { status: 'retry', note: notes.join('. ') || null };
+    if (delivered === 0) {
+      return { status: 'failed', note: notes.join('. ') || 'Nothing in this message could be matched to an identifier in the receiving system.' };
+    }
+    return { status: (unmapped.length || refused.length) ? 'partial' : 'sent', note: notes.join('. ') || null };
   }
 
   /** A plain TCP hand-off, for a middleware that wants the raw transmission. */
@@ -1456,8 +1555,10 @@ export class InstrumentBridge {
       const response = await fetch(url, { signal: controller.signal });
       return (await response.text()).trim();
     } catch (error) {
-      // The safe URL, so a password never reaches a log or a screen.
-      throw new Error(`${lhimsSafeUrl(url)} — ${(error as Error).message}`);
+      // The safe URL, so a password never reaches a log or a screen. Masked
+      // twice over: LHIMS's own shape, and the wider set of secret-looking
+      // parameters a laboratory's own template might carry.
+      throw new Error(`${safeTemplateUrl(lhimsSafeUrl(url))} — ${(error as Error).message}`);
     } finally {
       clearTimeout(timer);
     }

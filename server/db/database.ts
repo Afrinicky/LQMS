@@ -6979,6 +6979,21 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       ['lhims_password', 'lhims_password TEXT'],
       ['lhims_map_key', 'lhims_map_key TEXT'],
       ['measure_map', 'measure_map TEXT'],
+      /*
+       * Carrying results to a receiving system that is not LHIMS.
+       *
+       * `forward_template` is that system's address written once, with
+       * placeholders where each result's details go, so a laboratory running a
+       * different LIS configures a delivery instead of waiting for code.
+       *
+       * `forward_skip` is the list of codes the laboratory has said are not
+       * results. A haematology analyser sends Take Mode, Blood Mode and Ref
+       * Group in the same segments it sends WBC in; naming them once stops
+       * them being offered onward, and stops them being reported as parameters
+       * that still need an identifier.
+       */
+      ['forward_template', 'forward_template TEXT'],
+      ['forward_skip', 'forward_skip TEXT'],
       ['tap_path', 'tap_path TEXT'],
       ['tap_offset', 'tap_offset INTEGER NOT NULL DEFAULT 0'],
     ];

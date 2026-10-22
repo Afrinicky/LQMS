@@ -43,6 +43,9 @@ import {
   LHIMS_MEASURE_MAPS, LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS,
   lhimsMapByKey, lhimsMeasureId,
 } from '../../shared/constants/lhims.js';
+import {
+  FORWARD_TARGETS, FORWARD_TEMPLATE_FIELDS, suggestParameterKind, unknownTokens,
+} from '../../shared/constants/receivers.js';
 
 const MODULE = 'iqc';
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
@@ -124,6 +127,7 @@ export function instrumentLinkRoutes() {
       analyte_map: json<Record<string, string>>(row.analyte_map, {}),
       control_patterns: json<string[]>(row.control_patterns, []),
       measure_map: json<Record<string, number>>(row.measure_map, {}),
+      forward_skip: json<string[]>(row.forward_skip, []),
       lhims_password_set: Boolean(lhims_password),
       running: bridge.isRunning(row.id),
     };
@@ -158,6 +162,14 @@ export function instrumentLinkRoutes() {
         : (String(b.lhimsPassword) || null),
       lhimsMapKey: pick(b.lhimsMapKey, existing.lhims_map_key) ?? null,
       measureMap: b.measureMap !== undefined ? JSON.stringify(b.measureMap ?? {}) : (existing.measure_map ?? null),
+      // The receiving system's own address, and the codes this laboratory has
+      // said are not results. Both are per link, because both are properties of
+      // this analyser talking to this system.
+      forwardTemplate: pick(b.forwardTemplate, existing.forward_template) ?? null,
+      forwardSkip: b.forwardSkip !== undefined
+        ? JSON.stringify((Array.isArray(b.forwardSkip) ? b.forwardSkip : [])
+          .map((c: unknown) => String(c ?? '').trim()).filter(Boolean))
+        : (existing.forward_skip ?? null),
       tapPath: pick(b.tapPath, existing.tap_path) ?? null,
       // Looking, as well as being sent to.
       fetchEnabled: b.fetchEnabled !== undefined ? (b.fetchEnabled ? 1 : 0) : (existing.fetch_enabled ?? 0),
@@ -205,7 +217,33 @@ export function instrumentLinkRoutes() {
     if (v.forwardEnabled && v.forwardTarget === 'tcp' && (!v.forwardHost || !v.forwardPort)) {
       return 'Handing the raw transmission to another program needs its address and port.';
     }
-    if (v.forwardEnabled && v.forwardTarget !== 'tcp') {
+    if (v.forwardEnabled && !FORWARD_TARGETS.includes(v.forwardTarget as never)) {
+      return `The delivery must be one of: ${FORWARD_TARGETS.join(', ')}.`;
+    }
+    // A receiving system that is not LHIMS is described by its own address,
+    // written once with placeholders. Only the placeholders this system can
+    // actually fill are accepted — a template asking for {patient_name} would
+    // be sent with the word still in it, which is worse than being refused now.
+    if (v.forwardEnabled && v.forwardTarget === 'http_template') {
+      const template = String(v.forwardTemplate ?? '').trim();
+      if (!template) {
+        return 'Carrying results to another system needs its address, written once with placeholders where each result\'s details go.';
+      }
+      if (!/^https?:\/\//i.test(template)) {
+        return 'The receiving system\'s address has to start with http:// or https://.';
+      }
+      if (!/\{specimen\}/.test(template) || !/\{value\}/.test(template)) {
+        return 'The address needs at least {specimen} and {value} in it, or every result would be sent to the same place with no result in it.';
+      }
+      const unknown = unknownTokens(template);
+      if (unknown.length) {
+        return `This system cannot fill ${unknown.map(t => `{${t}}`).join(', ')}. The ones it can fill are: ${FORWARD_TEMPLATE_FIELDS.map(f => `{${f.token}}`).join(', ')}.`;
+      }
+      if (!v.measureMap) {
+        return 'Carrying results onward needs to know what the receiving system calls each parameter. Set them under What the receiving system calls each parameter.';
+      }
+    }
+    if (v.forwardEnabled && v.forwardTarget === 'lhims_api') {
       if (!v.lhimsUrl || !v.lhimsUsername) {
         return 'Carrying results to LHIMS needs its address and the username the middleware uses.';
       }
@@ -269,14 +307,14 @@ export function instrumentLinkRoutes() {
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
          listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
-         lhims_password, lhims_map_key, measure_map, tap_path,
+         lhims_password, lhims_map_key, measure_map, forward_template, forward_skip, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
          auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
-        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
+        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.forwardTemplate, v.forwardSkip, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
         v.autoStart, v.isActive, v.notes, req.user!.id);
 
@@ -298,13 +336,13 @@ export function instrumentLinkRoutes() {
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
         watch_path = ?, analyte_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
-        lhims_map_key = ?, measure_map = ?, tap_path = ?,
+        lhims_map_key = ?, measure_map = ?, forward_template = ?, forward_skip = ?, tap_path = ?,
         fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
         auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
-        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
+        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.forwardTemplate, v.forwardSkip, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
         v.autoStart, v.isActive, v.notes, req.params.id);
 
@@ -793,6 +831,96 @@ export function instrumentLinkRoutes() {
   /* ======================================================================
      What the analyser has said
      ==================================================================== */
+  /**
+   * Every parameter this analyser has actually sent, and what becomes of it.
+   *
+   * This is the screen that was missing, and the reason an analyser outside the
+   * shipped maps could never be carried onward: the link said "map these on the
+   * link" and there was nowhere to do it. Guessing was not an option either,
+   * because what a receiving system calls a parameter is that laboratory's own
+   * configuration, not something derivable from the analyser.
+   *
+   * So the question is turned round. Rather than asking somebody to know in
+   * advance what their analyser sends, this lists what it HAS sent — every
+   * distinct code, how often, with an example of the value — and asks only for
+   * the identifier beside each one. A first guess marks the codes that look
+   * like the analyser describing itself rather than measuring something, so the
+   * real work is visible instead of buried.
+   */
+  router.get('/:id/parameters', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+
+    // Patient results only: a control run is quality control and is never
+    // carried onward, so its parameters are not this screen's business.
+    const rows = db.prepare(`SELECT parsed_values FROM instrument_messages
+        WHERE link_id = ? AND kind = 'patient' AND parsed_values IS NOT NULL
+        ORDER BY id DESC LIMIT 200`).all(req.params.id) as any[];
+
+    const seen = new Map<string, { code: string; label: string | null; unit: string | null; count: number; samples: string[] }>();
+    for (const row of rows) {
+      for (const value of json<any[]>(row.parsed_values, [])) {
+        const code = String(value?.code ?? value?.analyte ?? '').trim();
+        if (!code) continue;
+        const key = code.toUpperCase();
+        const entry = seen.get(key) ?? { code, label: null, unit: null, count: 0, samples: [] };
+        entry.count++;
+        if (!entry.unit && value?.unit) entry.unit = String(value.unit);
+        if (!entry.label && value?.analyte && String(value.analyte).trim() !== code) entry.label = String(value.analyte);
+        if (entry.samples.length < 5 && String(value?.value ?? '').trim()) entry.samples.push(String(value.value).trim());
+        seen.set(key, entry);
+      }
+    }
+
+    const overrides = json<Record<string, string | number>>(link.measure_map, {});
+    const byCode = new Map(Object.entries(overrides).map(([k, v]) => [String(k).trim().toUpperCase(), v]));
+    const skip = new Set(json<string[]>(link.forward_skip, [])
+      .map(c => String(c).trim().toUpperCase()).filter(Boolean));
+
+    const parameters = [...seen.values()]
+      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code))
+      .map(entry => {
+        const key = entry.code.toUpperCase();
+        const own = byCode.get(key);
+        // What the shipped map for this analyser would give it, so a laboratory
+        // can see the map is working rather than wonder whether it is.
+        const shipped = link.forward_target === 'lhims_api'
+          ? lhimsMeasureId(entry.code, null, link.lhims_map_key) : null;
+        const identifier = own !== undefined && String(own ?? '').trim() !== ''
+          ? String(own) : (shipped ? String(shipped) : '');
+        return {
+          code: entry.code,
+          label: entry.label,
+          unit: entry.unit,
+          messages: entry.count,
+          samples: entry.samples,
+          identifier,
+          /** Where that identifier came from, so an inherited one is obvious. */
+          source: own !== undefined && String(own ?? '').trim() !== '' ? 'link'
+            : shipped ? 'profile' : 'none',
+          skipped: skip.has(key),
+          suggestion: suggestParameterKind(entry.code, entry.samples),
+        };
+      });
+
+    res.json({
+      linkId: Number(req.params.id),
+      forwardTarget: link.forward_target ?? 'lhims_api',
+      forwardEnabled: Boolean(link.forward_enabled),
+      mapKey: link.lhims_map_key ?? null,
+      mapLabel: lhimsMapByKey(link.lhims_map_key)?.label ?? null,
+      messagesRead: rows.length,
+      parameters,
+      counts: {
+        total: parameters.length,
+        ready: parameters.filter(p => !p.skipped && p.identifier).length,
+        needed: parameters.filter(p => !p.skipped && !p.identifier).length,
+        skipped: parameters.filter(p => p.skipped).length,
+      },
+    });
+  });
+
   router.get('/:id/messages', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
     const db = getDb();
     const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
