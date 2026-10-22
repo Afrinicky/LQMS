@@ -18,6 +18,10 @@ import {
   type LinkMode, type LinkProtocol, type LinkRole,
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
+import {
+  FORWARD_TARGETS, FORWARD_TARGET_LABELS, FORWARD_TARGET_HINTS, FORWARD_TEMPLATE_FIELDS,
+} from '../../shared/constants/receivers';
+import LinkParameterMap from '../components/instruments/LinkParameterMap';
 import LiveTransmission from '../components/instruments/LiveTransmission';
 
 /**
@@ -56,6 +60,10 @@ type Link = {
   measure_map: Record<string, number>;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
   forward_target: string | null;
+  /** The receiving system's own address, for a system that is not LHIMS. */
+  forward_template: string | null;
+  /** Codes this laboratory has said are not results, and are never sent on. */
+  forward_skip: string[];
   lhims_url: string | null; lhims_username: string | null; lhims_password_set: boolean;
   lhims_map_key: string | null;
   tap_path: string | null; tap_offset: number | null;
@@ -106,7 +114,8 @@ const EMPTY = {
   listenHost: '', listenPort: '', remoteHost: '', remotePort: '', watchPath: '',
   controlPatterns: DEFAULT_CONTROL_PATTERNS.join(', '),
   forwardEnabled: false, forwardHost: '', forwardPort: '',
-  forwardTarget: 'lhims_api',
+  forwardTarget: 'lhims_api', forwardTemplate: '', forwardSkip: [] as string[],
+  measureMap: {} as Record<string, string>,
   lhimsUrl: '', lhimsUsername: '', lhimsPassword: '', lhimsMapKey: '',
   tapPath: '',
   // Looking, as well as being sent to.
@@ -204,6 +213,9 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       forwardHost: form.forwardHost || null,
       forwardPort: form.forwardPort ? Number(form.forwardPort) : null,
       forwardTarget: form.forwardTarget,
+      forwardTemplate: form.forwardTemplate || null,
+      forwardSkip: form.forwardSkip,
+      measureMap: form.measureMap,
       lhimsUrl: form.lhimsUrl || null,
       lhimsUsername: form.lhimsUsername || null,
       // Left out entirely when untouched, so an edit does not blank a stored
@@ -373,7 +385,8 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       {showForm && (
         <LinkForm form={form} setForm={setForm} profiles={profiles} lhimsMaps={lhimsMaps}
           equipment={equipment} sections={sections} host={host}
-          editing={Boolean(editing)} passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
+          editing={Boolean(editing)} editingId={editing?.id ?? null}
+          passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
           onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
@@ -415,6 +428,9 @@ function formFrom(link: Link) {
     forwardEnabled: Boolean(link.forward_enabled),
     forwardHost: link.forward_host ?? '', forwardPort: link.forward_port ? String(link.forward_port) : '',
     forwardTarget: link.forward_target ?? 'lhims_api',
+    forwardTemplate: link.forward_template ?? '',
+    forwardSkip: Array.isArray(link.forward_skip) ? link.forward_skip : [],
+    measureMap: Object.fromEntries(Object.entries(link.measure_map ?? {}).map(([k, v]) => [k, String(v ?? '')])),
     lhimsUrl: link.lhims_url ?? '', lhimsUsername: link.lhims_username ?? '',
     lhimsPassword: '',
     lhimsMapKey: link.lhims_map_key ?? '',
@@ -777,11 +793,14 @@ function Section({ step, title, children }: { step: number; title: string; child
    changed is that the reading is optional and the order matches the walk to
    the analyser.
    ------------------------------------------------------------------------- */
-function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, passwordSet, busy, host, onSave, onClose }: {
+function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, editingId, passwordSet, busy, host, onSave, onClose }: {
   form: typeof EMPTY; setForm: (fn: (f: typeof EMPTY) => typeof EMPTY) => void;
   profiles: Profile[]; lhimsMaps: LhimsMap[];
   equipment: Array<{ id: number; name: string }>; sections: Array<{ id: number; name: string }>;
-  editing: boolean; passwordSet: boolean; busy: boolean; host: HostInfo | null;
+  editing: boolean;
+  /** The saved link, when there is one — the parameter list is read from it. */
+  editingId: number | null;
+  passwordSet: boolean; busy: boolean; host: HostInfo | null;
   onSave: () => void; onClose: () => void;
 }) {
   const set = <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => setForm(f => ({ ...f, [key]: value }));
@@ -996,28 +1015,33 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             </>
           )}
 
+          {/* Neutral on purpose. LHIMS is the receiving system in this
+              hospital and one of the deliveries below; a laboratory running
+              something else carries its results just the same. */}
           <label className="ls-check">
             <input type="checkbox" checked={form.forwardEnabled} disabled={lhimsOwned}
               onChange={e => set('forwardEnabled', e.target.checked)} />
             <span>
-              Also carry this analyser&rsquo;s patient results into LHIMS
+              Also carry this analyser&rsquo;s patient results on to another system
               <em>
                 {lhimsOwned
                   ? ' — not available for a link LHIMS already receives; two copies of one result is worse than none.'
-                  : ' — only for an analyser LHIMS is not already receiving. Control runs are never sent.'}
+                  : ' — only for an analyser that system is not already receiving. Control runs are never sent.'}
               </em>
             </span>
           </label>
           {form.forwardEnabled && (
             <>
               <div className="lf-grid">
-                <label className="lf-wide"><span>How to deliver</span>
+                <label className="lf-wide"><span>Where the results go</span>
                   <select value={form.forwardTarget} onChange={e => set('forwardTarget', e.target.value)}>
-                    <option value="lhims_api">Post each result to the LHIMS API, as the middleware does</option>
-                    <option value="tcp">Hand the raw transmission to another program</option>
+                    {FORWARD_TARGETS.map(t => (
+                      <option key={t} value={t}>{FORWARD_TARGET_LABELS[t]}</option>
+                    ))}
                   </select>
                 </label>
               </div>
+              <p className="iqc-hint in-head">{FORWARD_TARGET_HINTS[form.forwardTarget as 'lhims_api']}</p>
               {form.forwardTarget === 'lhims_api' ? (
                 <>
                   <div className="lf-grid">
@@ -1031,9 +1055,12 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                         placeholder={passwordSet ? 'unchanged' : ''}
                         onChange={e => set('lhimsPassword', e.target.value)} />
                     </label>
-                    <label className="lf-wide"><span>What LHIMS calls each parameter</span>
+                    {/* A starting point, not the answer. Another analyser's map
+                        matches nothing, which is how a link ended up delivering
+                        none of its results. Every parameter is set below. */}
+                    <label className="lf-wide"><span>Start from a known analyser&rsquo;s map</span>
                       <select value={form.lhimsMapKey} onChange={e => set('lhimsMapKey', e.target.value)}>
-                        <option value="">Choose the analyser&rsquo;s LHIMS map…</option>
+                        <option value="">None — set every parameter below</option>
                         {lhimsMaps.map(m => (
                           <option key={m.key} value={m.key}>{m.label} — {m.measureCount} parameters</option>
                         ))}
@@ -1042,10 +1069,39 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                   </div>
                   <Why summary="About the parameter map">
                     These are the measure ids from your own LHIMS client configuration files, so a result lands
-                    in the same LHIMS field the middleware would have put it in. A parameter with no id is not
-                    sent — it is listed for you instead, because LHIMS storing a value under the wrong id is
-                    worse than not storing it. Use &ldquo;Try one&rdquo; to see exactly which would go and which
-                    would not.
+                    in the same LHIMS field the middleware would have put it in. Choose a map only if it is this
+                    analyser’s — another analyser’s matches nothing, and every parameter is then set
+                    below instead. A parameter with no id is not sent: it is listed for you, because LHIMS storing
+                    a value under the wrong id is worse than not storing it. Use &ldquo;Try one&rdquo; to see
+                    exactly which would go and which would not.
+                  </Why>
+                </>
+              ) : form.forwardTarget === 'http_template' ? (
+                <>
+                  <div className="lf-grid">
+                    <label className="lf-wide"><span>The receiving system’s address</span>
+                      <TextField value={form.forwardTemplate} onValue={v => set('forwardTemplate', v)}
+                        placeholder="https://lis.example.org/api/results?sample={specimen}&test={code}&value={value}" /></label>
+                    <label><span>Username</span>
+                      <TextField value={form.lhimsUsername} onValue={v => set('lhimsUsername', v)} /></label>
+                    <label><span>Password</span>
+                      <input type="password" value={form.lhimsPassword} autoComplete="new-password"
+                        placeholder={passwordSet ? 'unchanged' : ''}
+                        onChange={e => set('lhimsPassword', e.target.value)} />
+                    </label>
+                  </div>
+                  <Why summary="What goes in the address">
+                    <p>
+                      Write the address once, as the receiving system wants it, with a placeholder where each
+                      result’s details belong. Everything outside a placeholder is sent exactly as written, so
+                      an API key or a path segment works as well as a query string. One call is made per result,
+                      and it needs at least <code>{'{specimen}'}</code> and <code>{'{value}'}</code>.
+                    </p>
+                    <ul className="lf-tokens">
+                      {FORWARD_TEMPLATE_FIELDS.map(f => (
+                        <li key={f.token}><code>{`{${f.token}}`}</code> <strong>{f.label}</strong> — {f.meaning}</li>
+                      ))}
+                    </ul>
                   </Why>
                 </>
               ) : (
@@ -1057,6 +1113,16 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                       onValue={n => set('forwardPort', n ? String(n) : '')} />
                   </label>
                 </div>
+              )}
+              {/* Where the mapping is actually done. A raw hand-off carries the
+                  transmission whole, so there is nothing to match up there. */}
+              {form.forwardTarget !== 'tcp' && editingId !== null && (
+                <LinkParameterMap
+                  linkId={editingId}
+                  target={form.forwardTarget}
+                  measureMap={form.measureMap}
+                  skip={form.forwardSkip}
+                  onChange={next => setForm(f => ({ ...f, measureMap: next.measureMap, forwardSkip: next.skip }))} />
               )}
             </>
           )}
