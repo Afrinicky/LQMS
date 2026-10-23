@@ -1383,6 +1383,33 @@ export class InstrumentBridge {
    * configuration problem and retrying it forever only hides that.
    */
   private async drainForwardQueue(): Promise<void> {
+    /*
+     * ONE DRAIN AT A TIME, and never at the analyser's expense.
+     *
+     * This runs on a 20-second timer, and a result waits up to 15 seconds for
+     * a receiving system that is not answering. A link carrying four results a
+     * message, with a queue of twenty-five and LHIMS unreachable, takes twenty
+     * minutes — so the timer started a second drain, and a third, and by the
+     * afternoon the host was holding hundreds of overlapping deliveries, every
+     * one of them waiting on sockets and timers it would never get an answer
+     * from.
+     *
+     * The analyser pays for that. It opens a connection, finds a host too busy
+     * to answer, waits, and resets: "connected ... read ECONNRESET" with no
+     * acknowledgement in between, and a bench told the transmission has
+     * stopped. Carrying results onward is the LAST thing this bridge does and
+     * the first thing that should suffer; receiving them is the thing that must
+     * never suffer at all.
+     */
+    if (this.draining) return;
+    this.draining = true;
+    try { await this.drainOnce(); } finally { this.draining = false; }
+  }
+
+  /** True while a drain is in flight, so the timer cannot start another. */
+  private draining = false;
+
+  private async drainOnce(): Promise<void> {
     let pending: any[] = [];
     try {
       pending = this.getDb().prepare(`SELECT m.*, l.forward_host, l.forward_port, l.forward_target,
@@ -1417,9 +1444,37 @@ export class InstrumentBridge {
             : await this.deliverToLhims(message);
         this.markForward(message.id, this.settle(outcome, message), outcome.note);
       } catch (error) {
-        this.markForward(message.id, this.settle({ status: 'retry', note: null }, message), (error as Error).message);
+        const why = (error as Error).message;
+        this.markForward(message.id, this.settle({ status: 'retry', note: null }, message), why);
+        /*
+         * The receiving system is not answering at all, so stop here.
+         *
+         * Every remaining message in this batch is addressed to the same host
+         * and would wait the same fifteen seconds to learn the same thing.
+         * Trying all of them turns one unreachable host into a drain lasting
+         * minutes, which is how the queue got ahead of the timer in the first
+         * place. The queue is untouched and the next drain picks it up; the
+         * only thing given up is the waiting.
+         */
+        if (this.unreachable(why)) {
+          this.record(message.link_id, 'warn',
+            `${message.link_name ?? 'This link'}: the receiving system is not answering, so the rest of this batch waits. `
+            + 'Nothing is lost — it is tried again shortly.');
+          return;
+        }
       }
     }
+  }
+
+  /**
+   * Did the delivery fail to reach the far end at all?
+   *
+   * A refusal is an answer and says something about the result; these say only
+   * that nobody was there to answer, which is true of every other message
+   * addressed to the same place.
+   */
+  private unreachable(why: string): boolean {
+    return /ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|abort|timed? ?out|fetch failed/i.test(why);
   }
 
   /**
