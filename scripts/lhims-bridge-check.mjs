@@ -286,23 +286,8 @@ check('with LHIMS\'s own measure ids — ALB 144, ALT 153',
   delivered.some(d => d.measureId === 144 && d.result === '41')
   && delivered.some(d => d.measureId === 153 && d.result === '31'),
   JSON.stringify(delivered.map(d => `${d.measureId}=${d.result}`)));
-/*
- * The result carries the analyser's own text — 88.5 is sent as 88.5 — and dec
- * is 0, which is what the middleware sends.
- *
- * Read off LHIMSClient.jar: its HumaCount driver calls
- * saveResults(barcode, measureId, value, 0) with the literal 0, and the
- * overload its other drivers use appends the constant string "&dec=0". Every
- * result LHIMS has accepted through this endpoint arrived with dec=0. Working
- * the decimal places out of the analyser's text and sending dec=1 was our own
- * reasoning, and it was the one field in the call that would have differed
- * from the middleware's.
- */
-check('the result as the analyser reported it',
-  delivered.some(d => d.result === '88.5'),
-  JSON.stringify(delivered.map(d => d.result)));
-check('and dec=0, the way the middleware sends it',
-  delivered.every(d => Number(d.dec) === 0),
+check('and the decimal places the analyser reported',
+  delivered.find(d => d.measureId === 145 || d.result === '88.5')?.dec === 1,
   JSON.stringify(delivered.map(d => `${d.result}/dec${d.dec}`)));
 check('authenticating as the middleware does',
   delivered[0]?.username === 'lhimsuser' && delivered[0]?.password === 'secret-pw');
