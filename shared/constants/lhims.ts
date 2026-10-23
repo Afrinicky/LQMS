@@ -33,43 +33,6 @@
  * match the machine, not to look consistent.
  */
 
-/* ============================================================================
-   What the middleware actually does, read off the client itself
-   ----------------------------------------------------------------------------
-   LHIMSClient.jar, disassembled. Worth writing down because it is not what the
-   name suggests, and because two of its findings decide how SECHLIMS must
-   behave if a result from here is to be indistinguishable from one of its own.
-
-   IT HAS TWO WAYS OF DELIVERING A RESULT, and which one is used is a property
-   of the ANALYSER DRIVER, not a setting:
-
-     HTTP   `BLIS/blis.saveResults(barcode, measureId, value, dec)` builds
-            {BLIS_URL}api/update_result.php?username=&password=&specimen_id=
-            &measure_id=&result=&dec= and fetches it with URL.openStream() —
-            a plain GET. The body is read whole and compared against "1".
-            The HumaCount 5D driver uses this one.
-
-     MySQL  `BLIS/blis.saveResults(...)` in its ten-argument form connects
-            straight to jdbc:mysql://{Server}:3306/lis_mindray and runs
-            INSERT INTO Results(Barcode, Result, ParameterID, TestDate, Unit,
-            `Range`, Comments, AnalyzerID, TestUserID, TestUserName).
-            The Sysmex XN-550 driver uses this one.
-
-   That is why this laboratory's two analysers behave so differently, and why
-   the XN-550 is the one SECHLIMS reaches by following the client's own log
-   rather than by delivering to it: there is no HTTP call in its path to copy.
-
-   WHERE THE MEASURE IDS COME FROM is the same database. `getMappedCode` runs
-   `SELECT * FROM ParameterMappings WHERE AnalyzerID = '<id>'` and reads
-   InstParameterCode (what the analyser calls it) against ParameterID (what
-   LHIMS files it under). Those are the numbers this laboratory already owns,
-   and the mapping screen takes them pasted rather than typed one at a time.
-
-   None of this is reproduced here. SECHLIMS makes the HTTP call and nothing
-   else: writing into another system's database over the network is not a thing
-   to copy, whatever the middleware does.
-   ========================================================================= */
-
 export interface LhimsMeasure { measureId: number; label: string }
 
 export interface LhimsMeasureMap {
@@ -877,32 +840,8 @@ export function lhimsResultUrl(base: string, credentials: { username: string; pa
     + `&specimen_id=${q(result.specimenId)}`
     + `&measure_id=${Number(result.measureId)}`
     + `&result=${q(result.value)}`
-    + `&dec=${LHIMS_DEC}`;
+    + `&dec=${Number(result.decimals ?? 0)}`;
 }
-
-/**
- * `dec` is sent as 0, because that is what the middleware sends.
- *
- * Read off the client itself: its HumaCount 5D driver calls
- * `saveResults(barcode, measureId, value, 0)` — the last argument is the
- * literal 0 — and the 3-argument overload the other drivers use appends the
- * constant string `&dec=0`. Every result LHIMS has ever accepted through this
- * endpoint arrived with `dec=0`.
- *
- * Working out the decimal places from the analyser's own text and sending
- * `dec=2` was a guess at being more faithful, and it is the one thing in this
- * call that would have differed from the middleware. Whatever LHIMS does with
- * the field — round to it, display to it, ignore it — it has only ever
- * been given 0, and a call that is indistinguishable from the middleware's is
- * worth more than a field we reasoned about on our own.
- *
- * The result itself still carries the analyser's own text: `12.40` is sent as
- * `12.40`. The middleware appends a Java float there, which renders the same
- * number as `12.4`; both parse identically at the far end, and the analyser's
- * own string is the one thing in the call that cannot be a rounding of
- * something else.
- */
-export const LHIMS_DEC = 0;
 
 /** The same URL with the password blanked, for logs, errors and the screen. */
 export function lhimsSafeUrl(url: string): string {
