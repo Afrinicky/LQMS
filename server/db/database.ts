@@ -8339,6 +8339,180 @@ CREATE TABLE IF NOT EXISTS mw_dennis_actions (
 CREATE INDEX IF NOT EXISTS idx_mw_dennis_state ON mw_dennis_actions(state, id);
 `);
 
+  /* ==========================================================================
+     THE RESULT FILLER, AND THE REPORT A TRANSMISSION PRINTS AS
+     --------------------------------------------------------------------------
+     Also additive, and read-only towards everything that already works. The
+     browser extension does not receive from an analyser, does not forward
+     anything and writes to none of the tables above: it reads what the bridge
+     and the middleware recorded, and records what it filled into a form. The
+     Sysmex XN-550 to LHIMS path is not touched by anything in this section.
+     ======================================================================= */
+  database.exec(`
+-- A browser that has been enrolled to ask SECHLIMS for pending results.
+--
+-- Two credentials answer two different questions. This row answers "may this
+-- browser ask at all", issued by an administrator and withdrawable on its own;
+-- the person's ordinary session answers "who is filling this form". The token
+-- is stored as a hash, so the register can prove which device asked without
+-- holding anything that would let somebody impersonate it.
+CREATE TABLE IF NOT EXISTS rf_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_code TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  location TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  pairing_code TEXT,
+  pairing_expires_at TEXT,
+  token_hash TEXT,
+  state TEXT NOT NULL DEFAULT 'pending',     -- pending | enrolled | revoked
+  user_agent TEXT,
+  browser TEXT,
+  enrolled_at TEXT,
+  last_seen_at TEXT,
+  last_seen_ip TEXT,
+  fills INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revoked_by INTEGER REFERENCES users(id),
+  revoked_at TEXT,
+  revoke_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rf_devices_state ON rf_devices(state);
+
+-- One result-entry form the extension knows how to read and fill.
+--
+-- This is the whole of the extension's knowledge of a form, held as
+-- configuration so another analyser, another form or another browser-based LIS
+-- is supported by adding a row rather than by shipping a new extension.
+CREATE TABLE IF NOT EXISTS rf_adapters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  adapter_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'sechlims',   -- sechlims | lhims | lis | his | other
+  description TEXT,
+  url_pattern TEXT NOT NULL,
+  url_match_mode TEXT NOT NULL DEFAULT 'glob', -- contains | glob | regex | exact
+  -- A selector that must be present for this to be the form. Without it a page
+  -- that merely has the right address would be treated as a result form.
+  form_selector TEXT,
+  identifiers TEXT,                            -- JSON: [{kind, selectorKind, selector, primary}]
+  normaliser TEXT NOT NULL DEFAULT 'alnum',
+  overwrite_policy TEXT NOT NULL DEFAULT 'confirm',
+  lookback_hours INTEGER NOT NULL DEFAULT 72,
+  message_kind TEXT NOT NULL DEFAULT 'patient', -- patient | control | any
+  -- Fill every parameter the transmission carries by matching the row label,
+  -- rather than only the parameters listed in rf_fields.
+  match_by_label INTEGER NOT NULL DEFAULT 1,
+  row_container TEXT,                           -- the grid the row strategy searches
+  row_label_cell INTEGER NOT NULL DEFAULT 1,
+  row_value_cell INTEGER NOT NULL DEFAULT 0,    -- 0 = the last cell in the row
+  section_id INTEGER REFERENCES sections(id),
+  is_builtin INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rf_adapters_active ON rf_adapters(is_active, platform);
+
+-- What one form calls each analyser parameter, and where that parameter's box
+-- is. Per adapter, because two forms that both take a haemoglobin do not name
+-- the field the same way, and a result typed into the wrong box is worse than
+-- one not typed at all.
+CREATE TABLE IF NOT EXISTS rf_fields (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  adapter_id INTEGER NOT NULL REFERENCES rf_adapters(id) ON DELETE CASCADE,
+  source_code TEXT NOT NULL,                   -- what the analyser emits: WBC, 1, HGB…
+  analyte TEXT,                                -- what this laboratory calls it
+  selector_kind TEXT NOT NULL DEFAULT 'row',   -- css | name | id | label | row
+  selector TEXT NOT NULL,
+  unit TEXT,
+  decimals INTEGER,
+  factor REAL,
+  offset_value REAL,
+  value_map TEXT,                              -- JSON: coded value -> coded value
+  is_required INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(adapter_id, source_code)
+);
+
+-- Every fill, from the plan that was issued to what the form actually took.
+--
+-- This is what makes "was this result typed or filled, and from which
+-- transmission" a question with an answer, and it is what detects a sample
+-- being filled a second time.
+CREATE TABLE IF NOT EXISTS rf_fills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fill_uid TEXT NOT NULL UNIQUE,
+  device_id INTEGER REFERENCES rf_devices(id) ON DELETE SET NULL,
+  user_id INTEGER REFERENCES users(id),
+  adapter_id INTEGER REFERENCES rf_adapters(id) ON DELETE SET NULL,
+  instrument_message_id INTEGER REFERENCES instrument_messages(id) ON DELETE SET NULL,
+  mw_message_id INTEGER REFERENCES mw_messages(id) ON DELETE SET NULL,
+  identifier TEXT,
+  identifier_kind TEXT,
+  identifier_agreement TEXT,                   -- exact | normalised | partial
+  verify_status TEXT,
+  page_url TEXT,
+  page_title TEXT,
+  state TEXT NOT NULL DEFAULT 'issued',        -- issued | applied | partial | failed | abandoned
+  fields_offered INTEGER NOT NULL DEFAULT 0,
+  fields_filled INTEGER NOT NULL DEFAULT 0,
+  fields_skipped INTEGER NOT NULL DEFAULT 0,
+  fields_overwritten INTEGER NOT NULL DEFAULT 0,
+  unmatched TEXT,                              -- JSON: parameters with nowhere to go
+  detail TEXT,
+  issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reported_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rf_fills_message ON rf_fills(instrument_message_id, id);
+CREATE INDEX IF NOT EXISTS idx_rf_fills_at ON rf_fills(issued_at);
+
+-- How a transmitted result is laid out when it is printed, exported or shown.
+-- One row per template; one of them is the default the viewer opens with.
+CREATE TABLE IF NOT EXISTS rf_report_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  organisation TEXT,
+  facility TEXT,
+  address_line TEXT,
+  contact_line TEXT,
+  report_title TEXT,
+  footer_text TEXT,
+  logo_data_uri TEXT,
+  accent_colour TEXT NOT NULL DEFAULT '#1B3A6B',
+  text_colour TEXT NOT NULL DEFAULT '#111827',
+  header_style TEXT NOT NULL DEFAULT 'centred',
+  font TEXT NOT NULL DEFAULT 'serif',
+  paper TEXT NOT NULL DEFAULT 'A4',
+  density TEXT NOT NULL DEFAULT 'comfortable',
+  margin_mm INTEGER NOT NULL DEFAULT 13,
+  columns TEXT,                                -- JSON array of column keys, in order
+  show_logo INTEGER NOT NULL DEFAULT 1,
+  show_flag_legend INTEGER NOT NULL DEFAULT 1,
+  show_instrument_messages INTEGER NOT NULL DEFAULT 1,
+  show_signature INTEGER NOT NULL DEFAULT 1,
+  signature_line TEXT,
+  show_delivery_state INTEGER NOT NULL DEFAULT 0,
+  watermark TEXT,
+  disclaimer TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT
+);
+`);
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an

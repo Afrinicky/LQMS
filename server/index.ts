@@ -50,6 +50,8 @@ import { iqcPortalRoutes } from './routes/iqcPortal.js';
 import { SignatureRequiredError } from './services/signatureService.js';
 import { instrumentLinkRoutes } from './routes/instrumentLinks.js';
 import { middlewareRoutes } from './routes/middleware.js';
+import { resultFillerRoutes } from './routes/resultFiller.js';
+import { transmissionReportRoutes } from './routes/transmissionReports.js';
 import { systemAuditRoutes } from './routes/systemAudit.js';
 import { scannedRecordsRoutes } from './routes/scannedRecords.js';
 import { assessmentsRoutes } from './routes/assessments.js';
@@ -178,6 +180,8 @@ export function createApiServer() {
   app.use('/api/decontamination', decontaminationRoutes());
   app.use('/api/instrument-links', instrumentLinkRoutes());
   app.use('/api/middleware', middlewareRoutes());
+  app.use('/api/result-filler', resultFillerRoutes());
+  app.use('/api/transmission-reports', transmissionReportRoutes());
   // The system's audit of itself: the live trail, and everything not done.
   app.use('/api/system-audit', systemAuditRoutes());
   app.use('/api/scanned-records', scannedRecordsRoutes());

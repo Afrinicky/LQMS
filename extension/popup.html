@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SECHLIMS Result Filler</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <span class="av">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3h6" /><path d="M10 3v7.5L5.6 18A2.5 2.5 0 0 0 7.8 21h8.4a2.5 2.5 0 0 0 2.2-3L14 10.5V3" /><path d="M7 15h10" />
+      </svg>
+    </span>
+    <span>
+      <strong>SECHLIMS Result Filler</strong>
+      <small id="host-line">Not connected</small>
+    </span>
+  </header>
+
+  <main>
+    <section class="card" id="connection">
+      <h2>Connection</h2>
+      <div class="row"><span>SECHLIMS</span><strong id="state-host">—</strong></div>
+      <div class="row"><span>This browser</span><span class="chip" id="state-device">Not enrolled</span></div>
+      <div class="row"><span>Signed in</span><span class="chip" id="state-user">No</span></div>
+    </section>
+
+    <section class="card hidden" id="enrol">
+      <h2>Enrol this browser</h2>
+      <p class="msg">Ask an administrator for a pairing code: SECHLIMS → Analyser Transmission &amp; Middleware → Result Filler.</p>
+      <label>Pairing code
+        <input id="pairing" placeholder="XXXX-XXXX" autocomplete="off" />
+      </label>
+      <button id="enrol-go">Enrol</button>
+    </section>
+
+    <section class="card hidden" id="signin">
+      <h2>Sign in</h2>
+      <label>Username <input id="username" autocomplete="username" /></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" /></label>
+      <button id="signin-go">Sign in</button>
+    </section>
+
+    <section class="card hidden" id="page">
+      <h2>This page</h2>
+      <div class="row"><span>Form</span><strong id="page-form">—</strong></div>
+      <p class="msg" id="page-note"></p>
+      <button id="allow-site" class="hidden">Show the filler on this site</button>
+      <div class="pair">
+        <button class="ghost" id="capture">Teach this form</button>
+        <button class="ghost" id="signout">Sign out</button>
+      </div>
+    </section>
+
+    <p class="msg crit hidden" id="error"></p>
+    <p class="msg ok hidden" id="notice"></p>
+  </main>
+
+  <footer>
+    <span id="packaged">SECHLIMS</span>
+    <button class="link" id="options">Settings</button>
+  </footer>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

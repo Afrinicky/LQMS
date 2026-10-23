@@ -18,6 +18,8 @@ import MiddlewareExplorer from '../components/middleware/Explorer';
 import MiddlewareQueues from '../components/middleware/Queues';
 import MiddlewareDennis from '../components/middleware/Dennis';
 import MiddlewareAudit from '../components/middleware/Audit';
+import MiddlewareResultFiller from '../components/middleware/ResultFiller';
+import MiddlewareLabReports from '../components/middleware/LabReports';
 import type { Destination, MiddlewareLink, Overview, Reference, Route } from '../components/middleware/shared';
 
 /**
@@ -34,10 +36,12 @@ import type { Destination, MiddlewareLink, Overview, Reference, Route } from '..
  * its address, probe it or route over it, and the screens say so rather than
  * offering buttons that would be refused.
  *
- * The twelve sections run in the order the work is actually done: see the
- * state, find a device, configure it, diagnose it, then the connections, the
- * destinations, the routing, and finally the evidence — live traffic, the
- * message explorer, the queues, the assistant and the audit trail.
+ * The sections run in the order the work is actually done: see the state, find
+ * a device, configure it, diagnose it, then the connections, the destinations,
+ * the routing, then the evidence — live traffic, the message explorer, the
+ * queues and the assistant — and finally what a received result is FOR: the
+ * extension that fills it into a result-entry form, the report it prints as,
+ * and the audit trail behind both.
  */
 
 const TABS = [
@@ -52,6 +56,8 @@ const TABS = [
   'Message Explorer',
   'Queues & Failed Deliveries',
   'Dennis Assistant',
+  'Result Filler',
+  'Result Reports',
   'Audit & Rollback',
 ];
 
@@ -147,6 +153,8 @@ export default function MiddlewarePage() {
       {tab === 'Message Explorer' && <MiddlewareExplorer {...shared} />}
       {tab === 'Queues & Failed Deliveries' && <MiddlewareQueues {...shared} />}
       {tab === 'Dennis Assistant' && <MiddlewareDennis {...shared} />}
+      {tab === 'Result Filler' && <MiddlewareResultFiller {...shared} />}
+      {tab === 'Result Reports' && <MiddlewareLabReports {...shared} />}
       {tab === 'Audit & Rollback' && <MiddlewareAudit {...shared} />}
     </div>
   );
