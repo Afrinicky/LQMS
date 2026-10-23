@@ -712,42 +712,50 @@ export function seedDefaults() {
     //   everything and is not listed.
     const MIDDLEWARE_ACCESS: Array<[string, Partial<Record<AccessLevel, string[]>>]> = [
       ['Laboratory Manager', {
-        full: ['analyser_middleware.configuration', 'analyser_middleware.dennis', 'analyser_middleware.audit'],
-        manage: ['analyser_middleware.queues'],
+        full: ['analyser_middleware.configuration', 'analyser_middleware.dennis', 'analyser_middleware.audit',
+          'analyser_middleware.result_filler'],
+        manage: ['analyser_middleware.queues', 'analyser_middleware.reports'],
         contribute: ['analyser_middleware.discovery', 'analyser_middleware.diagnostics'],
         view: ['analyser_middleware.overview'],
       }],
       ['Deputy Laboratory Manager', {
         full: ['analyser_middleware.configuration', 'analyser_middleware.dennis'],
-        manage: ['analyser_middleware.queues'],
+        manage: ['analyser_middleware.queues', 'analyser_middleware.result_filler', 'analyser_middleware.reports'],
         contribute: ['analyser_middleware.discovery', 'analyser_middleware.diagnostics'],
         view: ['analyser_middleware.overview', 'analyser_middleware.audit'],
       }],
       // The post that actually sets the interfaces up. Configures and runs
       // them, and stops short of approving its own work.
       ['Data Officer', {
-        manage: ['analyser_middleware.configuration', 'analyser_middleware.queues', 'analyser_middleware.dennis'],
+        manage: ['analyser_middleware.configuration', 'analyser_middleware.queues', 'analyser_middleware.dennis',
+          'analyser_middleware.result_filler', 'analyser_middleware.reports'],
         contribute: ['analyser_middleware.discovery', 'analyser_middleware.diagnostics'],
         view: ['analyser_middleware.overview', 'analyser_middleware.audit'],
       }],
       // Audits the interfaces, operates none of them.
       ['Quality Manager', {
-        view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics', 'analyser_middleware.audit', 'analyser_middleware.dennis'],
+        manage: ['analyser_middleware.reports'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics', 'analyser_middleware.audit',
+          'analyser_middleware.dennis', 'analyser_middleware.result_filler'],
       }],
       ['Internal Auditor', {
-        view: ['analyser_middleware.overview', 'analyser_middleware.audit'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.audit', 'analyser_middleware.result_filler',
+          'analyser_middleware.reports'],
       }],
       // The bench, answering "did it transmit?" for itself.
       ['Unit Supervisor', {
         contribute: ['analyser_middleware.diagnostics'],
-        view: ['analyser_middleware.overview', 'analyser_middleware.dennis'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.dennis', 'analyser_middleware.result_filler',
+          'analyser_middleware.reports'],
       }],
       ['Blood Bank Unit Supervisor', {
         contribute: ['analyser_middleware.diagnostics'],
-        view: ['analyser_middleware.overview', 'analyser_middleware.dennis'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.dennis', 'analyser_middleware.result_filler',
+          'analyser_middleware.reports'],
       }],
       ['Biomedical Scientist', {
-        view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics'],
+        view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics', 'analyser_middleware.result_filler',
+          'analyser_middleware.reports'],
       }],
     ];
     for (const [roleName, levels] of MIDDLEWARE_ACCESS) {

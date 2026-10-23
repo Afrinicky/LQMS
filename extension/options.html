@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SECHLIMS Result Filler — settings</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body class="wide">
+  <header>
+    <span class="av">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3h6" /><path d="M10 3v7.5L5.6 18A2.5 2.5 0 0 0 7.8 21h8.4a2.5 2.5 0 0 0 2.2-3L14 10.5V3" /><path d="M7 15h10" />
+      </svg>
+    </span>
+    <span>
+      <strong>SECHLIMS Result Filler</strong>
+      <small>Settings for this browser</small>
+    </span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>SECHLIMS address</h2>
+      <label>Host
+        <input id="host" placeholder="http://192.168.1.10:4317" autocomplete="off" />
+      </label>
+      <p class="msg">The same address staff open SECHLIMS at, without a trailing path.</p>
+      <button id="save-host">Save address</button>
+    </section>
+
+    <section class="card">
+      <h2>This browser</h2>
+      <div class="row"><span>Enrolment</span><span class="chip" id="device-state">Not enrolled</span></div>
+      <label>Pairing code
+        <input id="pairing" placeholder="XXXX-XXXX" autocomplete="off" />
+      </label>
+      <p class="msg">An administrator issues one in SECHLIMS → Analyser Transmission &amp; Middleware → Result Filler → Browsers.</p>
+      <button id="enrol">Enrol this browser</button>
+    </section>
+
+    <section class="card">
+      <h2>Where the filler appears</h2>
+      <div class="row"><span>Floating bubble</span><span class="chip" id="bubble-state">On</span></div>
+      <p class="msg">The bubble shows itself on result-entry pages of the sites allowed below, and nowhere else.</p>
+      <div class="pair">
+        <button id="allow-sechlims" class="ghost">Allow the SECHLIMS site</button>
+        <button id="allow-all" class="ghost">Allow all sites</button>
+      </div>
+      <label>Allow one more site
+        <input id="site" placeholder="https://lhims.example.gov.gh" autocomplete="off" />
+      </label>
+      <button id="allow-site" class="ghost">Allow this site</button>
+      <div class="row"><span>Allowed</span><strong id="sites">none</strong></div>
+      <div class="pair">
+        <button id="toggle-bubble" class="ghost">Turn the bubble off</button>
+        <button id="clear-sites" class="ghost">Remove all sites</button>
+      </div>
+    </section>
+
+    <p class="msg crit hidden" id="error"></p>
+    <p class="msg ok hidden" id="notice"></p>
+  </main>
+
+  <footer><span id="packaged"></span><span>Fills forms only — review, save and authorise in the usual way.</span></footer>
+  <script src="options.js" type="module"></script>
+</body>
+</html>

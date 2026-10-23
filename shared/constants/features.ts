@@ -281,6 +281,12 @@ export const FEATURES: FeatureDef[] = [
   { key: 'analyser_middleware.audit', module: 'analyser_middleware', label: 'Audit & rollback', sensitive: true,
     desc: 'The configuration history of every interface, and rolling one back to a recorded version.',
     tabs: ['Audit & Rollback'] },
+  { key: 'analyser_middleware.result_filler', module: 'analyser_middleware', label: 'Result Filler extension', sensitive: true,
+    desc: 'The browser extension that fills result-entry forms from transmissions already received: its form adapters, field mappings, enrolled browsers and fill record.',
+    tabs: ['Result Filler'] },
+  { key: 'analyser_middleware.reports', module: 'analyser_middleware', label: 'Transmitted result reports',
+    desc: 'Viewing, printing and exporting a transmitted result as a laboratory report, and designing how that report looks.',
+    tabs: ['Result Reports'] },
 
   // ── Communication — the central hub ─────────────────────────────────────
   // Four keys, because "may send a message to a colleague" and "may approve a

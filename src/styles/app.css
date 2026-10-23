@@ -8067,3 +8067,83 @@ button.mw-chip:disabled { cursor: default; opacity: 0.65; }
   .mw-side { position: static; }
   .mw-grid-2 { grid-template-columns: 1fr; }
 }
+
+/* ============================================================================
+   Result Filler, and the report a transmission prints as
+   ----------------------------------------------------------------------------
+   Two sections of the middleware module, built on its own panels so they read
+   as part of it rather than as something bolted on. Only what the module's
+   language does not already cover is added here: the install steps, the
+   mapping grid, the pairing code and the report preview.
+   ========================================================================= */
+.rf-subtabs { margin-bottom: 2px; }
+
+.rf-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.rf-kpis > div {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+  padding: 11px 13px; display: flex; flex-direction: column; gap: 1px;
+}
+.rf-kpis b { font-size: 21px; font-weight: 680; line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums; }
+.rf-kpis span { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+
+/* The install steps: numbered, because they are done once and in order. */
+.rf-steps { list-style: none; counter-reset: rf; margin: 0; padding: 0; display: grid; gap: 9px; }
+.rf-steps > li {
+  counter-increment: rf; position: relative; padding: 10px 12px 10px 42px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+}
+.rf-steps > li::before {
+  content: counter(rf); position: absolute; left: 12px; top: 11px;
+  width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center;
+  background: var(--accent); color: var(--on-accent); font-size: 10.5px; font-weight: 700;
+}
+.rf-steps strong { font-size: 12.5px; font-weight: 620; }
+.rf-steps span { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+.rf-steps code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  background: var(--overlay-2); padding: 1px 5px; border-radius: 4px;
+}
+
+.rf-flow { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.rf-flow b { color: var(--text); }
+
+/* A pairing code is read aloud across a bench, so it is set large. */
+.rf-code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rf-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 24px; font-weight: 700;
+  letter-spacing: 0.16em; padding: 9px 18px; border-radius: 10px;
+  background: var(--info-bg); color: var(--info); border: 1px solid var(--info-line);
+}
+
+/* The mapping grid: a spreadsheet, so it is edited like one. */
+.rf-fields td { padding: 3px 5px; }
+.rf-fields input[type="text"], .rf-fields input:not([type]), .rf-fields input[type="number"], .rf-fields select {
+  width: 100%; min-width: 72px; font-size: 11.5px; padding: 4px 6px;
+}
+.rf-fields input[type="checkbox"] { width: auto; }
+.rf-fields td.num input { text-align: right; }
+
+/* The register beside the document it produces. */
+.rf-report-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+/* The report is shown at its real proportions and scaled, so what is judged
+   on screen is the page that will come out of the printer. */
+.rf-sheet {
+  height: 560px; overflow-y: auto; overflow-x: hidden;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+}
+.rf-sheet.tall { height: 780px; }
+.rf-sheet-inner { position: relative; width: 566px; max-width: 100%; height: 800px; margin: 0 auto; }
+.rf-preview {
+  position: absolute; top: 0; left: 0; width: 832px; height: 1176px; border: 0;
+  background: #fff; display: block; transform: scale(0.68); transform-origin: top left;
+}
+.rf-logo {
+  max-height: 34px; max-width: 86px; object-fit: contain;
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px; background: #fff;
+}
+
+@media (max-width: 1240px) {
+  .rf-report-split { grid-template-columns: 1fr; }
+  .rf-sheet { height: 620px; }
+}
