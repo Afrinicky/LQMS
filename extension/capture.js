@@ -115,7 +115,7 @@
 <div class="panel">
   <div class="hd"><strong>Teach this form</strong><button class="x" title="Cancel">&times;</button></div>
   <div class="bd">
-    <p class="hint">Click the <b>sample identifier</b> field on the page first, then click each result field. Name each one as the analyser reports it — WBC, HGB, Glucose.</p>
+    <p class="hint">Most forms are read without this. Use it when one is not: click the <b>sample identifier</b> &mdash; a box or a printed value such as a barcode &mdash; then each result field, naming it as the analyser reports it.</p>
     <ul class="list"></ul>
     <p class="msg"></p>
   </div>
@@ -143,25 +143,75 @@
     }
   };
 
+  /**
+   * What the person is pointing at.
+   *
+   * A box to type in, or — just as often on a real result page — a value the
+   * page merely prints. The sample barcode on an LHIMS form is a table cell,
+   * and a capture tool that only saw inputs could not be shown it at all.
+   */
+  function targetAt(node) {
+    const control = node.closest?.(FILLABLE);
+    if (control) return { element: control, fillable: true };
+    const printed = node.closest?.('td, th, span, b, strong, div, p, li, dd');
+    if (!printed) return null;
+    const text = String(printed.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 64) return null;
+    return { element: printed, fillable: false, text };
+  }
+
   const onMove = event => {
     if (host.contains(event.target)) return;
-    const target = event.target.closest?.(FILLABLE);
-    highlight(target || null);
+    highlight(targetAt(event.target)?.element || null);
   };
+
+  /** The column header above a printed cell, or the caption beside it. */
+  function captionFor(element) {
+    const cell = element.closest('td, th');
+    const row = cell?.closest('tr, [role=\"row\"]');
+    const table = row?.closest('table');
+    if (cell && row && table) {
+      const cells = Array.from(row.children);
+      const column = cells.indexOf(cell);
+      const headerRow = table.querySelector('tr');
+      const header = headerRow && headerRow !== row ? Array.from(headerRow.children)[column] : null;
+      const text = String(header?.textContent ?? '').replace(/\s+/g, ' ').trim();
+      if (text) return text.slice(0, 60);
+    }
+    const previous = element.previousElementSibling;
+    const before = String(previous?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (before && before.length <= 40) return before.slice(0, 60);
+    return '';
+  }
 
   const onClick = event => {
     if (host.contains(event.target)) return;
-    const target = event.target.closest?.(FILLABLE);
+    const target = targetAt(event.target);
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
 
-    const found = selectorFor(target);
+    if (!target.fillable) {
+      // A printed value: it identifies the sample or the patient, and what it
+      // is called is whatever the page prints above or beside it.
+      identifier = {
+        kind: 'sample',
+        selectorKind: 'css',
+        selector: selectorFor(target.element).selector,
+        label: captionFor(target.element),
+        sample: target.text,
+        primary: true,
+      };
+      draw();
+      return;
+    }
+
+    const found = selectorFor(target.element);
     if (!identifier) {
-      identifier = { kind: 'sample', ...found, primary: true };
+      identifier = { kind: 'sample', ...found, primary: true, sample: target.element.value || '', label: captionFor(target.element) };
     } else {
-      if (!container) container = containerFor(target);
-      const row = target.closest('tr, [role="row"]');
+      if (!container) container = containerFor(target.element);
+      const row = target.element.closest('tr, [role=\"row\"]');
       const guess = found.selectorKind === 'row' ? found.selector
         : String(row?.children?.[0]?.textContent ?? '').trim().replace(/\s+/g, ' ');
       captured.push({ sourceCode: (guess || '').slice(0, 40), analyte: guess || '', ...found });
@@ -175,7 +225,8 @@
   function draw() {
     const rows = [];
     if (identifier) {
-      rows.push(`<li><span class="tag">Sample</span><small title="${esc(identifier.selector)}">${esc(identifier.selectorKind)}: ${esc(identifier.selector)}</small></li>`);
+      rows.push(`<li><span class="tag">Sample</span><small title="${esc(identifier.selector)}">${
+        esc(identifier.sample || identifier.label || identifier.selector)}</small></li>`);
     }
     captured.forEach((field, index) => {
       rows.push(`<li>
@@ -222,7 +273,7 @@
       urlPattern: `${location.origin}${location.pathname}`,
       formSelector: container || '',
       rowContainer: container || '',
-      identifiers: [identifier],
+      identifiers: [{ kind: identifier.kind, selectorKind: identifier.selectorKind, selector: identifier.selector, primary: true }],
       fields: captured,
       description: `Captured from ${location.host} with ${captured.length} field(s).`,
     };

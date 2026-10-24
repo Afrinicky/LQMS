@@ -196,6 +196,24 @@ export function seenOutsideWindow(db: DB, identifier: string, normaliser: Identi
   return null;
 }
 
+
+/**
+ * Are these two identifiers drawn from the same series?
+ *
+ * Compared by SHAPE rather than by value: `AAJ7447` and `AAJ7448` are two
+ * numbers of one kind and disagreeing about which is a real contradiction;
+ * `AAJ7447` and `UW-A11-AAB2287` are a laboratory number and a folder number,
+ * and their disagreeing means nothing at all.
+ */
+export function sameIdentifierShape(a: string, b: string): boolean {
+  const shape = (value: string) => String(value ?? '').trim().toUpperCase()
+    .replace(/[A-Z]/g, 'A').replace(/[0-9]/g, '9').replace(/[^A9]/g, '-');
+  const shapeA = shape(a);
+  const shapeB = shape(b);
+  if (!shapeA || !shapeB) return false;
+  return shapeA === shapeB;
+}
+
 export interface Verdict {
   status: VerifyStatus;
   /** One line a person can act on. The screens show this and nothing else. */
@@ -271,15 +289,35 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
     warnings.push(`Matched as the same identifier after ignoring spacing and punctuation: form ${formIdentifier}, analyser ${chosen.sampleId}.`);
   }
 
-  // A second identifier on the form that contradicts the transmission stops
-  // everything: one of the two is about a different person.
+  /*
+   * The patient identifier beside the sample: corroboration, contradiction, or
+   * neither.
+   *
+   * A hospital rarely gives its analysers the same patient number its LIS
+   * shows. Here the form prints a folder number — UW-A11-AAB2287 — while the
+   * analyser was given AAJ7447, and both are correct for the same person. So a
+   * mismatch cannot mean "wrong patient" on its own, or the filler would refuse
+   * every sample in the building.
+   *
+   * What CAN mean it is two identifiers of the same SHAPE that differ: those
+   * are two numbers from the same series, and one of them belongs to somebody
+   * else. That is blocked; the rest is said out loud and left to the person.
+   */
   const formPatient = String(options.patientIdentifier ?? '').trim();
   const sentPatient = chosen.demographics.patientId;
-  if (formPatient && sentPatient && compareIdentifiers(formPatient, sentPatient, options.normaliser) === 'different') {
-    return {
-      ...base, status: 'blocked', transmissions: [chosen], agreement: chosen.agreement, recordIdentifier: chosen.sampleId,
-      summary: `The sample matches, but the patient identifiers do not: this form says ${formPatient} and the transmission carries ${sentPatient}. Nothing will be filled.`,
-    };
+  if (formPatient && sentPatient) {
+    const agreement = compareIdentifiers(formPatient, sentPatient, options.normaliser);
+    if (agreement === 'different') {
+      if (sameIdentifierShape(formPatient, sentPatient)) {
+        return {
+          ...base, status: 'blocked', transmissions: [chosen], agreement: chosen.agreement, recordIdentifier: chosen.sampleId,
+          summary: `The sample matches, but the patient identifiers do not: this form says ${formPatient} and the transmission carries ${sentPatient}. They are numbers of the same kind, so one of them is a different patient. Nothing will be filled.`,
+        };
+      }
+      warnings.push(`The patient identifier on this form (${formPatient}) is not the one the analyser was given (${sentPatient}). They are different kinds of number, so this was matched on the sample identifier alone — check the name before saving.`);
+    } else {
+      warnings.push(`The patient identifier agrees as well: ${sentPatient}.`);
+    }
   }
 
   if (agreed.length > 1) {

@@ -40,6 +40,14 @@ import {
 } from '../../shared/constants/resultFiller.js';
 import { adapterFields, buildPlan, publicAdapter, seedAdapters, type AdapterRow } from '../services/resultFiller/adapters.js';
 import { transmissionById, verifyIdentifier } from '../services/resultFiller/pending.js';
+import {
+  aliasIndex, describeScan, orderCandidates, planFromScan, tidyDetectedFields, tidyDetectedIdentifiers,
+  type IdentifierCandidate,
+} from '../services/resultFiller/matching.js';
+import {
+  ANALYTE_DICTIONARY, IDENTIFIER_LABEL_RULES, IDENTIFIER_SHAPES, MATCH_FILL_THRESHOLD,
+  analyteKey, canonicalAnalyte,
+} from '../../shared/constants/formIntelligence.js';
 import { browserOf, enrol, newPairingCode, nextDeviceCode, pairingExpiry, requireDevice } from '../services/resultFiller/devices.js';
 import { packageExtension } from '../services/resultFiller/packaging.js';
 
@@ -65,6 +73,83 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
 function oneOf<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number]): T[number] {
   const raw = String(value ?? '').trim();
   return (allowed as readonly string[]).includes(raw) ? raw as T[number] : fallback;
+}
+
+/**
+ * The identifiers a page offered, in the order they are worth trying.
+ *
+ * Two shapes arrive here. A configured adapter sends what its selectors read,
+ * keyed by kind; a scanned page sends everything it found, because on a real
+ * LIS page the sample barcode, the folder number and an insurance number are
+ * all printed and only one of them is the one results are filed against. Both
+ * become the same ordered list, and the answer says which one matched.
+ */
+function candidatesFrom(body: any): IdentifierCandidate[] {
+  const out: IdentifierCandidate[] = [];
+  const detected = tidyDetectedIdentifiers(body?.detectedIdentifiers);
+  for (const identifier of detected) {
+    out.push({ kind: identifier.kind, label: identifier.label, value: identifier.value, source: identifier.source, confidence: identifier.confidence });
+  }
+  const keyed = (body?.identifiers ?? {}) as Record<string, unknown>;
+  for (const [kind, value] of Object.entries(keyed)) {
+    const text = String(value ?? '').trim();
+    if (!text) continue;
+    if (out.some(candidate => candidate.value === text)) continue;
+    out.push({ kind: kind === 'qc_lot' ? 'sample' : kind, label: IDENTIFIER_KIND_LABELS[kind as keyof typeof IDENTIFIER_KIND_LABELS] ?? kind, value: text, source: 'adapter', confidence: 80 });
+  }
+  return orderCandidates(out);
+}
+
+/**
+ * Try each identifier the page carries until one is recognised.
+ *
+ * The verdict returned is the FIRST that verified; if none did, the verdict of
+ * the most authoritative candidate is returned instead, so the bench is told
+ * about the sample barcode that is not on the record rather than about an
+ * insurance number nobody expected to find.
+ */
+function verifyCandidates(db: any, adapter: AdapterRow, candidates: IdentifierCandidate[]) {
+  const tried: Array<{ kind: string; label: string; value: string; status: string }> = [];
+  let fallback: { verdict: ReturnType<typeof verifyIdentifier>; candidate: IdentifierCandidate } | null = null;
+  const patient = candidates.find(candidate => candidate.kind === 'patient')?.value ?? null;
+
+  for (const candidate of candidates.slice(0, 8)) {
+    const verdict = verifyIdentifier(db, {
+      identifier: candidate.value,
+      normaliser: adapter.normaliser as IdentifierNormaliser,
+      lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
+      messageKind: adapter.message_kind,
+      // A patient identifier is corroboration, never the thing matched on, so
+      // it is not held against itself.
+      patientIdentifier: candidate.kind === 'patient' ? null : patient,
+    });
+    tried.push({ kind: candidate.kind, label: candidate.label, value: candidate.value, status: verdict.status });
+    if (statusAllowsFill(verdict.status) || verdict.status === 'blocked') return { verdict, candidate, tried };
+    if (!fallback && candidate.kind !== 'patient') fallback = { verdict, candidate };
+  }
+
+  if (fallback) return { verdict: fallback.verdict, candidate: fallback.candidate, tried };
+  const first = candidates[0];
+  if (!first) {
+    return {
+      verdict: verifyIdentifier(db, {
+        identifier: '', normaliser: adapter.normaliser as IdentifierNormaliser,
+        lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
+        messageKind: adapter.message_kind,
+      }),
+      candidate: null as IdentifierCandidate | null,
+      tried,
+    };
+  }
+  return {
+    verdict: verifyIdentifier(db, {
+      identifier: first.value, normaliser: adapter.normaliser as IdentifierNormaliser,
+      lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
+      messageKind: adapter.message_kind,
+    }),
+    candidate: first,
+    tried,
+  };
 }
 
 export function resultFillerRoutes() {
@@ -129,6 +214,23 @@ export function resultFillerRoutes() {
       adapters: rows.map(row => publicAdapter(row, adapterFields(db, row.id))),
       matched: url ? rows.filter(row => urlMatches(row.url_pattern, row.url_match_mode as any, url)).map(row => row.adapter_code) : [],
       mayConfigure: true,
+      /*
+       * How to read a page, sent rather than built into the extension.
+       *
+       * The rules for recognising an identifier are the same rules the API
+       * verifies against; shipping them as data means the page and the server
+       * cannot come to disagree about what a sample barcode looks like, and a
+       * laboratory with an unusual one is served by a release of SECHLIMS
+       * rather than a reinstall on every bench.
+       */
+      detection: {
+        identifierRules: IDENTIFIER_LABEL_RULES.map(rule => ({
+          kind: rule.kind, weight: rule.weight, patterns: rule.patterns.map(pattern => pattern.source),
+        })),
+        shapes: IDENTIFIER_SHAPES.map(shape => ({
+          kind: shape.kind, weight: shape.weight, pattern: shape.shape.source, description: shape.description,
+        })),
+      },
     });
   });
 
@@ -145,19 +247,11 @@ export function resultFillerRoutes() {
       .get(String(req.body?.adapterCode ?? '')) as AdapterRow | undefined;
     if (!adapter) return res.status(404).json({ error: 'No active form adapter matches this page.' });
 
-    const identifiers = (req.body?.identifiers ?? {}) as Record<string, string>;
-    const primary = String(identifiers.sample ?? identifiers.request ?? identifiers.qc_lot ?? identifiers.patient ?? '').trim();
+    const candidates = candidatesFrom(req.body);
+    const { verdict, candidate, tried } = verifyCandidates(db, adapter, candidates);
+    const fields = tidyDetectedFields(req.body?.detectedFields);
+    const identifiers = tidyDetectedIdentifiers(req.body?.detectedIdentifiers);
 
-    const verdict = verifyIdentifier(db, {
-      identifier: primary,
-      normaliser: adapter.normaliser as IdentifierNormaliser,
-      lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
-      messageKind: adapter.message_kind,
-      patientIdentifier: identifiers.patient ?? null,
-    });
-
-    // The transmission is summarised rather than returned whole: the extension
-    // needs to show what is available, not to hold a copy of the record.
     res.json({
       status: verdict.status,
       label: VERIFY_STATUS_LABELS[verdict.status],
@@ -167,7 +261,17 @@ export function resultFillerRoutes() {
       recordIdentifier: verdict.recordIdentifier,
       agreement: verdict.agreement,
       mayFill: statusAllowsFill(verdict.status),
-      adapter: { code: adapter.adapter_code, name: adapter.name, overwritePolicy: adapter.overwrite_policy },
+      // Which of the page's identifiers the answer is about, so the bench can
+      // see that the barcode was used and the folder number was only checked.
+      matchedOn: candidate ? { kind: candidate.kind, label: candidate.label, value: candidate.value, source: candidate.source } : null,
+      tried,
+      scan: {
+        identifiers,
+        fields: fields.length,
+        recognised: fields.filter(field => canonicalAnalyte(field.label)).length,
+        summary: describeScan(identifiers, fields),
+      },
+      adapter: { code: adapter.adapter_code, name: adapter.name, overwritePolicy: adapter.overwrite_policy, autoDetect: Number(adapter.auto_detect ?? 1) === 1 },
       transmissions: verdict.transmissions.slice(0, 6).map(t => ({
         id: t.id,
         sampleId: t.sampleId,
@@ -198,61 +302,116 @@ export function resultFillerRoutes() {
       .get(String(req.body?.adapterCode ?? '')) as AdapterRow | undefined;
     if (!adapter) return res.status(404).json({ error: 'No active form adapter matches this page.' });
 
-    const identifiers = (req.body?.identifiers ?? {}) as Record<string, string>;
-    const primary = String(identifiers.sample ?? identifiers.request ?? identifiers.qc_lot ?? identifiers.patient ?? '').trim();
-    const verdict = verifyIdentifier(db, {
-      identifier: primary,
-      normaliser: adapter.normaliser as IdentifierNormaliser,
-      lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
-      messageKind: adapter.message_kind,
-      patientIdentifier: identifiers.patient ?? null,
-    });
+    // Verification is done again here rather than trusting what the extension
+    // reports: the browser is where a person works, not where a safety check
+    // belongs. A plan is issued only for a transmission that still matches an
+    // identifier on the form at the moment the button is pressed.
+    const candidates = candidatesFrom(req.body);
+    const { verdict, candidate } = verifyCandidates(db, adapter, candidates);
     if (!statusAllowsFill(verdict.status)) {
       return res.status(409).json({ error: verdict.summary, status: verdict.status });
     }
-    // A verdict the person has to agree to must have been agreed to.
     if ((verdict.status === 'near_match' || verdict.status === 'already_entered') && !req.body?.confirmed) {
       return res.status(409).json({ error: verdict.summary, status: verdict.status, needsConfirmation: true });
     }
 
     const requested = Number(req.body?.messageId ?? 0);
-    const chosen = requested
-      ? verdict.transmissions.find(t => t.id === requested)
-      : verdict.transmissions[0];
+    const chosen = requested ? verdict.transmissions.find(t => t.id === requested) : verdict.transmissions[0];
     if (!chosen) {
       return res.status(409).json({ error: 'That transmission no longer matches the identifier on this form.', status: 'ambiguous' });
     }
     const transmission = transmissionById(db, chosen.id);
     if (!transmission) return res.status(404).json({ error: 'That transmission is no longer on the record.' });
 
-    const plan = buildPlan(adapter, adapterFields(db, adapter.id), transmission);
-    if (!plan.fields.length) {
-      return res.status(409).json({ error: 'Nothing in this transmission maps to a field on this form. Check the field mappings for this adapter.', status: 'no_results' });
+    const mappings = adapterFields(db, adapter.id);
+    const detectedFields = tidyDetectedFields(req.body?.detectedFields);
+    const detectedIdentifiers = tidyDetectedIdentifiers(req.body?.detectedIdentifiers);
+    const autoDetect = Number(adapter.auto_detect ?? 1) === 1 && detectedFields.length > 0;
+
+    /*
+     * Two ways a plan is built, and the page decides which.
+     *
+     * A page the extension could READ hands back the parameters it is asking
+     * for, each with the label printed beside it, and the readings are matched
+     * to those labels. A page it could not read falls back to the selectors an
+     * administrator configured. The first needs nothing configured; the second
+     * still works where a form gives nothing to read.
+     */
+    let payload: Record<string, unknown>;
+    let offered = 0;
+    let unmatched: unknown[] = [];
+
+    if (autoDetect) {
+      const plan = planFromScan(transmission, detectedFields, {
+        fields: mappings,
+        aliases: aliasIndex(db, adapter.id),
+        threshold: bounded(req.body?.threshold, MATCH_FILL_THRESHOLD, 55, 100),
+      });
+      if (!plan.assignments.length) {
+        return res.status(409).json({
+          error: plan.unmatched.length
+            ? `None of the ${plan.unmatched.length} parameter(s) in this transmission matches a field on this form. Add a mapping, or an alias, under Result Filler.`
+            : 'This transmission carries no value this form can take.',
+          status: 'no_results',
+          unmatched: plan.unmatched,
+          unfilled: plan.unfilled,
+          suggestions: plan.suggestions,
+        });
+      }
+      offered = plan.assignments.length;
+      unmatched = plan.unmatched;
+      payload = {
+        mode: 'detected',
+        assignments: plan.assignments,
+        unmatched: plan.unmatched,
+        unfilled: plan.unfilled,
+        suggestions: plan.suggestions,
+        overwritePolicy: adapter.overwrite_policy,
+      };
+    } else {
+      const plan = buildPlan(adapter, mappings, transmission);
+      if (!plan.fields.length) {
+        return res.status(409).json({ error: 'Nothing in this transmission maps to a field on this form. Check the field mappings for this adapter.', status: 'no_results' });
+      }
+      offered = plan.fields.length;
+      unmatched = plan.unmatched;
+      payload = { mode: 'configured', ...plan };
     }
 
     const fillUid = uuid();
-    db.prepare(`INSERT INTO rf_fills
+    const inserted = db.prepare(`INSERT INTO rf_fills
         (fill_uid, device_id, user_id, adapter_id, instrument_message_id, mw_message_id, identifier, identifier_kind,
          identifier_agreement, verify_status, page_url, page_title, state, fields_offered, unmatched)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?, ?)`)
       .run(fillUid, req.fillerDevice?.id ?? null, req.user!.id, adapter.id, transmission.id, transmission.mwMessageId,
-        primary, 'sample', verdict.agreement, verdict.status, text(req.body?.url, 500), text(req.body?.title, 200),
-        plan.fields.length, JSON.stringify(plan.unmatched));
+        verdict.formIdentifier, candidate?.kind ?? 'sample', verdict.agreement, verdict.status,
+        text(req.body?.url, 500), text(req.body?.title, 200), offered, JSON.stringify(unmatched));
+
+    // What the page showed and what it was matched against, kept beside the
+    // fill so "why did it put that number there" has an answer later.
+    try {
+      db.prepare(`INSERT INTO rf_scan_records (fill_id, identifiers, fields, assignments)
+          VALUES (?, ?, ?, ?)`)
+        .run(Number(inserted.lastInsertRowid), JSON.stringify(detectedIdentifiers),
+          JSON.stringify(detectedFields.map(field => ({ index: field.index, label: field.label, unit: field.unit }))),
+          JSON.stringify(payload.assignments ?? payload.fields ?? []));
+    } catch { /* the fill is the record; the scan is the explanation */ }
 
     audit(req, {
       action: 'populate', entity: 'rf_fills', entityId: fillUid,
-      newValue: { adapter: adapter.adapter_code, sample: primary, message: transmission.id, fields: plan.fields.length },
+      newValue: { adapter: adapter.adapter_code, sample: verdict.formIdentifier, message: transmission.id, fields: offered, mode: payload.mode },
     });
 
     res.json({
       fillUid,
       adapter: { code: adapter.adapter_code, name: adapter.name },
+      matchedOn: candidate ? { kind: candidate.kind, label: candidate.label, value: candidate.value } : null,
       transmission: {
         id: transmission.id, sampleId: transmission.sampleId, receivedAt: transmission.receivedAt,
         analyser: transmission.linkName ?? transmission.equipmentName,
         patient: transmission.demographics.patientName,
       },
-      ...plan,
+      ...payload,
     });
   });
 
@@ -495,6 +654,72 @@ export function resultFillerRoutes() {
 
     audit(req, { action: 'update', entity: 'rf_fields', entityId: adapter.id, newValue: { adapter: adapter.adapter_code, fields: kept.length } });
     res.json({ ok: true, fields: kept.length });
+  });
+
+  /* ------------------------------------------------- the laboratory's names */
+
+  /**
+   * What this laboratory calls a parameter, beyond what the dictionary knows.
+   *
+   * The built-in names cover what these analysers emit and what LHIMS labels
+   * its fields. The rest is local — a form that says "HB CONC", an analyser
+   * that sends "SGPT" — and is taught here once rather than waiting for a new
+   * extension to be built and distributed.
+   */
+  router.get('/aliases', requirePermission(F, 'view'), (req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`SELECT a.*, f.name AS adapter_name, u.username AS created_by_name
+        FROM rf_aliases a LEFT JOIN rf_adapters f ON f.id = a.adapter_id LEFT JOIN users u ON u.id = a.created_by
+        ORDER BY a.canonical, a.alias`).all() as any[];
+    res.json({
+      rows,
+      // The dictionary itself, so the screen can show what is already known and
+      // nobody adds an alias the filler already understood.
+      dictionary: ANALYTE_DICTIONARY.map(entry => ({
+        canonical: entry.canonical, discipline: entry.discipline, aliases: entry.aliases,
+      })),
+      matchThreshold: MATCH_FILL_THRESHOLD,
+    });
+  });
+
+  router.post('/aliases', requirePermission(F, 'edit'), (req, res) => {
+    const db = getDb();
+    const canonical = text(req.body?.canonical, 80);
+    const alias = text(req.body?.alias, 80);
+    if (!canonical || !alias) return res.status(400).json({ error: 'Give both the parameter and the other name for it.' });
+    if (analyteKey(canonical) === analyteKey(alias)) {
+      return res.status(400).json({ error: 'That is the same name written twice.' });
+    }
+    // Already spoken for — either by the dictionary, or by a name this
+    // laboratory taught earlier. SQLite's UNIQUE would not catch the second:
+    // a null adapter is not equal to another null adapter, so every
+    // everywhere-alias would be allowed through.
+    const known = canonicalAnalyte(alias) ?? aliasIndex(db, null).get(analyteKey(alias)) ?? null;
+    if (known) {
+      return res.status(409).json({
+        error: known === canonical
+          ? `“${alias}” is already understood as ${known}.`
+          : `“${alias}” already means ${known}. Two parameters cannot share a name.`,
+      });
+    }
+    try {
+      const inserted = db.prepare(`INSERT INTO rf_aliases (canonical, alias, adapter_id, note, created_by)
+          VALUES (?, ?, ?, ?, ?)`)
+        .run(canonical, alias, req.body?.adapterId ? Number(req.body.adapterId) : null, text(req.body?.note, 200), req.user!.id);
+      audit(req, { action: 'create', entity: 'rf_aliases', entityId: Number(inserted.lastInsertRowid), newValue: { canonical, alias } });
+      res.status(201).json({ id: Number(inserted.lastInsertRowid) });
+    } catch (error) {
+      res.status(400).json({ error: `That name could not be added: ${(error as Error).message}` });
+    }
+  });
+
+  router.delete('/aliases/:id', numericOnly, requirePermission(F, 'edit'), (req, res) => {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM rf_aliases WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That name is not on the register.' });
+    db.prepare('DELETE FROM rf_aliases WHERE id = ?').run(row.id);
+    audit(req, { action: 'delete', entity: 'rf_aliases', entityId: row.id, oldValue: { canonical: row.canonical, alias: row.alias } });
+    res.json({ ok: true });
   });
 
   /* ---------------------------------------------------------- the browsers */

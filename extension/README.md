@@ -9,13 +9,23 @@ is supported by adding a row rather than by rebuilding this.
 
 ## What it does, and what it refuses
 
-* Reads the identifier off the open form and asks SECHLIMS whether it holds
-  analyser results for it.
-* Fills the fields that identifier's transmission maps to, and nothing else.
+* **Reads the page.** Not just the boxes somebody can type in — the sample
+  barcode printed in a table cell, the folder number under the patient's
+  photograph, and the name written beside every result box. A value is
+  recognised by what labels it (a column header, a caption) or, failing a
+  label, by what it looks like.
+* Asks SECHLIMS whether any of the identifiers it found is one it holds
+  analyser results for, and says which one it used.
+* Matches each reading to the box it belongs in by name, through a dictionary
+  of what analysers emit and what forms ask for — `NA` to SODIUM, `SGPT` to
+  *Alanine Aminotransferase (ALT)* — and never confuses an absolute count with
+  a percentage.
+* Fills the fields that transmission maps to, and nothing else.
 * Refuses to fill when the identifier is missing, ambiguous, matched only
   loosely without confirmation, or contradicted by the record.
 * Never writes over a box that already has a value unless the person says so.
 * Stops before filling anything if a required field cannot be found exactly once.
+* Reports every parameter the form has no box for, rather than dropping it.
 * Fills only. Reviewing, saving, authorising and releasing stay with the
   laboratory.
 
@@ -39,12 +49,21 @@ Open a result-entry form. The bubble appears in the corner by itself. It shows
 the form it recognised, the identifier it read, and whether SECHLIMS verified
 it. Press **Populate results**, then review and save the form as usual.
 
-## Teaching it a new form
+## Teaching it
 
-With the form open, click the extension in the toolbar and choose **Teach this
-form**. Click the sample identifier field, then each result field, name each one
-as the analyser reports it, and save. The draft is stored in SECHLIMS **inactive**
-until an administrator reviews its mappings and enables it.
+Most forms need no teaching: the page is read as it is. Two things can be
+taught when a form is unusual.
+
+**A name.** If a form calls haemoglobin `HB CONC`, or an analyser sends `SGPT`
+for something this dictionary does not know, add it under **Result Filler →
+Parameter names** in SECHLIMS. It applies everywhere at once, with no reinstall
+on any bench.
+
+**A form.** If a page gives nothing to read — no labels, no headers — open it,
+click the extension in the toolbar and choose **Teach this form**. Click the
+sample identifier (a box, or a printed value such as a barcode), then each
+result field, name each one as the analyser reports it, and save. The draft is
+stored **inactive** until an administrator reviews it.
 
 ## Files
 

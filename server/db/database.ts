@@ -8513,6 +8513,57 @@ CREATE TABLE IF NOT EXISTS rf_report_templates (
 );
 `);
 
+  // Reading a form rather than being told where its boxes are.
+  //
+  // The first version could only fill what an administrator had written a
+  // selector for, and only inside a box somebody could type in. On a real LIS
+  // page that is the wrong half of the page: the sample barcode is printed in a
+  // table cell and the parameter a box belongs to is written beside it. An
+  // adapter that detects rather than being configured needs no selector at all,
+  // so this is the default for a new form and the existing ones keep their
+  // mappings.
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(rf_adapters)").all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('auto_detect')) database.exec('ALTER TABLE rf_adapters ADD COLUMN auto_detect INTEGER NOT NULL DEFAULT 1');
+    if (!cols.has('service_title')) database.exec('ALTER TABLE rf_adapters ADD COLUMN service_title TEXT');
+  }
+
+  database.exec(`
+-- What this laboratory calls a parameter, beyond what the dictionary knows.
+--
+-- The built-in names cover what the analysers here emit and what LHIMS labels
+-- its fields, which is most of it. The rest is local: a form that says
+-- "HB CONC", an analyser that sends "SGPT". One row teaches the filler, and it
+-- is taught once rather than waiting for a new extension.
+CREATE TABLE IF NOT EXISTS rf_aliases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  canonical TEXT NOT NULL,
+  alias TEXT NOT NULL,
+  -- Blank means everywhere. Set, it limits the alias to one form, for a site
+  -- whose own vocabulary disagrees with everyone else's.
+  adapter_id INTEGER REFERENCES rf_adapters(id) ON DELETE CASCADE,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(alias, adapter_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rf_aliases_canonical ON rf_aliases(canonical);
+
+-- What one scan of a page found, kept only for the fills that were issued from
+-- it. This is what makes "why did it put that number in that box" answerable
+-- months later: the labels the page showed, and the score each match was made
+-- on.
+CREATE TABLE IF NOT EXISTS rf_scan_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fill_id INTEGER REFERENCES rf_fills(id) ON DELETE CASCADE,
+  identifiers TEXT,              -- JSON: what was detected, and how
+  fields TEXT,                   -- JSON: the labels the page offered
+  assignments TEXT,              -- JSON: reading -> field, with the score
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_rf_scan_fill ON rf_scan_records(fill_id);
+`);
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an
