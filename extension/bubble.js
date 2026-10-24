@@ -25,6 +25,13 @@
   if (window.__sechlimsResultFillerMounted) return;
   window.__sechlimsResultFillerMounted = true;
 
+  /**
+   * Shown because somebody asked for it, rather than because the page is one
+   * the filler knows. It then appears whatever it finds, and says so — a tool
+   * that answers "nothing here" is worth more than one that answers nothing.
+   */
+  let forced = Boolean(window.__sechlimsShowAnyway);
+
   const HOST_ID = 'sechlims-result-filler';
   const POSITION_KEY = 'rf_bubble_position';
   const RECHECK_MS = 1_500;
@@ -461,7 +468,7 @@
 :host { all: initial; }
 *, *::before, *::after { box-sizing: border-box; }
 .wrap { position: fixed; z-index: 2147483000; font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-  color: #16202E; }
+  color: #16202E; pointer-events: auto; }
 .fab { width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: grab; position: relative;
   display: flex; align-items: center; justify-content: center; color: #fff; touch-action: none;
   background: radial-gradient(circle at 30% 25%, #2A5CA8, #16284B); box-shadow: 0 8px 22px rgba(10, 22, 44, .34);
@@ -564,7 +571,17 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     if (document.getElementById(HOST_ID)) return;
     const host = document.createElement('div');
     host.id = HOST_ID;
-    host.style.all = 'initial';
+    /*
+     * The host takes no space and inherits nothing.
+     *
+     * `all: initial` alone leaves it an inline box sitting in the page's flow,
+     * which on a long form puts it a thousand pixels below the fold and at the
+     * mercy of whatever the page does to its own layout. Pinned, sized to
+     * nothing and transparent to the pointer, it cannot be pushed about, and
+     * the panel inside the shadow decides for itself where it sits.
+     */
+    host.style.cssText = 'all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0;'
+      + ' margin: 0; padding: 0; border: 0; z-index: 2147483000; pointer-events: none;';
     shadow = host.attachShadow({ mode: 'closed' });
 
     const style = document.createElement('style');
@@ -586,7 +603,8 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
       </div>`;
 
     shadow.append(style, wrap);
-    document.documentElement.appendChild(host);
+    // Inside the body where a page expects its own elements, not after it.
+    (document.body || document.documentElement).appendChild(host);
 
     elements = {
       host, wrap,
@@ -727,7 +745,7 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     setDot();
     if (!elements.panel || !state.open) return;
 
-    elements.formName.textContent = state.adapter ? state.adapter.name : 'No form recognised on this page';
+    elements.formName.textContent = state.adapter ? state.adapter.name : 'No form configured for this page';
 
     const verdict = state.verdict;
     const chosen = verdict?.transmissions?.find(t => String(t.id) === String(state.chosenId)) ?? verdict?.transmissions?.[0];
@@ -1072,11 +1090,27 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
    */
   async function evaluate() {
     const matched = await detectAdapter();
-    if (!matched) {
+    if (!matched && !forced) {
       if (!state.open) unmount();
       return;
     }
     mount();
+    if (!matched) {
+      // Read the page anyway: "23 result fields but no form configured for this
+      // address" tells an administrator exactly what to do next.
+      state.scan = scanPage();
+      const identifier = primaryIdentifier();
+      state.verdict = {
+        status: 'no_identifier',
+        label: 'Not a form the filler knows',
+        summary: `No form is configured for this address. The page offers ${state.scan.fields.length} result field(s)`
+          + `${identifier ? ` and an identifier that reads ${identifier.value}` : ' and no identifier this filler recognises'}`
+          + '. Add a form for it under Result Filler in SECHLIMS, or use Teach this form.',
+        mayFill: false, transmissions: [],
+      };
+      render();
+      return;
+    }
     await refresh();
   }
 
@@ -1129,7 +1163,55 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     } catch { /* an older browser polls instead */ }
 
     window.addEventListener('resize', () => { if (state.open) clampIntoView(); else restorePosition(); });
+
+    // A page that redraws its body would otherwise carry the bubble away with
+    // it, and nothing would say why it vanished.
+    setInterval(() => {
+      if (!state.adapter && !forced) return;
+      if (elements.host && !document.contains(elements.host)) {
+        (document.body || document.documentElement).appendChild(elements.host);
+        restorePosition();
+      }
+    }, 2_000);
   }
+
+  /**
+   * "Show the filler on this page now."
+   *
+   * The content script runs on every page of an allowed site, and on one it
+   * does not recognise it goes quiet. Re-injecting it then does nothing — it
+   * is already there — so the popup asks it to show itself instead, and it
+   * appears and says what it found.
+   */
+  try {
+    chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+      // What this page was read as — so the popup can answer "why is nothing
+      // being offered?" without the person having to find the bubble first.
+      if (message?.type === 'rf-state') {
+        const identifier = primaryIdentifier();
+        respond({
+          ok: true,
+          state: {
+            adapter: state.adapter?.name ?? null,
+            identifier: identifier?.value ?? null,
+            identifierLabel: identifier?.label ?? null,
+            fields: state.scan.fields.length,
+            status: state.verdict?.label ?? null,
+            mayFill: Boolean(state.verdict?.mayFill),
+          },
+        });
+        return true;
+      }
+      if (message?.type !== 'rf-show') return false;
+      forced = true;
+      void (async () => {
+        await evaluate();
+        if (elements.panel) toggle(true);
+        respond({ ok: true, shown: Boolean(document.getElementById(HOST_ID)) });
+      })();
+      return true;
+    });
+  } catch { /* an injected script with no messaging still works on its own */ }
 
   void (async () => {
     await evaluate();

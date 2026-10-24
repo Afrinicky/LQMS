@@ -163,3 +163,43 @@ nothing more.
   name that fills only once it has been taught.
 * The bubble itself was driven in a browser against a replica of the FBC page:
   33 fields found, 26 readings placed, the occupied box held for confirmation.
+
+---
+
+## 7. When the bubble does not appear
+
+A bubble that fails silently is indistinguishable from one that is not wanted.
+The toolbar panel now walks the same chain the bubble walks and marks the link
+that is broken, with a button that mends it:
+
+| Step | Fails when | The button does |
+| --- | --- | --- |
+| This page can carry the filler | the page is not http/https | — |
+| A SECHLIMS address is set | the host was never entered | opens Settings |
+| This browser is enrolled | no pairing code was used | focuses the code box |
+| Somebody is signed in | the session lapsed | focuses sign-in |
+| The bubble is turned on | it was turned off in Settings | opens Settings |
+| **This site is allowed** | permission was never granted for that host | grants it and injects into the open tab |
+| SECHLIMS answered | the host is unreachable | opens Settings |
+| A form is configured for this page | no active adapter matches the address | opens Teach this form |
+| The filler is running on this tab | the tab predates the registration | injects it now |
+| It can read this page | — | reports the identifier and field count it read |
+
+Three things were fixed behind that panel, each of which could stop the bubble
+on its own and none of which said so:
+
+1. **The detection rules never reached the page.** `/context` carries them; the
+   background worker dropped them on the way through, so the content script
+   scanned with nothing to recognise an identifier *by* and found none on a page
+   that prints a barcode in bold.
+2. **A newly allowed site does not reach an open tab.** The browser injects a
+   registered content script on the next navigation. Granting a site and seeing
+   nothing happen was the expected behaviour and the most confusing one; the
+   open tab is now injected too.
+3. **An already-running script could not be asked to show itself.** On an
+   allowed site the script runs on every page and goes quiet where no form is
+   configured. Re-injecting it did nothing — it was already there — so it now
+   answers a message instead, appears, and says what it found.
+
+The host element is also pinned and sized to nothing rather than left inline in
+the page's flow, where a long form pushed it below the fold.

@@ -66,3 +66,18 @@ p.msg.ok { color: #15803D; }
 footer { padding: 9px 14px 13px; display: flex; justify-content: space-between; align-items: center;
   font-size: 10.5px; color: #94A3B8; }
 .hidden { display: none !important; }
+
+/* Why the bubble is or is not on the page in front of you.
+   One line per thing that has to be true, in the order it has to be true. */
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.steps li { display: flex; align-items: flex-start; gap: 7px; font-size: 11.5px; line-height: 1.45; }
+.steps .mark {
+  flex: 0 0 auto; width: 14px; height: 14px; border-radius: 50%; margin-top: 1px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: #fff; background: #16A34A;
+}
+.steps li.bad .mark { background: #B91C1C; }
+.steps li.bad strong { color: #B91C1C; }
+.steps strong { font-weight: 620; display: block; }
+.steps small { color: var(--muted); display: block; word-break: break-word; }
+.steps li.bad small { color: #92400E; }

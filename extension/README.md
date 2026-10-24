@@ -49,6 +49,30 @@ Open a result-entry form. The bubble appears in the corner by itself. It shows
 the form it recognised, the identifier it read, and whether SECHLIMS verified
 it. Press **Populate results**, then review and save the form as usual.
 
+## If the bubble does not appear
+
+Click the extension in the toolbar. **This page** lists every condition that
+has to hold, in order, and marks the one that does not:
+
+* the page is http or https;
+* a SECHLIMS address is set, this browser is enrolled, somebody is signed in;
+* the bubble is turned on;
+* **this site is allowed** — the commonest cause, and one click to fix;
+* SECHLIMS answered, and a form is configured for this address;
+* the filler is running on this tab;
+* and what it read: the identifier, and how many result fields it found.
+
+The button underneath does whatever the failing step needs. Two notes worth
+knowing:
+
+* **Allowing a site does not reach a page already open.** The browser injects a
+  newly allowed content script on the next visit. The button injects it into
+  the open tab as well, so you should not have to reload — but reloading always
+  works.
+* **Show the filler on this page now** works even where no form is configured.
+  It appears and says what it found, which is what tells an administrator
+  whether the page is readable at all.
+
 ## Teaching it
 
 Most forms need no teaching: the page is read as it is. Two things can be
