@@ -377,6 +377,10 @@ export interface BuiltInAdapter {
   overwritePolicy: OverwritePolicy;
   lookbackHours: number;
   messageKind: 'patient' | 'control' | 'any';
+  /** Read the page rather than being told where its boxes are. */
+  autoDetect: boolean;
+  /** Where the page names the test it is for, so a scan can say which it read. */
+  serviceTitle?: string | null;
   /** Empty means the adapter matches analyser parameters by name at fill time. */
   fields: BuiltInField[];
   isActive: boolean;
@@ -395,6 +399,33 @@ export interface BuiltInAdapter {
  */
 export const BUILTIN_ADAPTERS: BuiltInAdapter[] = [
   {
+    adapterCode: 'LHIMS-PATHOLOGY',
+    name: 'LHIMS — pathology result entry',
+    platform: 'lhims',
+    description:
+      'The LHIMS result-entry template, for every pathology service it renders — full blood count, '
+      + 'urea and electrolytes, renal and liver function, and the rest. The page is read rather than '
+      + 'configured: the sample barcode is taken from the Sample Details table, the folder number from '
+      + 'the patient panel, and each parameter from the label beside its box.',
+    urlPattern: '*PathologyServiceTemplate.php*',
+    urlMatchMode: 'glob',
+    // Present on every one of these pages and on nothing else in LHIMS.
+    formSelector: '',
+    identifiers: [],
+    normaliser: 'alnum',
+    overwritePolicy: 'confirm',
+    lookbackHours: 72,
+    messageKind: 'patient',
+    autoDetect: true,
+    serviceTitle: null,
+    fields: [],
+    isActive: true,
+    notes:
+      'Detects its own identifiers and parameters, so a service LHIMS adds needs nothing here. '
+      + 'Nothing about it touches the existing analyser-to-LHIMS transmission: the extension types into '
+      + 'a page a person already has open, and LHIMS itself decides what to do with it.',
+  },
+  {
     adapterCode: 'SECHLIMS-IQC',
     name: 'SECHLIMS — control run entry',
     platform: 'sechlims',
@@ -407,6 +438,7 @@ export const BUILTIN_ADAPTERS: BuiltInAdapter[] = [
     overwritePolicy: 'confirm',
     lookbackHours: 72,
     messageKind: 'control',
+    autoDetect: true,
     fields: [],
     isActive: true,
     notes: 'Rows are matched on the analyte name in the first column, so a control that gains a parameter needs no change here.',
@@ -424,24 +456,8 @@ export const BUILTIN_ADAPTERS: BuiltInAdapter[] = [
     overwritePolicy: 'confirm',
     lookbackHours: 24 * 14,
     messageKind: 'any',
+    autoDetect: true,
     fields: [],
     isActive: true,
-  },
-  {
-    adapterCode: 'LHIMS-RESULTS',
-    name: 'LHIMS — patient result entry',
-    platform: 'lhims',
-    description: 'The LHIMS result-entry page. Capture the specimen field and each parameter from the page before enabling this adapter.',
-    urlPattern: '*lhims*',
-    urlMatchMode: 'glob',
-    formSelector: '',
-    identifiers: [{ kind: 'sample', selectorKind: 'name', selector: 'specimen_id', primary: true }],
-    normaliser: 'alnum',
-    overwritePolicy: 'never',
-    lookbackHours: 72,
-    messageKind: 'patient',
-    fields: [],
-    isActive: false,
-    notes: 'Inactive until its selectors are captured. Capturing them does not alter the existing analyser-to-LHIMS transmission in any way — the extension only types into a page a person already has open.',
   },
 ];

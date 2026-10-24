@@ -56,33 +56,74 @@ async function paint() {
 
   $('enrol').classList.toggle('hidden', state.enrolled || !state.host);
   $('signin').classList.toggle('hidden', !state.enrolled || state.signedIn);
-  $('page').classList.toggle('hidden', !state.enrolled || !state.signedIn);
+  $('page').classList.remove('hidden');
   $('packaged').textContent = state.host ? new URL(state.host).host : 'SECHLIMS';
 
-  if (!state.host) { say('Set the SECHLIMS address in Settings before enrolling this browser.'); return; }
-  if (state.enrolled && state.signedIn) await paintPage();
+  if (!state.host) say('Set the SECHLIMS address in Settings before enrolling this browser.');
+  await paintPage();
 }
+
+/**
+ * Why the bubble is, or is not, on the page in front of you.
+ *
+ * The extension used to answer that question with silence: no bubble, no
+ * reason, nothing to act on. It now walks the same steps the bubble does and
+ * shows where the chain breaks, with the one button that would mend it.
+ */
+let fixAction = null;
 
 async function paintPage() {
   const tab = await activeTab();
+  const response = await ask('diagnose', { url: tab?.url || '', tabId: tab?.id ?? null });
+  const list = $('steps');
+  const fix = $('fix');
+
+  if (!response.ok) {
+    list.innerHTML = `<li class="bad"><span class="mark">!</span><span><strong>Could not check this page</strong><small>${escapeHtml(response.error)}</small></span></li>`;
+    fix.classList.add('hidden');
+    return;
+  }
+
+  const steps = response.data.steps || [];
+  list.innerHTML = steps.map(step => `
+    <li class="${step.ok ? 'good' : 'bad'}">
+      <span class="mark">${step.ok ? '✓' : '!'}</span>
+      <span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.detail || '')}</small></span>
+    </li>`).join('');
+
+  const broken = steps.find(step => !step.ok && step.fix);
+  fixAction = broken?.fix ?? null;
+  const labels = {
+    allow: 'Show the filler on this site',
+    inject: 'Show the filler on this page now',
+    settings: 'Open settings',
+    enrol: 'Enter a pairing code',
+    signin: 'Sign in',
+    teach: 'Teach this form',
+  };
+  if (fixAction && labels[fixAction]) {
+    fix.textContent = labels[fixAction];
+    fix.classList.remove('hidden');
+  } else {
+    fix.classList.add('hidden');
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+/** Allow this site, then put the bubble on the tab without waiting for a reload. */
+async function allowThisSite() {
+  const tab = await activeTab();
   const origin = tab ? originOf(tab.url) : null;
-  const granted = origin ? await chrome.permissions.contains({ origins: [origin] }) : false;
-
-  $('allow-site').classList.toggle('hidden', !origin || granted);
-  $('allow-site').dataset.origin = origin || '';
-
-  const response = await ask('adapters', { url: tab?.url || '' });
-  if (!response.ok) { $('page-form').textContent = '—'; say(response.error); return; }
-
-  const matched = response.data.matched || [];
-  $('page-form').textContent = matched.length ? matched[0].name : 'Not a known result form';
-  $('page-note').textContent = !origin
-    ? 'The filler works on http and https pages.'
-    : !granted
-      ? 'Allow this site and the bubble appears on its result-entry forms by itself.'
-      : matched.length
-        ? 'The bubble is on this page, bottom right.'
-        : 'Nothing here matches a configured form. Teach it, and an administrator can enable it in SECHLIMS.';
+  if (!origin) { say('The filler works on http and https pages.'); return; }
+  const granted = await chrome.permissions.request({ origins: [origin] });
+  if (!granted) { say('The filler cannot appear on a site it has not been allowed on.'); return; }
+  await ask('register');
+  const shown = await ask('showHere', { tabId: tab.id });
+  say(shown.ok ? 'Allowed. The bubble is on this page now.' : `Allowed, but: ${shown.error}`, shown.ok ? 'notice' : 'error');
+  await paint();
 }
 
 /* ============================================================================
@@ -109,17 +150,23 @@ $('signin-go').addEventListener('click', async () => {
 $('signout').addEventListener('click', async () => { await ask('signOut'); await paint(); });
 $('options').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
-$('allow-site').addEventListener('click', async () => {
-  const origin = $('allow-site').dataset.origin;
-  if (!origin) return;
-  const granted = await chrome.permissions.request({ origins: [origin] });
-  if (!granted) { say('The filler cannot appear on a site it has not been allowed on.'); return; }
-  const tab = await activeTab();
-  if (tab?.id) {
-    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['bubble.js'] }); } catch { /* it loads on the next visit */ }
+$('fix').addEventListener('click', async () => {
+  say('');
+  if (fixAction === 'allow') { await allowThisSite(); return; }
+  if (fixAction === 'inject') {
+    const tab = await activeTab();
+    const shown = await ask('showHere', { tabId: tab?.id ?? null });
+    if (!shown.ok) { say(shown.error); return; }
+    say('The filler is on this page.', 'notice');
+    await paintPage();
+    return;
   }
-  say('Allowed. The bubble appears on this site’s result forms.', 'notice');
-  await paint();
+  if (fixAction === 'settings' || fixAction === 'enrol' || fixAction === 'signin') {
+    if (fixAction === 'settings') { chrome.runtime.openOptionsPage(); return; }
+    $(fixAction === 'enrol' ? 'pairing' : 'username')?.focus();
+    return;
+  }
+  if (fixAction === 'teach') { $('capture').click(); }
 });
 
 /**

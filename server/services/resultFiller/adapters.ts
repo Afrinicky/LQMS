@@ -46,6 +46,8 @@ export interface AdapterRow {
   row_container: string | null;
   row_label_cell: number;
   row_value_cell: number;
+  auto_detect: number;
+  service_title: string | null;
   section_id: number | null;
   is_builtin: number;
   is_active: number;
@@ -86,8 +88,8 @@ export function seedAdapters(db: DB, userId?: number | null): void {
   const insertAdapter = db.prepare(`INSERT INTO rf_adapters
       (adapter_code, name, platform, description, url_pattern, url_match_mode, form_selector, identifiers,
        normaliser, overwrite_policy, lookback_hours, message_kind, match_by_label, row_container,
-       row_label_cell, row_value_cell, is_builtin, is_active, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, 0, 1, ?, ?, ?)`);
+       row_label_cell, row_value_cell, auto_detect, is_builtin, is_active, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, 0, ?, 1, ?, ?, ?)`);
   const insertField = db.prepare(`INSERT OR IGNORE INTO rf_fields
       (adapter_id, source_code, analyte, selector_kind, selector, unit, decimals, is_required, sort_order, note)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -99,7 +101,7 @@ export function seedAdapters(db: DB, userId?: number | null): void {
       adapter.urlPattern, adapter.urlMatchMode, adapter.formSelector || null,
       JSON.stringify(adapter.identifiers), adapter.normaliser, adapter.overwritePolicy,
       adapter.lookbackHours, adapter.messageKind, adapter.formSelector || null,
-      adapter.isActive ? 1 : 0, adapter.notes ?? null, userId ?? null,
+      adapter.autoDetect === false ? 0 : 1, adapter.isActive ? 1 : 0, adapter.notes ?? null, userId ?? null,
     );
     const adapterId = Number(result.lastInsertRowid);
     adapter.fields.forEach((field, index) => {
@@ -133,6 +135,8 @@ export function publicAdapter(row: AdapterRow, fields?: FieldRow[]) {
     rowContainer: row.row_container,
     rowLabelCell: Number(row.row_label_cell ?? 1),
     rowValueCell: Number(row.row_value_cell ?? 0),
+    autoDetect: Number(row.auto_detect ?? 1) === 1,
+    serviceTitle: row.service_title ?? null,
     isBuiltin: Number(row.is_builtin) === 1,
     isActive: Number(row.is_active) === 1,
     notes: row.notes,

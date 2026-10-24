@@ -25,6 +25,13 @@
   if (window.__sechlimsResultFillerMounted) return;
   window.__sechlimsResultFillerMounted = true;
 
+  /**
+   * Shown because somebody asked for it, rather than because the page is one
+   * the filler knows. It then appears whatever it finds, and says so — a tool
+   * that answers "nothing here" is worth more than one that answers nothing.
+   */
+  let forced = Boolean(window.__sechlimsShowAnyway);
+
   const HOST_ID = 'sechlims-result-filler';
   const POSITION_KEY = 'rf_bubble_position';
   const RECHECK_MS = 1_500;
@@ -48,105 +55,364 @@
 
   /* ==========================================================================
      Reading the page
+     --------------------------------------------------------------------------
+     Not "find the selector I was given" but "read this form". A result page
+     prints the things that identify it — the sample barcode in a table cell,
+     the folder number under the photograph — and writes the name of each
+     parameter beside the box it belongs in. None of that is reachable through
+     input elements alone, which is why the first version could not see the
+     barcode at all.
+
+     So the page is read three ways, in the order a person would:
+
+       what a COLUMN HEADER says about the cell under it,
+       what a CAPTION says about the value beside it,
+       and failing both, what the value itself LOOKS like.
+
+     Nothing found this way is trusted on its own. Everything goes to SECHLIMS,
+     which decides which identifier it recognises and which reading belongs in
+     which box, and says on what grounds.
      ======================================================================= */
   const norm = value => String(value ?? '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
   const visible = el => Boolean(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const squash = value => String(value ?? '').replace(/[\u00a0\s]+/g, ' ').trim();
 
-  const FILLABLE = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]), select, textarea';
+  const FILLABLE = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]):not([type=date]):not([type=time]):not([type=search]), textarea';
+  const ROW = 'tr, [role="row"]';
+
+  /**
+   * An element's words, with the gaps the markup implies.
+   *
+   * `textContent` runs adjacent elements together: a label cell holding
+   * `MPV`, `*`, `(Laser Flowcytometry)` and the previous value `0` comes back
+   * as `MPV*(Laser Flowcytometry)0`, and the trailing value becomes part of the
+   * name. Joining the text nodes keeps them apart, which is what a person
+   * reading the cell sees.
+   */
+  function labelTextOf(element) {
+    if (!element) return '';
+    const parts = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const text = squash(walker.currentNode.textContent);
+      if (text) parts.push(text);
+      if (parts.length > 40) break;
+    }
+    return parts.join(' ');
+  }
+
+  /** The decoration a form puts on a label is not part of its name. */
+  function cleanLabel(raw) {
+    return squash(raw)
+      .replace(/[*\u2020\u2021]+/g, ' ')
+      .replace(/\s+0(\.0+)?\s*$/, '')
+      .replace(/\s*[:\uff1a]\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
   function isFillable(el) {
-    return Boolean(el) && !el.disabled && !el.readOnly && visible(el);
+    if (!el || el.disabled || el.readOnly) return false;
+    if (!visible(el)) return false;
+    if (elements.host && elements.host.contains(el)) return false;
+    const name = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''}`.toLowerCase();
+    // A search box on a result page is not a result box.
+    return !/search|filter|query|captcha|password/.test(name);
   }
 
   function textOf(el) {
     if (!el) return '';
     if ('value' in el && el.tagName !== 'BUTTON') return String(el.value ?? '').trim();
-    return String(el.textContent ?? '').trim();
+    return squash(el.textContent);
   }
 
-  /** The control a visible label points at. */
-  function controlForLabel(labelText) {
-    const wanted = norm(labelText);
-    if (!wanted) return { element: null, reason: 'no label given' };
-    const labels = Array.from(document.querySelectorAll('label'));
-    const matches = labels.filter(label => {
-      const text = norm(label.textContent);
-      return text === wanted || text.startsWith(wanted);
+  /** The cells of a row, whether the page builds rows from a table or from divs. */
+  function cellsOf(row) {
+    return Array.from(row.children).filter(cell =>
+      /^(TD|TH)$/.test(cell.tagName) || cell.getAttribute('role') === 'cell' || cell.getAttribute('role') === 'columnheader');
+  }
+
+  /* ---- identifiers ------------------------------------------------------- */
+  let detectionRules = { identifierRules: [], shapes: [] };
+
+  function identifierKindOf(label) {
+    const clean = cleanLabel(label).toUpperCase().replace(/[.\u00a0]/g, '').replace(/\s+/g, ' ').trim();
+    if (!clean || clean.length > 40) return null;
+    for (const rule of detectionRules.identifierRules || []) {
+      for (const source of rule.patterns) {
+        let pattern;
+        try { pattern = new RegExp(source); } catch { continue; }
+        if (pattern.test(clean)) return { kind: rule.kind, weight: rule.weight };
+      }
+    }
+    return null;
+  }
+
+  /** A value that identifies a sample even where nothing labels it. */
+  function looksLikeIdentifier(value) {
+    const text = squash(value).toUpperCase();
+    if (!text || text.length < 5 || text.length > 32) return null;
+    if (/^\d{1,2}[-/ ]\d{1,2}[-/ ]\d{2,4}$/.test(text)) return null;
+    if (/^\d{4}[-/]\d{2}[-/]\d{2}/.test(text)) return null;
+    if (/^(NA|N\/A|NIL|NONE|-)$/.test(text)) return null;
+    for (const shape of detectionRules.shapes || []) {
+      let pattern;
+      try { pattern = new RegExp(shape.pattern); } catch { continue; }
+      if (pattern.test(text)) return { kind: shape.kind, weight: shape.weight, description: shape.description };
+    }
+    return null;
+  }
+
+  function addIdentifier(found, candidate) {
+    const value = squash(candidate.value);
+    if (!value || value === '-' || value.length > 64) return;
+    // A value the page LABELLED is not also guessed at by its shape: an
+    // insurance number that happens to be ten digits long is an insurance
+    // number, and offering it as a second sample identifier only wastes a
+    // lookup and clutters what the bench is shown.
+    if (candidate.source === 'shape') {
+      for (const held of found.values()) {
+        if (norm(held.value) === norm(value) && held.source !== 'shape') return;
+      }
+    }
+    const key = `${candidate.kind}:${norm(value)}`;
+    const held = found.get(key);
+    if (held) {
+      // The same number printed twice on one page — the barcode appears in
+      // Sample Details and again in Sample Remarks — is corroboration.
+      held.confidence = Math.min(100, held.confidence + 6);
+      if (!held.label && candidate.label) held.label = candidate.label;
+      return;
+    }
+    found.set(key, {
+      kind: candidate.kind,
+      label: cleanLabel(candidate.label).slice(0, 80),
+      value,
+      source: candidate.source,
+      confidence: Math.min(100, candidate.confidence),
     });
-    for (const label of matches) {
-      const target = label.htmlFor ? document.getElementById(label.htmlFor) : label.querySelector(FILLABLE);
-      const sibling = target || (label.parentElement ? label.parentElement.querySelector(FILLABLE) : null);
-      if (isFillable(sibling)) return { element: sibling, reason: null };
-    }
-    return { element: null, reason: matches.length ? 'the label was found but no field belongs to it' : 'no label with that text' };
   }
 
-  /**
-   * The control in the row whose label cell reads like this parameter.
-   *
-   * This is what makes a result grid fillable without anybody configuring a
-   * selector for every parameter: the row says "Haemoglobin", so the box in
-   * that row is the haemoglobin box. A label cell that carries its unit —
-   * "Haemoglobin (g/dL)" — still matches, because the comparison is on the
-   * parameter rather than on the whole cell.
-   */
-  function controlInRow(labels, meta) {
-    const wanted = labels.map(norm).filter(Boolean);
-    if (!wanted.length) return { element: null, reason: 'no row label given' };
+  /** Column header above a cell: how a sample barcode is printed on every LIS. */
+  function identifiersFromTables(found) {
+    for (const table of document.querySelectorAll('table')) {
+      if (elements.host && elements.host.contains(table)) continue;
+      const rows = Array.from(table.querySelectorAll(ROW));
+      if (rows.length < 2) continue;
+      const headerCells = cellsOf(rows[0]);
+      if (!headerCells.length) continue;
+      const headers = headerCells.map(cell => cleanLabel(labelTextOf(cell)));
+      const interesting = headers.map(identifierKindOf);
+      if (!interesting.some(Boolean)) continue;
 
-    const containers = meta.rowContainer
-      ? Array.from(document.querySelectorAll(meta.rowContainer))
-      : [document];
-    const labelIndex = Math.max(1, Number(meta.rowLabelCell || 1)) - 1;
-    const valueIndex = Number(meta.rowValueCell || 0);
-
-    let sawRow = false;
-    for (const container of containers) {
-      const rows = Array.from(container.querySelectorAll('tr, [role="row"]'));
-      for (const row of rows) {
-        const cells = Array.from(row.children).filter(cell => /^(TD|TH)$/.test(cell.tagName) || cell.getAttribute('role') === 'cell');
-        if (cells.length < 2) continue;
-        const labelCell = cells[labelIndex];
-        if (!labelCell) continue;
-        const cellText = norm(labelCell.textContent);
-        if (!cellText) continue;
-        const hit = wanted.some(label => cellText === label || cellText.startsWith(label));
-        if (!hit) continue;
-        sawRow = true;
-
-        const searchOrder = valueIndex > 0 && cells[valueIndex - 1]
-          ? [cells[valueIndex - 1]]
-          : cells.slice(1).reverse();
-        for (const cell of searchOrder) {
-          const control = Array.from(cell.querySelectorAll(FILLABLE)).find(isFillable);
-          if (control) return { element: control, reason: null };
-        }
+      for (const row of rows.slice(1, 12)) {
+        const cells = cellsOf(row);
+        if (cells.length !== headers.length) continue;
+        interesting.forEach((rule, column) => {
+          if (!rule) return;
+          const cell = cells[column];
+          const value = squash(labelTextOf(cell));
+          if (!value) return;
+          addIdentifier(found, {
+            kind: rule.kind, label: headers[column], value,
+            source: 'header', confidence: rule.weight,
+          });
+        });
       }
     }
-    return { element: null, reason: sawRow ? 'the row was found but holds no field to fill' : 'no row with that label' };
   }
 
-  /** One field, found exactly once — or not used at all. */
-  function resolveControl(spec, meta) {
-    const kind = spec.selectorKind || 'row';
-    const selector = String(spec.selector || '').trim();
-    if (!selector) return { element: null, reason: 'no selector configured' };
+  /** A caption and the value beside it: `NHIA No. 29366816`. */
+  function identifiersFromCaptions(found) {
+    const captions = document.querySelectorAll('b, strong, label, th, td, span, div, dt, p');
+    for (const caption of captions) {
+      if (elements.host && elements.host.contains(caption)) continue;
+      const own = squash(Array.from(caption.childNodes)
+        .filter(node => node.nodeType === 3)
+        .map(node => node.textContent).join(' '));
+      const whole = squash(caption.textContent);
+      const label = own || whole;
+      if (!label || label.length > 40) continue;
+      const rule = identifierKindOf(label);
+      if (!rule) continue;
 
-    try {
-      if (kind === 'css' || kind === 'name' || kind === 'id') {
-        const query = kind === 'css' ? selector
-          : kind === 'name' ? `[name="${CSS.escape(selector)}"]`
-          : `#${CSS.escape(selector)}`;
-        const found = Array.from(document.querySelectorAll(query)).filter(isFillable);
-        if (found.length === 1) return { element: found[0], reason: null };
-        if (found.length > 1) return { element: null, reason: `${found.length} fields match that selector, so none was filled` };
-        return { element: null, reason: 'no field matches that selector' };
+      // The value is whatever follows the caption: the rest of its own text,
+      // the next cell, or the next node along.
+      const candidates = [];
+      if (whole.length > label.length) candidates.push(whole.slice(label.length));
+      const sibling = caption.nextElementSibling;
+      if (sibling) candidates.push(squash(sibling.textContent));
+      let node = caption.nextSibling;
+      while (node && candidates.length < 4) {
+        if (node.nodeType === 3 && squash(node.textContent)) candidates.push(squash(node.textContent));
+        node = node.nextSibling;
       }
-      if (kind === 'label') return controlForLabel(selector);
-      return controlInRow([selector, ...(spec.aliases || [])], meta);
-    } catch (error) {
-      return { element: null, reason: `that selector could not be read: ${error.message}` };
+      if (caption.htmlFor) {
+        const target = document.getElementById(caption.htmlFor);
+        if (target) candidates.push(textOf(target));
+      }
+
+      for (const candidate of candidates) {
+        const value = squash(candidate).replace(/^[:\-\u2013\s]+/, '');
+        if (!value || value.length > 64) continue;
+        if (identifierKindOf(value)) continue;
+        addIdentifier(found, { kind: rule.kind, label, value, source: 'caption', confidence: rule.weight - 4 });
+        break;
+      }
     }
+  }
+
+  /** A box somebody types the sample number into, where the form has one. */
+  function identifiersFromInputs(found) {
+    for (const input of document.querySelectorAll('input, select')) {
+      if (!isFillable(input) && input.tagName !== 'SELECT') continue;
+      const value = textOf(input);
+      if (!value) continue;
+      const names = [input.name, input.id, input.placeholder, input.getAttribute('aria-label')].filter(Boolean);
+      let rule = null;
+      let label = '';
+      for (const name of names) {
+        rule = identifierKindOf(String(name).replace(/[_\-]+/g, ' '));
+        if (rule) { label = String(name); break; }
+      }
+      if (!rule) {
+        const row = input.closest(ROW);
+        const first = row ? cellsOf(row)[0] : null;
+        if (first) { rule = identifierKindOf(labelTextOf(first)); label = cleanLabel(labelTextOf(first)); }
+      }
+      if (!rule) continue;
+      addIdentifier(found, { kind: rule.kind, label, value, source: 'input', confidence: rule.weight });
+    }
+  }
+
+  /** Nothing labelled it, but it is shaped like a sample number. */
+  function identifiersFromShape(found) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: node => {
+        if (elements.host && elements.host.contains(node.parentElement)) return NodeFilter.FILTER_REJECT;
+        const parent = node.parentElement;
+        if (!parent || /^(SCRIPT|STYLE|NOSCRIPT)$/.test(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        return squash(node.textContent) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      },
+    });
+    let seen = 0;
+    while (walker.nextNode() && seen < 4_000) {
+      seen++;
+      const text = squash(walker.currentNode.textContent);
+      if (text.length > 64) continue;
+      const shape = looksLikeIdentifier(text);
+      if (!shape) continue;
+      addIdentifier(found, { kind: shape.kind, label: '', value: text, source: 'shape', confidence: shape.weight });
+    }
+  }
+
+  function detectIdentifiers() {
+    const found = new Map();
+    // Labelled first, guessed last, so a guess never displaces a label.
+    identifiersFromTables(found);
+    identifiersFromCaptions(found);
+    identifiersFromInputs(found);
+    identifiersFromShape(found);
+    const rank = { sample: 0, request: 1, patient: 2, other: 3 };
+    return Array.from(found.values())
+      .sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9) || b.confidence - a.confidence)
+      .slice(0, 24);
+  }
+
+  /* ---- the result fields ------------------------------------------------- */
+
+  /** What the form calls the box: the row it sits in, its label, or its name. */
+  function labelForControl(control) {
+    const row = control.closest(ROW);
+    if (row) {
+      const cells = cellsOf(row);
+      const inputs = cells.flatMap(cell => Array.from(cell.querySelectorAll(FILLABLE)).filter(isFillable));
+      if (inputs.length <= 1 && cells.length) {
+        const label = cleanLabel(labelTextOf(cells[0]));
+        if (label) return { label, row, cells };
+      }
+    }
+    if (control.id) {
+      const tag = document.querySelector(`label[for="${CSS.escape(control.id)}"]`);
+      const label = tag ? cleanLabel(labelTextOf(tag)) : '';
+      if (label) return { label, row, cells: row ? cellsOf(row) : [] };
+    }
+    const wrapping = control.closest('label');
+    if (wrapping) {
+      const label = cleanLabel(labelTextOf(wrapping).replace(textOf(control), ''));
+      if (label) return { label, row, cells: row ? cellsOf(row) : [] };
+    }
+    // A container a few levels up that holds this one box and some words.
+    let node = control.parentElement;
+    for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+      const inputs = Array.from(node.querySelectorAll(FILLABLE)).filter(isFillable);
+      if (inputs.length !== 1) break;
+      const label = cleanLabel(labelTextOf(node).replace(textOf(control), ''));
+      if (label && label.length <= 80) return { label, row, cells: row ? cellsOf(row) : [] };
+    }
+    const previous = control.previousElementSibling;
+    const label = previous ? cleanLabel(labelTextOf(previous)) : '';
+    return { label, row, cells: row ? cellsOf(row) : [] };
+  }
+
+  /** The unit beside a result box, where the form offers one. */
+  function unitNear(control, row) {
+    const scope = row || control.parentElement;
+    if (!scope) return null;
+    for (const select of scope.querySelectorAll('select')) {
+      const value = squash(select.options?.[select.selectedIndex]?.textContent ?? select.value);
+      if (!value) continue;
+      if (/^select\b/i.test(value) || /^--/.test(value)) return null;
+      return value;
+    }
+    return null;
+  }
+
+  /** The reference range printed beside the box, kept for the record only. */
+  function referenceNear(cells, labelCell) {
+    for (let i = cells.length - 1; i > labelCell; i--) {
+      const text = squash(cells[i].textContent);
+      if (!text || text.length > 120) continue;
+      if (/\d/.test(text) && /[-\u2013]|to\b|</.test(text)) return text;
+    }
+    return null;
+  }
+
+  /** Every box on this page that takes a result, with what the form calls it. */
+  let fieldHandles = new Map();
+
+  function detectFields() {
+    fieldHandles = new Map();
+    const fields = [];
+    const controls = Array.from(document.querySelectorAll(FILLABLE)).filter(isFillable);
+
+    for (const control of controls) {
+      const { label, row, cells } = labelForControl(control);
+      if (!label) continue;
+      // A box whose label names an identifier is not a result box.
+      if (identifierKindOf(label)) continue;
+      // Nor is a free-text remark or a signature.
+      if (/remark|comment|note|reason|signature|verified|checked/i.test(label)) continue;
+      if (label.length > 90) continue;
+
+      const index = fields.length;
+      fieldHandles.set(index, control);
+      fields.push({
+        index,
+        label,
+        unit: unitNear(control, row),
+        referenceText: cells.length ? referenceNear(cells, 0) : null,
+        current: textOf(control),
+        kind: control.tagName === 'SELECT' ? 'select' : 'text',
+      });
+      if (fields.length >= 300) break;
+    }
+    return fields;
+  }
+
+  /** One pass over the page: what identifies it, and what it is asking for. */
+  function scanPage() {
+    return { identifiers: detectIdentifiers(), fields: detectFields() };
   }
 
   /**
@@ -154,8 +420,9 @@
    *
    * Assigning to `.value` is invisible to React, Vue and anything else holding
    * its own copy of the field's state: the box shows the number and the form
-   * saves what the person last typed. The native setter plus the two events is
-   * what makes the framework agree with the screen.
+   * saves what the person last typed. The native setter plus the events is what
+   * makes the framework agree with the screen. A plain PHP page needs none of
+   * it and is unharmed by it.
    */
   function setValue(element, value) {
     const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
@@ -176,6 +443,7 @@
 
     element.dispatchEvent(new Event('input', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('blur', { bubbles: true }));
     return true;
   }
 
@@ -184,24 +452,6 @@
     element.style.transition = 'box-shadow .25s ease';
     element.style.boxShadow = tone === 'ok' ? '0 0 0 2px #2DB7B2' : '0 0 0 2px #D97706';
     setTimeout(() => { element.style.boxShadow = previous; }, 1400);
-  }
-
-  /* ==========================================================================
-     The identifier on the form
-     ======================================================================= */
-  function readIdentifiers(adapter) {
-    const out = {};
-    for (const spec of adapter.identifiers || []) {
-      const found = resolveControl({ selectorKind: spec.selectorKind, selector: spec.selector }, adapter);
-      let value = found.element ? textOf(found.element) : '';
-      if (!value && spec.selectorKind === 'css') {
-        // A form that shows its sample number as text rather than in a box.
-        const node = document.querySelector(spec.selector);
-        if (node) value = String(node.textContent ?? '').trim();
-      }
-      if (value) out[spec.kind || 'sample'] = value;
-    }
-    return out;
   }
 
   /** Is this page actually the form, or only its address? */
@@ -218,7 +468,7 @@
 :host { all: initial; }
 *, *::before, *::after { box-sizing: border-box; }
 .wrap { position: fixed; z-index: 2147483000; font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-  color: #16202E; }
+  color: #16202E; pointer-events: auto; }
 .fab { width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: grab; position: relative;
   display: flex; align-items: center; justify-content: center; color: #fff; touch-action: none;
   background: radial-gradient(circle at 30% 25%, #2A5CA8, #16284B); box-shadow: 0 8px 22px rgba(10, 22, 44, .34);
@@ -298,7 +548,8 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
      ======================================================================= */
   const state = {
     adapter: null,
-    identifiers: {},
+    /** What the last scan of the page found. */
+    scan: { identifiers: [], fields: [] },
     verdict: null,
     busy: false,
     open: false,
@@ -309,6 +560,8 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     heldPlan: null,
     lastUrl: location.href,
     lastIdentifier: '',
+    /** The signature of the last page state scanned, so a re-scan is cheap. */
+    lastShape: '',
   };
 
   let shadow = null;
@@ -318,7 +571,17 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     if (document.getElementById(HOST_ID)) return;
     const host = document.createElement('div');
     host.id = HOST_ID;
-    host.style.all = 'initial';
+    /*
+     * The host takes no space and inherits nothing.
+     *
+     * `all: initial` alone leaves it an inline box sitting in the page's flow,
+     * which on a long form puts it a thousand pixels below the fold and at the
+     * mercy of whatever the page does to its own layout. Pinned, sized to
+     * nothing and transparent to the pointer, it cannot be pushed about, and
+     * the panel inside the shadow decides for itself where it sits.
+     */
+    host.style.cssText = 'all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0;'
+      + ' margin: 0; padding: 0; border: 0; z-index: 2147483000; pointer-events: none;';
     shadow = host.attachShadow({ mode: 'closed' });
 
     const style = document.createElement('style');
@@ -340,7 +603,8 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
       </div>`;
 
     shadow.append(style, wrap);
-    document.documentElement.appendChild(host);
+    // Inside the body where a page expects its own elements, not after it.
+    (document.body || document.documentElement).appendChild(host);
 
     elements = {
       host, wrap,
@@ -481,16 +745,23 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     setDot();
     if (!elements.panel || !state.open) return;
 
-    elements.formName.textContent = state.adapter ? state.adapter.name : 'No form recognised on this page';
+    elements.formName.textContent = state.adapter ? state.adapter.name : 'No form configured for this page';
 
     const verdict = state.verdict;
     const chosen = verdict?.transmissions?.find(t => String(t.id) === String(state.chosenId)) ?? verdict?.transmissions?.[0];
-    const identifier = state.identifiers.sample || state.identifiers.request || state.identifiers.qc_lot || state.identifiers.patient || '';
+    const sample = verdict?.matchedOn ?? primaryIdentifier();
+    const patient = state.scan.identifiers.find(i => i.kind === 'patient');
 
     const parts = [];
 
+    // What the page was read as, first: the bench should be able to see that
+    // the right sample was picked up before looking at anything else.
     parts.push(`<div class="card">
-      <div class="row"><span>Identifier</span><strong>${identifier ? escapeHtml(identifier) : '<em style="color:#B91C1C;font-style:normal">not found on this form</em>'}</strong></div>
+      <div class="row"><span>${escapeHtml(sample?.label || 'Sample')}</span><strong>${sample?.value
+        ? escapeHtml(sample.value)
+        : '<em style="color:#B91C1C;font-style:normal">no sample identifier found on this page</em>'}</strong></div>
+      ${patient ? `<div class="row"><span>${escapeHtml(patient.label || 'Patient')}</span><strong>${escapeHtml(patient.value)}</strong></div>` : ''}
+      <div class="row"><span>Read</span><strong>${state.scan.fields.length} result field(s)</strong></div>
       ${verdict ? `<div class="row"><span>Status</span><span class="chip ${TONES[verdict.status] || 'idle'}">${escapeHtml(verdict.label)}</span></div>` : ''}
       ${verdict?.summary ? `<p class="msg ${TONES[verdict.status] === 'crit' ? 'crit' : TONES[verdict.status] === 'warn' ? 'warn' : ''}">${escapeHtml(verdict.summary)}</p>` : ''}
       ${(verdict?.warnings || []).map(w => `<p class="msg warn">${escapeHtml(w)}</p>`).join('')}
@@ -567,29 +838,56 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
   async function detectAdapter() {
     const response = await ask('adapters', { url: location.href });
     if (!response.ok) { state.error = response.error; state.adapter = null; return false; }
+    // The rules for recognising an identifier come from SECHLIMS, so the page
+    // and the server can never disagree about what a barcode looks like.
+    if (response.data.detection) detectionRules = response.data.detection;
     const candidates = (response.data.matched || []).filter(formPresent);
     state.adapter = candidates[0] || null;
     state.error = null;
     return Boolean(state.adapter);
   }
 
+  /** The identifier a fill would be filed against, as the page gave it. */
+  function primaryIdentifier() {
+    return state.scan.identifiers.find(i => i.kind === 'sample')
+      ?? state.scan.identifiers.find(i => i.kind === 'request')
+      ?? state.scan.identifiers.find(i => i.kind === 'patient')
+      ?? null;
+  }
+
+  /** Enough of the page's state to notice it has changed, without re-reading it. */
+  function pageShape() {
+    const identifiers = state.scan.identifiers.map(i => `${i.kind}=${i.value}`).join('|');
+    return `${location.href}#${identifiers}#${state.scan.fields.length}`;
+  }
+
   async function refresh({ force = false } = {}) {
     if (!state.adapter && !(await detectAdapter())) { render(); return; }
-    state.identifiers = readIdentifiers(state.adapter);
-    const identifier = state.identifiers.sample || state.identifiers.request || state.identifiers.qc_lot || state.identifiers.patient || '';
+
+    state.scan = scanPage();
+    const identifier = primaryIdentifier();
+    const shape = pageShape();
 
     if (!identifier) {
-      state.verdict = { status: 'no_identifier', label: 'No identifier on the form', summary: 'This form carries no sample identifier yet. Enter or scan it, then re-check.', mayFill: false, transmissions: [] };
-      state.lastIdentifier = '';
+      state.verdict = {
+        status: 'no_identifier',
+        label: 'No identifier on the page',
+        summary: state.scan.fields.length
+          ? 'This page carries result fields but nothing that identifies the sample. Nothing will be filled.'
+          : 'Nothing on this page identifies a sample yet.',
+        mayFill: false, transmissions: [],
+      };
+      state.lastShape = shape;
       render();
       return;
     }
-    if (!force && identifier === state.lastIdentifier && state.verdict) { render(); return; }
+    if (!force && shape === state.lastShape && state.verdict) { render(); return; }
 
     state.busy = true; state.error = null; state.notice = null; state.held = []; render();
     const response = await ask('verify', {
       adapterCode: state.adapter.adapterCode,
-      identifiers: state.identifiers,
+      detectedIdentifiers: state.scan.identifiers,
+      detectedFields: state.scan.fields,
       url: location.href,
       title: document.title,
     });
@@ -600,7 +898,8 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     } else {
       state.verdict = response.data;
       state.chosenId = response.data.transmissions?.[0]?.id ?? '';
-      state.lastIdentifier = identifier;
+      state.lastShape = shape;
+      state.lastIdentifier = identifier.value;
     }
     render();
   }
@@ -608,18 +907,20 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
   /**
    * Fill the form.
    *
-   * The plan is resolved against the page BEFORE anything is written: if a
-   * field the mapping calls required cannot be found exactly once, nothing is
-   * filled at all and the bubble says which one. A half-filled panel that looks
-   * complete is the one outcome worse than no help.
+   * The page is read AGAIN first. Between the bubble appearing and the button
+   * being pressed a person may have opened a panel, switched sample or had the
+   * page reload a section under them, and filling a plan built against the page
+   * as it used to be is how a number lands in the wrong box.
    */
   async function populate({ confirmed, overwrite }) {
     if (!state.adapter || !state.verdict?.mayFill) return;
     state.busy = true; state.error = null; state.notice = null; render();
 
+    state.scan = scanPage();
     const response = await ask('populate', {
       adapterCode: state.adapter.adapterCode,
-      identifiers: state.identifiers,
+      detectedIdentifiers: state.scan.identifiers,
+      detectedFields: state.scan.fields,
       messageId: state.chosenId || undefined,
       confirmed: Boolean(confirmed),
       url: location.href,
@@ -629,41 +930,42 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
 
     if (!response.ok) { state.error = response.error; render(); return; }
     const plan = response.data;
+    const entries = plan.mode === 'detected' ? resolveAssignments(plan) : resolveConfigured(plan);
 
-    const resolved = plan.fields.map(field => ({ field, ...resolveControl(field, plan) }));
-    const unresolvedRequired = resolved.filter(entry => !entry.element && entry.field.required);
+    const unresolvedRequired = entries.filter(entry => !entry.element && entry.required);
     if (unresolvedRequired.length) {
       await ask('outcome', {
-        fillUid: plan.fillUid, filled: 0, skipped: plan.fields.length, abandoned: false,
-        failures: unresolvedRequired.map(entry => `${entry.field.analyte}: ${entry.reason}`),
+        fillUid: plan.fillUid, filled: 0, skipped: entries.length, abandoned: false,
+        failures: unresolvedRequired.map(entry => `${entry.label}: ${entry.reason}`),
       });
-      state.error = `Stopped before filling anything: ${unresolvedRequired.map(e => e.field.analyte).join(', ')} could not be found on this form (${unresolvedRequired[0].reason}).`;
+      state.error = `Stopped before filling anything: ${unresolvedRequired.map(e => e.label).join(', ')} could not be found on this form (${unresolvedRequired[0].reason}).`;
       render();
       return;
     }
 
-    const failures = resolved.filter(entry => !entry.element).map(entry => `${entry.field.analyte}: ${entry.reason}`);
-    const targets = resolved.filter(entry => entry.element);
+    const failures = entries.filter(entry => !entry.element).map(entry => `${entry.label}: ${entry.reason}`);
+    for (const left of plan.unmatched || []) {
+      failures.push(`${left.analyte || left.code}: this form has no field for it`);
+    }
+    const targets = entries.filter(entry => entry.element);
     const occupied = targets.filter(entry => textOf(entry.element) !== '');
     const free = targets.filter(entry => textOf(entry.element) === '');
 
     let filled = 0;
     let overwritten = 0;
     for (const entry of free) {
-      if (setValue(entry.element, entry.field.value)) { filled++; flash(entry.element, 'ok'); }
-      else failures.push(`${entry.field.analyte}: this field would not take the value ${entry.field.value}`);
+      if (setValue(entry.element, entry.value)) { filled++; flash(entry.element, 'ok'); }
+      else failures.push(`${entry.label}: this field would not take the value ${entry.value}`);
     }
 
     const policy = plan.overwritePolicy || 'confirm';
     if (occupied.length && (overwrite || policy === 'allow')) {
       for (const entry of occupied) {
-        if (setValue(entry.element, entry.field.value)) { filled++; overwritten++; flash(entry.element, 'warn'); }
+        if (setValue(entry.element, entry.value)) { filled++; overwritten++; flash(entry.element, 'warn'); }
       }
     }
 
     if (occupied.length && !overwrite && policy === 'confirm') {
-      // Held, not skipped: the person decides, and the outcome is reported once
-      // they have.
       state.held = occupied;
       state.heldPlan = { plan, filled, overwritten, failures };
       state.notice = `${filled} field(s) filled.`;
@@ -673,9 +975,74 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
 
     const skipped = (occupied.length && !overwrite && policy === 'never') ? occupied.length : 0;
     await report(plan, filled, skipped + failures.length, overwritten, failures);
-    state.notice = `${filled} field(s) filled${skipped ? `, ${skipped} left as they were` : ''}${failures.length ? `, ${failures.length} not found` : ''}. Review and save as usual.`;
+    state.notice = `${filled} field(s) filled${skipped ? `, ${skipped} left as they were` : ''}${failures.length ? `, ${failures.length} not filled` : ''}. Review and save as usual.`;
     state.error = failures.length ? failures.join(' · ') : null;
     render();
+  }
+
+  /**
+   * A plan SECHLIMS built against the page's own fields.
+   *
+   * The handles are the ones this scan created, so no selector is resolved and
+   * nothing can be mistaken for something else: assignment 7 is the box the
+   * scanner labelled 7 and no other.
+   */
+  function resolveAssignments(plan) {
+    return (plan.assignments || []).map(assignment => {
+      const element = fieldHandles.get(assignment.index);
+      return {
+        label: assignment.fieldLabel || assignment.analyte,
+        value: assignment.value,
+        required: Boolean(assignment.required),
+        element: element && isFillable(element) ? element : null,
+        reason: element ? 'that field is no longer editable' : 'that field is no longer on the page',
+      };
+    });
+  }
+
+  /** A plan built from configured selectors, for a form that reads as nothing. */
+  function resolveConfigured(plan) {
+    return (plan.fields || []).map(field => {
+      const found = resolveControl(field, plan);
+      return {
+        label: field.analyte || field.sourceCode,
+        value: field.value,
+        required: Boolean(field.required),
+        element: found.element,
+        reason: found.reason || 'not found',
+      };
+    });
+  }
+
+  /** One field, found exactly once — or not used at all. */
+  function resolveControl(spec, meta) {
+    const kind = spec.selectorKind || 'row';
+    const selector = String(spec.selector || '').trim();
+    if (!selector) return { element: null, reason: 'no selector configured' };
+    try {
+      if (kind === 'css' || kind === 'name' || kind === 'id') {
+        const query = kind === 'css' ? selector
+          : kind === 'name' ? `[name="${CSS.escape(selector)}"]`
+          : `#${CSS.escape(selector)}`;
+        const found = Array.from(document.querySelectorAll(query)).filter(isFillable);
+        if (found.length === 1) return { element: found[0], reason: null };
+        if (found.length > 1) return { element: null, reason: `${found.length} fields match that selector, so none was filled` };
+        return { element: null, reason: 'no field matches that selector' };
+      }
+      // Everything else is a name on the page, which the scanner already read.
+      const wanted = [selector, ...(spec.aliases || [])].map(norm);
+      for (const [index, control] of fieldHandles) {
+        const field = state.scan.fields[index];
+        if (!field) continue;
+        const label = norm(field.label);
+        if (wanted.some(want => want && (label === want || label.startsWith(want)))) {
+          return { element: control, reason: null };
+        }
+      }
+      return { element: null, reason: 'no field on this page carries that name' };
+    } catch (error) {
+      return { element: null, reason: `that selector could not be read: ${error.message}` };
+    }
   }
 
   async function fillHeld() {
@@ -684,8 +1051,8 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     let filled = context.filled;
     let overwritten = context.overwritten;
     for (const entry of state.held) {
-      if (setValue(entry.element, entry.field.value)) { filled++; overwritten++; flash(entry.element, 'warn'); }
-      else context.failures.push(`${entry.field.analyte}: this field would not take the value`);
+      if (setValue(entry.element, entry.value)) { filled++; overwritten++; flash(entry.element, 'warn'); }
+      else context.failures.push(`${entry.label}: this field would not take the value`);
     }
     await report(context.plan, filled, context.failures.length, overwritten, context.failures);
     state.notice = `${filled} field(s) filled, ${overwritten} overwritten. Review and save as usual.`;
@@ -713,18 +1080,38 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
      bubble follows the address rather than the load, and re-reads the
      identifier as the person works.
      ======================================================================= */
+  /**
+   * Decide whether this page is one of ours, and get ready on it.
+   *
+   * The scan runs whether or not the panel is open, so the bubble's dot is
+   * already green by the time somebody looks at it: on a form the laboratory
+   * uses forty times a morning, the answer should be waiting rather than
+   * fetched when asked for.
+   */
   async function evaluate() {
     const matched = await detectAdapter();
-    if (!matched) {
+    if (!matched && !forced) {
       if (!state.open) unmount();
       return;
     }
     mount();
-    if (state.open) await refresh();
-    else {
-      state.identifiers = readIdentifiers(state.adapter);
-      setDot();
+    if (!matched) {
+      // Read the page anyway: "23 result fields but no form configured for this
+      // address" tells an administrator exactly what to do next.
+      state.scan = scanPage();
+      const identifier = primaryIdentifier();
+      state.verdict = {
+        status: 'no_identifier',
+        label: 'Not a form the filler knows',
+        summary: `No form is configured for this address. The page offers ${state.scan.fields.length} result field(s)`
+          + `${identifier ? ` and an identifier that reads ${identifier.value}` : ' and no identifier this filler recognises'}`
+          + '. Add a form for it under Result Filler in SECHLIMS, or use Teach this form.',
+        mayFill: false, transmissions: [],
+      };
+      render();
+      return;
     }
+    await refresh();
   }
 
   function watchNavigation() {
@@ -739,23 +1126,92 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     const onMove = () => {
       if (location.href === state.lastUrl) return;
       state.lastUrl = location.href;
-      state.verdict = null; state.lastIdentifier = ''; state.held = []; state.notice = null;
+      state.verdict = null; state.lastShape = ''; state.held = []; state.notice = null;
       void evaluate();
     };
     window.addEventListener('sechlims:navigated', onMove);
     window.addEventListener('popstate', onMove);
+
+    /*
+     * A result page changes under the person working on it: a panel is
+     * expanded, a sample is chosen, a barcode is scanned into a box that was
+     * empty. Re-reading the page is cheap; asking SECHLIMS again is not, so it
+     * happens only when what was read has actually changed.
+     */
     setInterval(() => {
       onMove();
-      // The identifier can arrive after the page does — a barcode scanned into
-      // a box that was empty when the bubble appeared.
-      if (state.adapter && !state.open) {
-        const identifiers = readIdentifiers(state.adapter);
-        const next = identifiers.sample || identifiers.request || identifiers.qc_lot || '';
-        if (next && next !== state.lastIdentifier) { state.identifiers = identifiers; void refresh(); }
-      }
+      if (!state.adapter || state.busy || state.held.length) return;
+      const previous = pageShape();
+      state.scan = scanPage();
+      if (pageShape() !== previous) void refresh();
+      else setDot();
     }, RECHECK_MS);
+
+    // A page that builds its sections after load — LHIMS expands its panels —
+    // is caught by watching for them rather than by polling faster.
+    try {
+      const observer = new MutationObserver(() => {
+        if (!state.adapter || state.busy || state.open || state.held.length) return;
+        clearTimeout(observer.timer);
+        observer.timer = setTimeout(() => {
+          const previous = pageShape();
+          state.scan = scanPage();
+          if (pageShape() !== previous) void refresh();
+        }, 700);
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    } catch { /* an older browser polls instead */ }
+
     window.addEventListener('resize', () => { if (state.open) clampIntoView(); else restorePosition(); });
+
+    // A page that redraws its body would otherwise carry the bubble away with
+    // it, and nothing would say why it vanished.
+    setInterval(() => {
+      if (!state.adapter && !forced) return;
+      if (elements.host && !document.contains(elements.host)) {
+        (document.body || document.documentElement).appendChild(elements.host);
+        restorePosition();
+      }
+    }, 2_000);
   }
+
+  /**
+   * "Show the filler on this page now."
+   *
+   * The content script runs on every page of an allowed site, and on one it
+   * does not recognise it goes quiet. Re-injecting it then does nothing — it
+   * is already there — so the popup asks it to show itself instead, and it
+   * appears and says what it found.
+   */
+  try {
+    chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+      // What this page was read as — so the popup can answer "why is nothing
+      // being offered?" without the person having to find the bubble first.
+      if (message?.type === 'rf-state') {
+        const identifier = primaryIdentifier();
+        respond({
+          ok: true,
+          state: {
+            adapter: state.adapter?.name ?? null,
+            identifier: identifier?.value ?? null,
+            identifierLabel: identifier?.label ?? null,
+            fields: state.scan.fields.length,
+            status: state.verdict?.label ?? null,
+            mayFill: Boolean(state.verdict?.mayFill),
+          },
+        });
+        return true;
+      }
+      if (message?.type !== 'rf-show') return false;
+      forced = true;
+      void (async () => {
+        await evaluate();
+        if (elements.panel) toggle(true);
+        respond({ ok: true, shown: Boolean(document.getElementById(HOST_ID)) });
+      })();
+      return true;
+    });
+  } catch { /* an injected script with no messaging still works on its own */ }
 
   void (async () => {
     await evaluate();

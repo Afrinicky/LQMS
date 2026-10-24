@@ -23,7 +23,7 @@ import { Facts, Field, Note, Panel, Pick, Switch, when, type SectionProps } from
  * result, and nothing here can make the extension do so.
  */
 
-const TABS = ['Install', 'Browsers', 'Forms', 'Field mappings', 'Activity'] as const;
+const TABS = ['Install', 'Browsers', 'Forms', 'Parameter names', 'Field mappings', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 type Adapter = {
@@ -32,6 +32,7 @@ type Adapter = {
   identifiers: Array<{ kind: string; selectorKind: string; selector: string; primary?: boolean }>;
   normaliser: string; overwritePolicy: string; lookbackHours: number; messageKind: string;
   matchByLabel: boolean; rowContainer: string | null; rowLabelCell: number; rowValueCell: number;
+  autoDetect: boolean; serviceTitle: string | null;
   isBuiltin: boolean; isActive: boolean; notes: string | null;
   fieldCount?: number; fillCount?: number;
 };
@@ -81,6 +82,7 @@ const blankAdapter = (): Adapter => ({
   identifiers: [{ kind: 'sample', selectorKind: 'css', selector: '', primary: true }],
   normaliser: 'alnum', overwritePolicy: 'confirm', lookbackHours: 72, messageKind: 'patient',
   matchByLabel: true, rowContainer: '', rowLabelCell: 1, rowValueCell: 0,
+  autoDetect: true, serviceTitle: null,
   isBuiltin: false, isActive: true, notes: '',
 });
 
@@ -127,6 +129,7 @@ export default function ResultFiller({ onError, onNotice }: SectionProps) {
       {tab === 'Install' && <Install overview={overview} adapters={adapters} devices={devices} {...shared} />}
       {tab === 'Browsers' && <Browsers devices={devices} {...shared} />}
       {tab === 'Forms' && <Forms adapters={adapters} {...shared} />}
+      {tab === 'Parameter names' && <ParameterNames adapters={adapters} {...shared} />}
       {tab === 'Field mappings' && <Mappings adapters={adapters} {...shared} />}
       {tab === 'Activity' && <Activity adapters={adapters} {...shared} />}
     </>
@@ -217,8 +220,8 @@ function Install({ overview, adapters, devices, onError, onNotice, setBusy, busy
       <Panel title="How staff use it" subtitle="Open the form, check the bubble, press one button.">
         <ol className="rf-flow">
           <li><b>Open</b> the patient, sample or control result-entry form.</li>
-          <li>The bubble <b>reads the identifier</b> off the form by itself.</li>
-          <li>SECHLIMS <b>verifies</b> it against the analyser transmission and says what it found.</li>
+          <li>The bubble <b>reads the whole page</b> — the barcode printed in a table cell, the patient’s number, and every result box with the name beside it.</li>
+          <li>SECHLIMS <b>verifies</b> the identifier against the analyser transmission and matches each reading to the box it belongs in.</li>
           <li>Press <b>Populate results</b>. The fields fill.</li>
           <li><b>Review, save and authorise</b> exactly as before.</li>
         </ol>
@@ -392,7 +395,7 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
         {!adapters.length ? <Note>No form has been configured yet.</Note> : (
           <table className="data-table mw-table">
             <thead>
-              <tr><th>Form</th><th>Pages</th><th>Identifier</th><th>Overwrite</th><th className="num">Fields</th><th>State</th><th /></tr>
+              <tr><th>Form</th><th>Pages</th><th>Read by</th><th>Overwrite</th><th className="num">Fields</th><th>State</th><th /></tr>
             </thead>
             <tbody>
               {adapters.map(adapter => (
@@ -403,11 +406,13 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
                   </td>
                   <td className="mono">{adapter.urlPattern}</td>
                   <td>
-                    {adapter.identifiers?.[0]?.selector || <span className="t-warn">not set</span>}
+                    {adapter.autoDetect
+                      ? <span className="mw-chip t-ok">Reading the page</span>
+                      : adapter.identifiers?.[0]?.selector || <span className="t-warn">no identifier set</span>}
                     <span className="mw-sub">{adapter.normaliser} · {adapter.lookbackHours}h window</span>
                   </td>
                   <td>{reference?.overwritePolicies.find(p => p.key === adapter.overwritePolicy)?.label.split('—')[0] ?? adapter.overwritePolicy}</td>
-                  <td className="num">{adapter.matchByLabel ? `${adapter.fieldCount ?? 0} + by label` : adapter.fieldCount ?? 0}</td>
+                  <td className="num">{adapter.autoDetect ? `${adapter.fieldCount ?? 0} + detected` : adapter.fieldCount ?? 0}</td>
                   <td><span className={`mw-chip t-${adapter.isActive ? 'ok' : 'idle'}`}>{adapter.isActive ? 'Active' : 'Off'}</span></td>
                   <td className="mw-row-actions">
                     {mayEdit && <button className="btn ghost" onClick={() => setEditing(adapter)}>Edit</button>}
@@ -431,12 +436,21 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
             <Field label="Marker on the page" value={editing.formSelector ?? ''} onValue={v => set({ formSelector: v })}
               placeholder="table.results" hint="A CSS selector that exists only on this form." />
 
-            <Field label="Identifier field" value={identifier.selector} onValue={v => set({ identifiers: [{ ...identifier, selector: v, primary: true }] })}
-              placeholder="specimen_id" />
-            <Pick label="Found by" value={identifier.selectorKind} onValue={v => set({ identifiers: [{ ...identifier, selectorKind: v, primary: true }] })}
-              options={reference?.selectorKinds ?? []} hint={reference?.selectorKinds.find(s => s.key === identifier.selectorKind)?.hint} />
-            <Pick label="Identifier is" value={identifier.kind} onValue={v => set({ identifiers: [{ ...identifier, kind: v, primary: true }] })}
-              options={reference?.identifierKinds ?? []} />
+            <Switch label="Read the page rather than being told where its boxes are" checked={editing.autoDetect}
+              onChange={v => set({ autoDetect: v })}
+              hint="The identifier is taken from whatever labels it — a column header, a caption — and each parameter from the label beside its box. Turn this off only for a form that gives nothing to read." />
+            {!editing.autoDetect && (
+              <Field label="Identifier field" value={identifier.selector} onValue={v => set({ identifiers: [{ ...identifier, selector: v, primary: true }] })}
+                placeholder="specimen_id" />
+            )}
+            {!editing.autoDetect && (
+              <Pick label="Found by" value={identifier.selectorKind} onValue={v => set({ identifiers: [{ ...identifier, selectorKind: v, primary: true }] })}
+                options={reference?.selectorKinds ?? []} hint={reference?.selectorKinds.find(s => s.key === identifier.selectorKind)?.hint} />
+            )}
+            {!editing.autoDetect && (
+              <Pick label="Identifier is" value={identifier.kind} onValue={v => set({ identifiers: [{ ...identifier, kind: v, primary: true }] })}
+                options={reference?.identifierKinds ?? []} />
+            )}
 
             <Pick label="Identifiers match when" value={editing.normaliser} onValue={v => set({ normaliser: v })} options={reference?.normalisers ?? []} />
             <Pick label="Transmissions" value={editing.messageKind} onValue={v => set({ messageKind: v })}
@@ -465,6 +479,136 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
           </div>
         </Panel>
       )}
+    </>
+  );
+}
+
+/* ============================================================================
+   Parameter names
+   ----------------------------------------------------------------------------
+   The filler matches what an analyser sends to what a form asks for through a
+   dictionary of the names both of them use. Most of it is built in. The rest is
+   local, and belongs to the laboratory rather than to a release.
+   ========================================================================= */
+type AliasRow = {
+  id: number; canonical: string; alias: string; adapter_id: number | null;
+  adapter_name: string | null; note: string | null; created_by_name: string | null; created_at: string;
+};
+type DictionaryEntry = { canonical: string; discipline: string; aliases: string[] };
+
+function ParameterNames({ adapters, mayEdit, busy, setBusy, onError, onNotice }: SharedProps & { adapters: Adapter[] }) {
+  const [rows, setRows] = useState<AliasRow[]>([]);
+  const [dictionary, setDictionary] = useState<DictionaryEntry[]>([]);
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState({ canonical: '', alias: '', adapterId: '', note: '' });
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiRead<{ rows: AliasRow[]; dictionary: DictionaryEntry[] }>('/result-filler/aliases', { rows: [], dictionary: [] });
+      setRows(data.rows);
+      setDictionary(data.dictionary);
+    } catch (e) { onError(errorText(e)); }
+  }, [onError]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function add() {
+    if (!form.canonical.trim() || !form.alias.trim()) { onError('Give the parameter and the other name for it.'); return; }
+    setBusy('alias'); onError(null);
+    try {
+      await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify(form) });
+      onNotice(`“${form.alias}” now means ${form.canonical}.`);
+      setForm({ canonical: '', alias: '', adapterId: '', note: '' });
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function remove(row: AliasRow) {
+    setBusy(`x${row.id}`); onError(null);
+    try { await api(`/result-filler/aliases/${row.id}`, { method: 'DELETE' }); await load(); }
+    catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  const needle = search.trim().toUpperCase();
+  const shown = needle
+    ? dictionary.filter(entry => entry.canonical.toUpperCase().includes(needle)
+      || entry.aliases.some(alias => alias.toUpperCase().includes(needle)))
+    : dictionary;
+
+  return (
+    <>
+      <Panel
+        title="Names this laboratory has taught it"
+        subtitle="Added here, understood everywhere — no reinstall on any bench."
+        actions={<span className="mw-chip t-info">{rows.length} added</span>}
+      >
+        {mayEdit && (
+          <div className="mw-inset mw-grid">
+            <Pick label="Parameter" value={form.canonical} onValue={v => setForm(f => ({ ...f, canonical: v }))}
+              options={dictionary.map(entry => ({ key: entry.canonical, label: `${entry.canonical} (${entry.discipline})` }))}
+              blank="Choose the parameter" />
+            <Field label="Is also called" value={form.alias} onValue={v => setForm(f => ({ ...f, alias: v }))} placeholder="HB CONC" />
+            <Pick label="On which form" value={form.adapterId} onValue={v => setForm(f => ({ ...f, adapterId: v }))}
+              options={adapters.map(a => ({ key: String(a.id), label: a.name }))} blank="Every form" />
+            <Field label="Note" value={form.note} onValue={v => setForm(f => ({ ...f, note: v }))} />
+            <div className="mw-actions">
+              <button className="btn" onClick={() => void add()} disabled={busy === 'alias'}>
+                {busy === 'alias' ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} Teach this name
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!rows.length ? <Note>Nothing has needed teaching yet.</Note> : (
+          <table className="data-table mw-table">
+            <thead><tr><th>Parameter</th><th>Also called</th><th>On</th><th>Added by</th><th /></tr></thead>
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.id}>
+                  <td><strong>{row.canonical}</strong></td>
+                  <td>{row.alias}{row.note && <span className="mw-sub">{row.note}</span>}</td>
+                  <td>{row.adapter_name ?? 'Every form'}</td>
+                  <td>{row.created_by_name ?? '—'}<span className="mw-sub">{when(row.created_at)}</span></td>
+                  <td className="mw-row-actions">
+                    {mayEdit && <button className="btn ghost" onClick={() => void remove(row)} disabled={busy === `x${row.id}`}><Trash2 size={12} /></button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Panel>
+
+      <Panel
+        title="Names it already knows"
+        subtitle="What an analyser may send, and what a form may ask for, for each parameter."
+        actions={<Field label="Find" value={search} onValue={setSearch} placeholder="sodium, SGPT, HGB" />}
+      >
+        {!shown.length ? <Note>No parameter matches.</Note> : (
+          <table className="data-table mw-table">
+            <thead><tr><th>Parameter</th><th>Also understood as</th><th>Discipline</th></tr></thead>
+            <tbody>
+              {shown.map(entry => (
+                <tr key={entry.canonical}>
+                  <td><strong>{entry.canonical}</strong></td>
+                  <td>
+                    <ul className="mw-chips">
+                      {entry.aliases.map(alias => <li key={alias}><span className="mw-chip">{alias}</span></li>)}
+                      {rows.filter(row => row.canonical === entry.canonical).map(row => (
+                        <li key={row.id}><span className="mw-chip t-info">{row.alias}</span></li>
+                      ))}
+                      {!entry.aliases.length && !rows.some(row => row.canonical === entry.canonical) && <li className="mw-sub">its own name only</li>}
+                    </ul>
+                  </td>
+                  <td>{entry.discipline}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Panel>
     </>
   );
 }
