@@ -28,10 +28,10 @@
  * one, and every machine already has a PDF printer.
  */
 import {
-  DEFAULT_TEMPLATE, REPORT_COLUMN_LABELS, flagMeaning, fontStack, outsideRange,
-  type ReportColumn, type ReportTemplate,
+  DEFAULT_TEMPLATE, REPORT_COLUMN_LABELS, ageInDays, flagMeaning, fontStack, outsideRange, pickRange,
+  type ReferenceRange, type ReportColumn, type ReportTemplate,
 } from '../../shared/constants/labReport.js';
-import { codeKey } from '../../shared/constants/resultFiller.js';
+import { rangeKey } from './resultFiller/referenceRanges.js';
 import { demographicsOf, type Demographics } from './resultFiller/demographics.js';
 import { readingsOf } from './resultFiller/pending.js';
 
@@ -49,6 +49,8 @@ export interface ReportParameter {
   referenceLow: string | null;
   referenceHigh: string | null;
   referenceText: string | null;
+  /** The sex or age band the range was set for, where it was set for one. */
+  referencePopulation: string | null;
   /** Set only where the laboratory holds a range and the value falls outside it. */
   outside: 'high' | 'low' | null;
 }
@@ -85,36 +87,73 @@ const ROW_SQL = `SELECT m.id, m.sample_id, m.lot_number, m.kind, m.received_at, 
     LEFT JOIN mw_messages x ON x.instrument_message_id = m.id`;
 
 /**
- * The laboratory's reference intervals, keyed by parameter.
+ * The ranges a result is read against, keyed by parameter.
  *
- * Loaded once per report rather than per parameter, and narrowed by sex where
- * the laboratory has stated a population: an adult male haemoglobin range read
- * against a female sample is a wrong range printed with authority.
+ * Two registers, in order of authority. The ranges the laboratory set FOR THE
+ * REPORT come first; where it has set none for a parameter, the verification
+ * module's own reference intervals are used, so a laboratory that recorded them
+ * there years ago does not type them twice.
+ *
+ * Loaded once per report rather than per parameter, and narrowed to this
+ * patient afterwards — an adult male haemoglobin range read against a newborn
+ * is a wrong range printed with authority.
  */
-function referenceIndex(db: DB, sex: string | null): Map<string, any> {
-  const index = new Map<string, any>();
-  let rows: any[] = [];
-  try {
-    rows = db.prepare(`SELECT analyte, population, lower_limit, upper_limit, unit, clinical_decision_limit
-        FROM reference_interval_records WHERE status = 'active' ORDER BY id`).all() as any[];
-  } catch { return index; }
-
-  const wanted = String(sex ?? '').trim().toLowerCase();
-  for (const row of rows) {
-    const key = codeKey(row.analyte);
-    if (!key) continue;
-    const population = String(row.population ?? '').trim().toLowerCase();
+function rangeIndex(db: DB): Map<string, ReferenceRange[]> {
+  const index = new Map<string, ReferenceRange[]>();
+  const add = (key: string, range: ReferenceRange) => {
+    if (!key) return;
     const held = index.get(key);
-    const matchesSex = wanted ? population.includes(wanted.slice(0, 4)) : false;
-    const isGeneral = !population || /adult|general|all/.test(population);
-    // A population named for this patient wins; a general range is kept as the
-    // fallback; a range for the other sex is never preferred.
-    if (!held) { index.set(key, row); continue; }
-    const heldPopulation = String(held.population ?? '').trim().toLowerCase();
-    const heldMatches = wanted ? heldPopulation.includes(wanted.slice(0, 4)) : false;
-    if (matchesSex && !heldMatches) index.set(key, row);
-    else if (!heldMatches && isGeneral && heldPopulation && !/adult|general|all/.test(heldPopulation)) index.set(key, row);
-  }
+    if (held) held.push(range);
+    else index.set(key, [range]);
+  };
+
+  try {
+    const rows = db.prepare(`SELECT * FROM rf_reference_ranges WHERE is_active = 1 ORDER BY id`).all() as any[];
+    for (const row of rows) {
+      // Keyed from the name at read time rather than from the stored column,
+      // so a register written before the key was corrected still answers.
+      add(rangeKey(row.analyte), {
+        id: Number(row.id),
+        analyte: String(row.analyte),
+        sex: (row.sex || 'any') as ReferenceRange['sex'],
+        ageMinDays: row.age_min_days == null ? null : Number(row.age_min_days),
+        ageMaxDays: row.age_max_days == null ? null : Number(row.age_max_days),
+        ageLabel: row.age_label ?? null,
+        low: row.low ?? null,
+        high: row.high ?? null,
+        textValue: row.text_value ?? null,
+        unit: row.unit ?? null,
+        source: row.source ?? null,
+        note: row.note ?? null,
+      });
+    }
+  } catch { /* a database without the table falls through to the register below */ }
+
+  try {
+    const rows = db.prepare(`SELECT analyte, population, lower_limit, upper_limit, unit, clinical_decision_limit
+        FROM reference_interval_records WHERE status = 'active' ORDER BY id`).all() as any[];
+    for (const row of rows) {
+      const key = rangeKey(row.analyte);
+      // Only where the report's own register says nothing about this parameter.
+      if (!key || index.has(key)) continue;
+      const population = String(row.population ?? '').trim().toLowerCase();
+      add(key, {
+        analyte: String(row.analyte),
+        sex: population.includes('male') && !population.includes('female') ? 'male'
+          : population.includes('female') ? 'female' : 'any',
+        ageMinDays: null,
+        ageMaxDays: null,
+        ageLabel: row.population ?? null,
+        low: row.lower_limit == null ? null : String(row.lower_limit),
+        high: row.upper_limit == null ? null : String(row.upper_limit),
+        textValue: row.clinical_decision_limit ? String(row.clinical_decision_limit) : null,
+        unit: row.unit ?? null,
+        source: 'Verification & Validation',
+        note: null,
+      });
+    }
+  } catch { /* the report prints dashes rather than failing */ }
+
   return index;
 }
 
@@ -139,20 +178,31 @@ export function collectReport(db: DB, id: number): ReportData | null {
   if (!row) return null;
 
   const demographics = demographicsOf(row.raw_message, row.instrument_run_at ?? row.received_at);
-  const index = referenceIndex(db, demographics.sex);
+  const index = rangeIndex(db);
+  const patient = {
+    sex: demographics.sex,
+    ageDays: ageInDays(demographics.birthDate, row.instrument_run_at ?? row.received_at),
+  };
   const parameters: ReportParameter[] = readingsOf(row).map(reading => {
-    const reference = index.get(codeKey(reading.code)) ?? index.get(codeKey(reading.analyte));
-    const low = reference?.lower_limit ?? null;
-    const high = reference?.upper_limit ?? null;
+    // Looked up by the analyser's own mnemonic, by this system's name for it,
+    // and by what the dictionary calls it — so a range set once under HGB is
+    // found for a result that arrived as Haemoglobin.
+    const candidates = index.get(rangeKey(reading.analyte)) ?? index.get(rangeKey(reading.code)) ?? [];
+    const reference = pickRange(candidates, patient);
+    const low = reference?.low ?? null;
+    const high = reference?.high ?? null;
     return {
       code: reading.code,
       analyte: reading.analyte,
       value: reading.value,
       unit: reading.unit,
       flag: reading.flag,
-      referenceLow: low == null ? null : String(low),
-      referenceHigh: high == null ? null : String(high),
-      referenceText: reference?.clinical_decision_limit ? String(reference.clinical_decision_limit) : null,
+      referenceLow: low,
+      referenceHigh: high,
+      referenceText: reference?.textValue ?? null,
+      referencePopulation: reference && (reference.sex !== 'any' || reference.ageLabel)
+        ? [reference.sex !== 'any' ? reference.sex : '', reference.ageLabel ?? ''].filter(Boolean).join(' · ')
+        : null,
       outside: outsideRange(reading.value, low, high),
     };
   });
@@ -234,6 +284,7 @@ export function loadTemplate(db: DB, code?: string | null): ReportTemplate {
     showSignature: Number(row.show_signature) === 1,
     signatureLine: row.signature_line || DEFAULT_TEMPLATE.signatureLine,
     showDeliveryState: Number(row.show_delivery_state) === 1,
+    showRangePopulation: Number(row.show_range_population) === 1,
     watermark: row.watermark ?? '',
     disclaimer: row.disclaimer ?? '',
     isDefault: Number(row.is_default) === 1,
@@ -321,11 +372,13 @@ function identityBlock(data: ReportData): string {
 </section>`;
 }
 
-function referenceCell(parameter: ReportParameter): string {
+function referenceCell(parameter: ReportParameter, template: ReportTemplate): string {
+  const population = template.showRangePopulation && parameter.referencePopulation
+    ? `<span class="pop">${esc(parameter.referencePopulation)}</span>` : '';
   if (parameter.referenceLow != null || parameter.referenceHigh != null) {
-    return `( ${esc(parameter.referenceLow ?? '')} – ${esc(parameter.referenceHigh ?? '')} )`;
+    return `( ${esc(parameter.referenceLow ?? '')} – ${esc(parameter.referenceHigh ?? '')} )${population}`;
   }
-  if (parameter.referenceText) return esc(parameter.referenceText);
+  if (parameter.referenceText) return `${esc(parameter.referenceText)}${population}`;
   return dash;
 }
 
@@ -345,7 +398,7 @@ function parameterTable(data: ReportData, template: ReportTemplate): string {
       // reader stops seeing the one that matters.
       if (column === 'flag') return `<td class="c-flag${tone || ' t-none'}">${parameter.flag ? esc(parameter.flag) : ''}</td>`;
       if (column === 'unit') return `<td class="c-unit">${parameter.unit ? esc(parameter.unit) : ''}</td>`;
-      if (column === 'reference') return `<td class="c-reference">${referenceCell(parameter)}</td>`;
+      if (column === 'reference') return `<td class="c-reference">${referenceCell(parameter, template)}</td>`;
       return `<td class="c-method">${esc(data.instrumentName ?? data.equipmentName ?? '')}</td>`;
     };
     return `<tr>${columns.map(cell).join('')}</tr>`;
@@ -469,6 +522,7 @@ th.c-flag, td.c-flag { width: 34px; text-align: center; font-weight: 700; }
 td.c-flag.t-none { font-weight: 400; color: #9ca3af; }
 th.c-unit, td.c-unit { width: 96px; color: #4b5563; }
 th.c-reference, td.c-reference { width: 150px; color: #374151; }
+td.c-reference .pop { display: block; font-size: 8.5px; color: #9ca3af; }
 th.c-parameter, td.c-parameter { width: 32%; font-weight: 600; }
 td.c-parameter { font-weight: 600; }
 td.c-parameter .code { font-weight: 400; color: #9ca3af; font-size: 9.5px; margin-left: 6px; }

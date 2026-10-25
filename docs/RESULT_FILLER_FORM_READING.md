@@ -257,3 +257,44 @@ A plan that cannot be built returns the labels the form asked for beside the
 parameters the transmission holds, and the bubble shows them in two columns
 with the closest near-misses underneath. "They do not match" was never
 something anybody could act on.
+
+---
+
+## 9. Reference ranges
+
+The printed report showed a dash in every reference column, because nothing was
+configured for it to read against. A reference range is a clinical decision the
+laboratory owns, so none is assumed — a dash is the honest answer where no
+range is on file, and a number nobody decided on would be worse than useless.
+
+**Result Reports → Reference ranges** is where they are kept. A range may be
+narrowed by sex and by age, because on a full blood count most of them are: a
+newborn's haematocrit and a grown man's are different numbers and printing one
+against the other is worse than printing neither. The most specific range wins
+— one set for this sex beats one set for anybody, a narrow age band beats a
+wide one — and a range whose band excludes the patient is not used at all,
+because a range that does not apply is the wrong answer rather than a fallback.
+Where the transmission carried no age or sex, only ranges that ask for neither
+are eligible.
+
+Two registers are read, in order of authority: the ranges set here, and then
+the verification module's own reference intervals for any parameter this one
+says nothing about — so a laboratory that recorded them there does not type
+them twice, and that module is untouched.
+
+**A starting point, not a decision.** *Load the ranges our forms use* writes
+the ranges this laboratory's own LHIMS result-entry forms already display,
+transcribed from them: the full blood count with its newborn, infant and
+paediatric haematocrit and red cell bands, and the urea, electrolyte, renal and
+liver panels. Every row is marked with where it came from, a parameter the
+laboratory has already decided on is left untouched, and the screen says they
+must be reviewed before a report is released on them.
+
+### The same mistake, caught once more
+
+The first version keyed a range on `codeKey`, which strips punctuation — so
+`NEUT#` and `NEUT%` shared a key and the neutrophil **percentage** printed
+against the absolute count's range, 2.00–7.00, on a result of 57.3. Ranges are
+keyed on `analyteKey` now, where `#` and `%` survive as words. It is the third
+time that distinction has had to be defended in this module, which is a fair
+measure of how easily it is lost.

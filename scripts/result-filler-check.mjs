@@ -84,6 +84,9 @@ writeFileSync(join(WATCH, `${SAMPLE}.txt`), [
   'R|1|^^^^WBC^1|7.42|10*3/uL||N||F',
   'R|2|^^^^HGB^3|13.8|g/dL||N||F',
   'R|3|^^^^PLT^8|232|10*3/uL||N||F',
+  // A parameter no laboratory holds a range for, so the report has something
+  // to print a dash against whatever else has been set.
+  'R|4|^^^^ZZUNKNOWN^99|1.23|u||N||F',
   'L|1|N',
 ].join('\r'));
 
@@ -637,6 +640,94 @@ check('the report exports as Word', docx.status === 200 && docxBytes.length > 2_
 const xlsx = await fetch(`${BASE}/transmission-reports/export.xlsx?ids=${reportId}`, { headers: { Authorization: `Bearer ${ADMIN}` } });
 const xlsxBytes = Buffer.from(await xlsx.arrayBuffer());
 check('the report exports as Excel', xlsx.status === 200 && xlsxBytes.length > 2_000 && xlsxBytes.subarray(0, 2).toString() === 'PK');
+
+/* ===================================================== the reference ranges */
+/**
+ * A reference range is the laboratory's clinical decision, so none is assumed.
+ * What is proved here is that a parameter with no range prints a dash, that a
+ * range set once is found whatever the analyser called the parameter, and that
+ * the most specific range wins — a newborn's haematocrit is not an adult's.
+ */
+section('What a printed result is read against');
+
+const beforeRanges = await j(`/transmission-reports/${reportId}`, { token: ADMIN });
+const unranged = (beforeRanges.json?.report?.parameters ?? []).find(p => p.code === 'ZZUNKNOWN');
+check('a parameter with no range on file prints nothing',
+  Boolean(unranged) && !unranged.referenceLow && !unranged.referenceHigh && !unranged.referenceText,
+  JSON.stringify(unranged));
+
+const loaded = await j('/transmission-reports/ranges/load-form-ranges', { method: 'POST', token: ADMIN, body: {} });
+check('the ranges the laboratory’s own forms use are on the register',
+  ((loaded.json?.added ?? 0) + (loaded.json?.kept ?? 0)) > 50,
+  JSON.stringify(loaded.json).slice(0, 180));
+
+const loadedAgain = await j('/transmission-reports/ranges/load-form-ranges', { method: 'POST', token: ADMIN, body: {} });
+check('loading them again changes nothing the laboratory has set',
+  loadedAgain.json?.added === 0 && (loadedAgain.json?.kept ?? 0) > 50,
+  JSON.stringify(loadedAgain.json).slice(0, 160));
+
+const bands = await j('/transmission-reports/ranges', { token: ADMIN });
+check('a parameter that needs several bands got all of them',
+  (bands.json?.rows ?? []).filter(row => row.analyte === 'HCT').length >= 7,
+  `${(bands.json?.rows ?? []).filter(row => row.analyte === 'HCT').length} band(s) for HCT`);
+
+const afterRanges = await j(`/transmission-reports/${reportId}`, { token: ADMIN });
+const hgb = (afterRanges.json?.report?.parameters ?? []).find(p => /HGB|haemoglobin/i.test(p.analyte));
+check('and a result is then read against one',
+  hgb?.referenceLow === '11.00' && hgb?.referenceHigh === '16.00',
+  JSON.stringify(hgb));
+
+// The transmission in this check carries HGB; the range was set under HGB and
+// found for it however the analyser named the parameter.
+const printedWithRanges = await j(`/transmission-reports/${reportId}/print`, { token: ADMIN });
+check('the printed report shows the range', printedWithRanges.text.includes('11.00'),
+  printedWithRanges.text.slice(0, 0));
+
+const added = await j('/transmission-reports/ranges', {
+  method: 'POST', token: ADMIN,
+  body: { analyte: 'HCT', sex: 'male', low: '42', high: '52', unit: '%' },
+});
+check('a range can be set for one sex', added.status === 201, JSON.stringify(added.json));
+
+const newborn = await j('/transmission-reports/ranges', {
+  method: 'POST', token: ADMIN,
+  body: { analyte: 'HCT', ageMaxDays: 56, ageLabel: 'Newborn', low: '44', high: '64', unit: '%' },
+});
+check('and another for an age band', newborn.status === 201);
+
+const badBand = await j('/transmission-reports/ranges', {
+  method: 'POST', token: ADMIN,
+  body: { analyte: 'HCT', ageMinDays: 400, ageMaxDays: 100, low: '1', high: '2' },
+});
+check('an age band that ends before it begins is refused', badBand.status === 400, `${badBand.status}`);
+
+const emptyRange = await j('/transmission-reports/ranges', { method: 'POST', token: ADMIN, body: { analyte: 'HCT' } });
+check('a range with neither a number nor a word is refused', emptyRange.status === 400, `${emptyRange.status}`);
+
+/*
+ * The distinction that must survive everywhere it appears: an absolute count
+ * and a percentage are different parameters, and a range keyed on the letters
+ * of a name alone would print one against the other.
+ */
+const differentialReport = await j(`/transmission-reports?search=${encodeURIComponent(SYSMEX_SAMPLE)}`, { token: ADMIN });
+const differentialId = differentialReport.json?.rows?.[0]?.id;
+const differential = await j(`/transmission-reports/${differentialId}`, { token: ADMIN });
+const parameterRange = (code) => {
+  const found = (differential.json?.report?.parameters ?? []).find(p => p.code === code);
+  return found ? `${found.referenceLow}-${found.referenceHigh}` : null;
+};
+check('the absolute neutrophil count is read against the absolute range',
+  parameterRange('NEUT#') === '2.00-7.00', `NEUT# -> ${parameterRange('NEUT#')}`);
+check('and the percentage against the percentage range',
+  parameterRange('NEUT%') === '50.0-70.0', `NEUT% -> ${parameterRange('NEUT%')}`);
+check('the same holds for the reticulocytes',
+  parameterRange('RET#') === '0.0-999.9' && parameterRange('RET%') === '0.5-2',
+  `RET# -> ${parameterRange('RET#')}, RET% -> ${parameterRange('RET%')}`);
+
+const ranges = await j('/transmission-reports/ranges', { token: ADMIN });
+check('the register reads the age band back in words',
+  (ranges.json?.rows ?? []).some(row => row.analyte === 'HCT' && /weeks|days/.test(row.ageBand ?? '')),
+  JSON.stringify((ranges.json?.rows ?? []).filter(r => r.analyte === 'HCT').map(r => r.ageBand)));
 
 /* ------------------------------------------------------------ the package */
 section('The extension package');

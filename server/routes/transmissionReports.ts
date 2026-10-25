@@ -30,10 +30,13 @@ import {
   REPORT_HEADERS, collectReport, loadTemplate, renderReportDocument, reportFilename, reportRows,
 } from '../services/labReport.js';
 import {
-  DEFAULT_TEMPLATE, DENSITIES, FONT_CHOICES, HEADER_STYLES, HEADER_STYLE_LABELS, PAPER_SIZES,
-  REPORT_COLUMNS, REPORT_COLUMN_LABELS, REQUIRED_COLUMNS, DENSITY_LABELS,
+  AGE_UNITS, DEFAULT_TEMPLATE, DENSITIES, FONT_CHOICES, HEADER_STYLES, HEADER_STYLE_LABELS,
+  PAPER_SIZES, RANGE_SEXES, RANGE_SEX_LABELS, REPORT_COLUMNS, REPORT_COLUMN_LABELS,
+  REQUIRED_COLUMNS, DENSITY_LABELS, describeAgeBand,
   type ReportColumn,
 } from '../../shared/constants/labReport.js';
+import { ANALYTE_DICTIONARY } from '../../shared/constants/formIntelligence.js';
+import { FORM_RANGE_SOURCE, rangeKey, seedFormRanges } from '../services/resultFiller/referenceRanges.js';
 
 const F = 'analyser_middleware.reports';
 
@@ -123,6 +126,10 @@ export function transmissionReportRoutes() {
       densities: DENSITIES.map(key => ({ key, label: DENSITY_LABELS[key] })),
       fonts: FONT_CHOICES.map(f => ({ key: f.key, label: f.label })),
       columns: REPORT_COLUMNS.map(key => ({ key, label: REPORT_COLUMN_LABELS[key], required: REQUIRED_COLUMNS.includes(key) })),
+      sexes: RANGE_SEXES.map(key => ({ key, label: RANGE_SEX_LABELS[key] })),
+      ageUnits: AGE_UNITS.map(unit => ({ key: unit.key, label: unit.label })),
+      parameters: ANALYTE_DICTIONARY.map(entry => ({ key: entry.canonical, label: entry.canonical, discipline: entry.discipline })),
+      formRangeSource: FORM_RANGE_SOURCE,
     });
   });
 
@@ -168,6 +175,7 @@ export function transmissionReportRoutes() {
       showSignature: body?.showSignature === false ? 0 : 1,
       signatureLine: text(body?.signatureLine, 80) ?? 'Authorised by',
       showDeliveryState: body?.showDeliveryState ? 1 : 0,
+      showRangePopulation: body?.showRangePopulation ? 1 : 0,
       watermark: text(body?.watermark, 40),
       disclaimer: text(body?.disclaimer, 500),
     };
@@ -185,31 +193,145 @@ export function transmissionReportRoutes() {
           contact_line = ?, report_title = ?, footer_text = ?, logo_data_uri = ?, accent_colour = ?, text_colour = ?,
           header_style = ?, font = ?, paper = ?, density = ?, margin_mm = ?, columns = ?, show_logo = ?,
           show_flag_legend = ?, show_instrument_messages = ?, show_signature = ?, signature_line = ?,
-          show_delivery_state = ?, watermark = ?, disclaimer = ?,
+          show_delivery_state = ?, show_range_population = ?, watermark = ?, disclaimer = ?,
           updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(payload.name, payload.organisation, payload.facility, payload.addressLine, payload.contactLine,
           payload.reportTitle, payload.footerText, payload.logoDataUri, payload.accentColour, payload.textColour,
           payload.headerStyle, payload.font, payload.paper, payload.density, payload.marginMm, payload.columns,
           payload.showLogo, payload.showFlagLegend, payload.showInstrumentMessages, payload.showSignature,
-          payload.signatureLine, payload.showDeliveryState, payload.watermark,
+          payload.signatureLine, payload.showDeliveryState, payload.showRangePopulation, payload.watermark,
           payload.disclaimer, req.user!.id, existing.id);
     } else {
       db.prepare(`INSERT INTO rf_report_templates
           (template_code, name, organisation, facility, address_line, contact_line, report_title, footer_text,
            logo_data_uri, accent_colour, text_colour, header_style, font, paper, density, margin_mm, columns,
            show_logo, show_flag_legend, show_instrument_messages, show_signature, signature_line,
-           show_delivery_state, watermark, disclaimer, is_default, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+           show_delivery_state, show_range_population, watermark, disclaimer, is_default, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(code, payload.name, payload.organisation, payload.facility, payload.addressLine, payload.contactLine,
           payload.reportTitle, payload.footerText, payload.logoDataUri, payload.accentColour, payload.textColour,
           payload.headerStyle, payload.font, payload.paper, payload.density, payload.marginMm, payload.columns,
           payload.showLogo, payload.showFlagLegend, payload.showInstrumentMessages, payload.showSignature,
-          payload.signatureLine, payload.showDeliveryState, payload.watermark,
+          payload.signatureLine, payload.showDeliveryState, payload.showRangePopulation, payload.watermark,
           payload.disclaimer, code === 'DEFAULT' ? 1 : 0, req.user!.id);
     }
 
     audit(req, { action: 'update', entity: 'rf_report_templates', entityId: code, newValue: { name: payload.name, paper: payload.paper } });
     res.json(loadTemplate(db, code));
+  });
+
+  /* ======================================================================
+     Reference ranges
+     ----------------------------------------------------------------------
+     What a printed result is read against. A range is the laboratory's own
+     clinical decision, so none is assumed: a parameter with no range on file
+     prints a dash rather than a number somebody might trust.
+     ====================================================================== */
+  router.get('/ranges', requirePermission(F, 'view'), (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`SELECT r.*, u.username AS created_by_name
+        FROM rf_reference_ranges r LEFT JOIN users u ON u.id = r.created_by
+        ORDER BY r.analyte, r.sex, r.age_min_days`).all() as any[];
+
+    // What the verification module already holds, so a laboratory can see that
+    // a parameter is covered from there rather than thinking it has none.
+    let inherited: any[] = [];
+    try {
+      inherited = db.prepare(`SELECT analyte, population, lower_limit, upper_limit, unit
+          FROM reference_interval_records WHERE status = 'active' ORDER BY analyte`).all() as any[];
+    } catch { inherited = []; }
+
+    res.json({
+      rows: rows.map(row => ({
+        ...row,
+        ageBand: describeAgeBand(row.age_min_days ?? null, row.age_max_days ?? null),
+      })),
+      inherited,
+      formRangeSource: FORM_RANGE_SOURCE,
+    });
+  });
+
+  function rangePayload(body: any) {
+    const number = (value: unknown) => {
+      if (value == null || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) && n >= 0 && n < 60_000 ? Math.round(n) : null;
+    };
+    return {
+      analyte: text(body?.analyte, 80),
+      sex: oneOf(body?.sex, RANGE_SEXES, 'any'),
+      ageMinDays: number(body?.ageMinDays),
+      ageMaxDays: number(body?.ageMaxDays),
+      ageLabel: text(body?.ageLabel, 60),
+      low: text(body?.low, 24),
+      high: text(body?.high, 24),
+      textValue: text(body?.textValue, 60),
+      unit: text(body?.unit, 24),
+      note: text(body?.note, 200),
+    };
+  }
+
+  router.post('/ranges', requirePermission(F, 'edit'), (req, res) => {
+    const db = getDb();
+    const payload = rangePayload(req.body);
+    if (!payload.analyte) return res.status(400).json({ error: 'Say which parameter the range is for.' });
+    if (payload.low == null && payload.high == null && !payload.textValue) {
+      return res.status(400).json({ error: 'Give a low, a high, or the expected result in words.' });
+    }
+    if (payload.ageMinDays != null && payload.ageMaxDays != null && payload.ageMinDays >= payload.ageMaxDays) {
+      return res.status(400).json({ error: 'The age band ends before it begins.' });
+    }
+    const inserted = db.prepare(`INSERT INTO rf_reference_ranges
+        (analyte, analyte_key, sex, age_min_days, age_max_days, age_label, low, high, text_value, unit, source, note, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(payload.analyte, rangeKey(payload.analyte), payload.sex, payload.ageMinDays, payload.ageMaxDays,
+        payload.ageLabel, payload.low, payload.high, payload.textValue, payload.unit,
+        text(req.body?.source, 80) ?? 'Set by the laboratory', payload.note, req.user!.id);
+    audit(req, { action: 'create', entity: 'rf_reference_ranges', entityId: Number(inserted.lastInsertRowid), newValue: payload });
+    res.status(201).json({ id: Number(inserted.lastInsertRowid) });
+  });
+
+  router.put('/ranges/:id', numericOnly, requirePermission(F, 'edit'), (req, res) => {
+    const db = getDb();
+    const before = db.prepare('SELECT * FROM rf_reference_ranges WHERE id = ?').get(req.params.id) as any;
+    if (!before) return res.status(404).json({ error: 'That range is not on the register.' });
+    const payload = rangePayload({ ...before, analyte: before.analyte, ...req.body });
+    if (!payload.analyte) return res.status(400).json({ error: 'Say which parameter the range is for.' });
+    db.prepare(`UPDATE rf_reference_ranges SET analyte = ?, analyte_key = ?, sex = ?, age_min_days = ?,
+        age_max_days = ?, age_label = ?, low = ?, high = ?, text_value = ?, unit = ?, note = ?,
+        is_active = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(payload.analyte, rangeKey(payload.analyte), payload.sex, payload.ageMinDays, payload.ageMaxDays,
+        payload.ageLabel, payload.low, payload.high, payload.textValue, payload.unit, payload.note,
+        req.body?.isActive === false ? 0 : 1, req.user!.id, before.id);
+    audit(req, { action: 'update', entity: 'rf_reference_ranges', entityId: before.id, oldValue: { analyte: before.analyte, low: before.low, high: before.high }, newValue: payload });
+    res.json({ ok: true });
+  });
+
+  router.delete('/ranges/:id', numericOnly, requirePermission(F, 'edit'), (req, res) => {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM rf_reference_ranges WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That range is not on the register.' });
+    db.prepare('DELETE FROM rf_reference_ranges WHERE id = ?').run(row.id);
+    audit(req, { action: 'delete', entity: 'rf_reference_ranges', entityId: row.id, oldValue: { analyte: row.analyte, low: row.low, high: row.high } });
+    res.json({ ok: true });
+  });
+
+  /**
+   * The ranges this laboratory's own result-entry forms already display.
+   *
+   * A starting point, not a decision: every row is marked with where it came
+   * from, a parameter already decided on is left alone, and the screen says
+   * plainly that they must be reviewed before anybody relies on them.
+   */
+  router.post('/ranges/load-form-ranges', requirePermission(F, 'edit'), (req, res) => {
+    const outcome = seedFormRanges(getDb(), req.user!.id);
+    audit(req, { action: 'import', entity: 'rf_reference_ranges', newValue: outcome });
+    res.json({
+      ...outcome,
+      note: `${outcome.added} range(s) loaded from the laboratory\u2019s own forms`
+        + `${outcome.kept ? `, ${outcome.kept} parameter(s) left as the laboratory had already set them` : ''}. `
+        + 'Review them before any report is released on them.',
+    });
   });
 
   /* ======================================================================

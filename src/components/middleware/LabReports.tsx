@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileSpreadsheet, FileText, Image, Loader2, Printer, RefreshCw, Upload } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, Image, Loader2, Plus, Printer, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { api, apiRead, errorText, API_BASE, getToken } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { openPrintable } from '../../services/xlsx';
-import { REPORT_COLUMN_LABELS, type ReportColumn, type ReportTemplate } from '../../../shared/constants/labReport';
+import {
+  REPORT_COLUMN_LABELS, ageToDays, describeAgeBand,
+  type AgeUnit, type ReportColumn, type ReportTemplate,
+} from '../../../shared/constants/labReport';
 import { Field, Note, Panel, Pick, Switch, when, type SectionProps } from './shared';
 
 /**
@@ -19,7 +22,7 @@ import { Field, Note, Panel, Pick, Switch, when, type SectionProps } from './sha
  * received; a reference range appears only where the laboratory holds one.
  */
 
-const TABS = ['Reports', 'Design'] as const;
+const TABS = ['Reports', 'Reference ranges', 'Design'] as const;
 type Tab = (typeof TABS)[number];
 
 type Row = {
@@ -35,6 +38,17 @@ type Reference = {
   densities: Array<{ key: string; label: string }>;
   fonts: Array<{ key: string; label: string }>;
   columns: Array<{ key: ReportColumn; label: string; required: boolean }>;
+  sexes: Array<{ key: string; label: string }>;
+  ageUnits: Array<{ key: string; label: string }>;
+  parameters: Array<{ key: string; label: string; discipline: string }>;
+  formRangeSource: string;
+};
+
+type RangeRow = {
+  id: number; analyte: string; sex: string; age_min_days: number | null; age_max_days: number | null;
+  age_label: string | null; low: string | null; high: string | null; text_value: string | null;
+  unit: string | null; source: string | null; note: string | null; is_active: number;
+  ageBand: string; created_by_name: string | null;
 };
 
 export default function LabReports({ onError, onNotice }: SectionProps) {
@@ -213,12 +227,208 @@ export default function LabReports({ onError, onNotice }: SectionProps) {
         </div>
       )}
 
+      {tab === 'Reference ranges' && (
+        <ReferenceRanges reference={reference} mayEdit={mayDesign} busy={busy} setBusy={setBusy}
+          onError={onError} onNotice={onNotice} />
+      )}
+
       {tab === 'Design' && (
         <Design
           template={template} reference={reference} mayDesign={mayDesign} busy={busy} setBusy={setBusy}
           onError={onError} onNotice={onNotice} onSaved={setTemplate}
           sampleId={open ?? rows[0]?.id ?? null}
         />
+      )}
+    </>
+  );
+}
+
+/* ============================================================================
+   Reference ranges
+   ----------------------------------------------------------------------------
+   What a printed result is read against. Nothing is assumed: a parameter with
+   no range on file prints a dash, because a number somebody might trust is
+   worse than an honest blank.
+   ========================================================================= */
+function ReferenceRanges({ reference, mayEdit, busy, setBusy, onError, onNotice }: {
+  reference: Reference | null;
+  mayEdit: boolean;
+  busy: string | null;
+  setBusy: (key: string | null) => void;
+  onError: (message: string | null) => void;
+  onNotice: (message: string | null) => void;
+}) {
+  const [rows, setRows] = useState<RangeRow[]>([]);
+  const [inherited, setInherited] = useState<Array<{ analyte: string; population: string | null; lower_limit: string | null; upper_limit: string | null; unit: string | null }>>([]);
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState({
+    analyte: '', sex: 'any', low: '', high: '', textValue: '', unit: '',
+    ageLabel: '', fromValue: '', fromUnit: 'years' as AgeUnit, toValue: '', toUnit: 'years' as AgeUnit, note: '',
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiRead<{ rows: RangeRow[]; inherited: typeof inherited }>(
+        '/transmission-reports/ranges', { rows: [], inherited: [] });
+      setRows(data.rows);
+      setInherited(data.inherited ?? []);
+    } catch (e) { onError(errorText(e)); }
+  }, [onError]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function add() {
+    if (!form.analyte.trim()) { onError('Say which parameter the range is for.'); return; }
+    setBusy('range'); onError(null);
+    try {
+      await api('/transmission-reports/ranges', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...form,
+          ageMinDays: form.fromValue === '' ? null : ageToDays(Number(form.fromValue), form.fromUnit),
+          ageMaxDays: form.toValue === '' ? null : ageToDays(Number(form.toValue), form.toUnit),
+        }),
+      });
+      onNotice(`A range for ${form.analyte} was added.`);
+      setForm(f => ({ ...f, low: '', high: '', textValue: '', ageLabel: '', fromValue: '', toValue: '', note: '' }));
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function remove(row: RangeRow) {
+    setBusy(`r${row.id}`); onError(null);
+    try { await api(`/transmission-reports/ranges/${row.id}`, { method: 'DELETE' }); await load(); }
+    catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function loadFormRanges() {
+    if (!window.confirm('Load the ranges this laboratory’s own result-entry forms display? Nothing already set is changed, and every range must be reviewed before a report is released on it.')) return;
+    setBusy('seed'); onError(null);
+    try {
+      const outcome = await api<{ note: string }>('/transmission-reports/ranges/load-form-ranges', { method: 'POST', body: JSON.stringify({}) });
+      onNotice(outcome.note);
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  const needle = search.trim().toUpperCase();
+  const shown = needle ? rows.filter(row => row.analyte.toUpperCase().includes(needle)) : rows;
+
+  return (
+    <>
+      <Panel
+        title="Reference ranges"
+        subtitle="What a printed result is read against. A parameter with no range prints a dash — never a number nobody decided on."
+        actions={(
+          <>
+            <Field label="Find" value={search} onValue={setSearch} placeholder="HGB, sodium" />
+            {mayEdit && (
+              <button className="btn ghost" onClick={() => void loadFormRanges()} disabled={busy === 'seed'}>
+                {busy === 'seed' ? <Loader2 size={13} className="spin" /> : <Download size={13} />} Load the ranges our forms use
+              </button>
+            )}
+          </>
+        )}
+      >
+        {mayEdit && (
+          <div className="mw-inset mw-grid">
+            <Pick label="Parameter" value={form.analyte} onValue={v => setForm(f => ({ ...f, analyte: v }))}
+              options={(reference?.parameters ?? []).map(p => ({ key: p.key, label: `${p.label} (${p.discipline})` }))}
+              blank="Choose the parameter" />
+            <Pick label="Applies to" value={form.sex} onValue={v => setForm(f => ({ ...f, sex: v }))}
+              options={reference?.sexes ?? []} />
+            <Field label="Low" value={form.low} onValue={v => setForm(f => ({ ...f, low: v }))} placeholder="11.0" />
+            <Field label="High" value={form.high} onValue={v => setForm(f => ({ ...f, high: v }))} placeholder="16.0" />
+            <Field label="Unit" value={form.unit} onValue={v => setForm(f => ({ ...f, unit: v }))} placeholder="g/dL" />
+            <label className="rf-age">
+              <span>Age from</span>
+              <div>
+                <input type="number" min="0" value={form.fromValue} onChange={e => setForm(f => ({ ...f, fromValue: e.target.value }))} placeholder="birth" />
+                <select value={form.fromUnit} onChange={e => setForm(f => ({ ...f, fromUnit: e.target.value as AgeUnit }))}>
+                  {(reference?.ageUnits ?? []).map(unit => <option key={unit.key} value={unit.key}>{unit.label}</option>)}
+                </select>
+              </div>
+            </label>
+            <label className="rf-age">
+              <span>Age to</span>
+              <div>
+                <input type="number" min="0" value={form.toValue} onChange={e => setForm(f => ({ ...f, toValue: e.target.value }))} placeholder="no limit" />
+                <select value={form.toUnit} onChange={e => setForm(f => ({ ...f, toUnit: e.target.value as AgeUnit }))}>
+                  {(reference?.ageUnits ?? []).map(unit => <option key={unit.key} value={unit.key}>{unit.label}</option>)}
+                </select>
+              </div>
+            </label>
+            <Field label="Expected result, in words" value={form.textValue} onValue={v => setForm(f => ({ ...f, textValue: v }))}
+              placeholder="Negative" hint="For a parameter whose range is not a number." />
+            <Field label="What this band is called" value={form.ageLabel} onValue={v => setForm(f => ({ ...f, ageLabel: v }))} placeholder="Newborn" />
+            <Field label="Note" value={form.note} onValue={v => setForm(f => ({ ...f, note: v }))} wide />
+            <div className="mw-actions">
+              <button className="btn" onClick={() => void add()} disabled={busy === 'range'}>
+                {busy === 'range' ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} Add this range
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!shown.length ? (
+          <Note tone="warn">
+            No range is on file, which is why every reference column on a printed report reads as a dash. Add the
+            parameters this laboratory reports on, or load the ranges its own result-entry forms already display.
+          </Note>
+        ) : (
+          <table className="data-table mw-table">
+            <thead>
+              <tr><th>Parameter</th><th>Applies to</th><th>Age</th><th className="num">Low</th><th className="num">High</th><th>Unit</th><th>Source</th><th /></tr>
+            </thead>
+            <tbody>
+              {shown.map(row => (
+                <tr key={row.id} className={row.is_active ? undefined : 'mw-row-off'}>
+                  <td><strong>{row.analyte}</strong>{row.note && <span className="mw-sub">{row.note}</span>}</td>
+                  <td>{row.sex === 'any' ? 'Anyone' : row.sex === 'male' ? 'Male' : 'Female'}</td>
+                  <td>
+                    {row.ageBand ?? describeAgeBand(row.age_min_days, row.age_max_days)}
+                    {row.age_label && <span className="mw-sub">{row.age_label}</span>}
+                  </td>
+                  <td className="num">{row.low ?? (row.text_value ? '—' : '')}</td>
+                  <td className="num">{row.high ?? ''}</td>
+                  <td>{row.unit ?? ''}{row.text_value && <span className="mw-sub">{row.text_value}</span>}</td>
+                  <td><span className="mw-sub">{row.source ?? '—'}</span></td>
+                  <td className="mw-row-actions">
+                    {mayEdit && <button className="btn ghost" onClick={() => void remove(row)} disabled={busy === `r${row.id}`}><Trash2 size={12} /></button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <Note>
+          The most specific range wins: one set for this sex beats one set for anybody, and a narrow age band beats a
+          wide one. A range whose band excludes the patient is not used at all.
+        </Note>
+      </Panel>
+
+      {inherited.length > 0 && (
+        <Panel
+          title="Already recorded under Verification & Validation"
+          subtitle="Used for any parameter with no range set above, so nothing is typed twice."
+        >
+          <table className="data-table mw-table">
+            <thead><tr><th>Parameter</th><th>Population</th><th className="num">Low</th><th className="num">High</th><th>Unit</th></tr></thead>
+            <tbody>
+              {inherited.slice(0, 40).map((row, index) => (
+                <tr key={index}>
+                  <td>{row.analyte}</td><td>{row.population ?? '—'}</td>
+                  <td className="num">{row.lower_limit ?? ''}</td><td className="num">{row.upper_limit ?? ''}</td>
+                  <td>{row.unit ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
       )}
     </>
   );
@@ -359,6 +569,8 @@ function Design({ template, reference, mayDesign, busy, setBusy, onError, onNoti
             <Switch label="Analyser messages" checked={draft.showInstrumentMessages} onChange={v => set({ showInstrumentMessages: v })} />
             <Switch label="Signature block" checked={draft.showSignature} onChange={v => set({ showSignature: v })} />
             <Switch label="Delivery state" checked={draft.showDeliveryState} onChange={v => set({ showDeliveryState: v })} />
+            <Switch label="Say who a range was set for" checked={draft.showRangePopulation}
+              onChange={v => set({ showRangePopulation: v })} />
             <Field label="Signature line reads" value={draft.signatureLine} onValue={v => set({ signatureLine: v })} />
             <Field label="Footer" value={draft.footerText} onValue={v => set({ footerText: v })} area wide />
             <Field label="Disclaimer" value={draft.disclaimer} onValue={v => set({ disclaimer: v })} area wide />
