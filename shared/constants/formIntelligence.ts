@@ -119,19 +119,19 @@ export const ANALYTE_DICTIONARY: AnalyteEntry[] = [
   { canonical: 'MPV', discipline: 'haematology', aliases: ['MEAN PLATELET VOLUME'] },
   { canonical: 'P-LCR', discipline: 'haematology', aliases: ['P LCR', 'PLCR', 'PLATELET LARGE CELL RATIO', 'LARGE PLATELET RATIO'] },
   { canonical: 'PCT', discipline: 'haematology', aliases: ['PLATELETCRIT', 'PLATELET CRIT'] },
-  { canonical: 'NEUT#', discipline: 'haematology', aliases: ['NE ABS', 'NEUT ABS', 'NEUTROPHIL ABS', 'NEUTROPHILS ABS', 'ABSOLUTE NEUTROPHIL COUNT', 'ANC', 'NEUTROPHIL COUNT'] },
-  { canonical: 'LYMPH#', discipline: 'haematology', aliases: ['LY ABS', 'LYMPH ABS', 'LYMPHOCYTE ABS', 'LYMPHOCYTES ABS', 'ABSOLUTE LYMPHOCYTE COUNT', 'LYMPHOCYTE COUNT'] },
-  { canonical: 'MONO#', discipline: 'haematology', aliases: ['MO ABS', 'MONO ABS', 'MONOCYTE ABS', 'MONOCYTES ABS', 'ABSOLUTE MONOCYTE COUNT', 'MONOCYTE COUNT'] },
-  { canonical: 'EO#', discipline: 'haematology', aliases: ['EO ABS', 'EOS ABS', 'EOSINOPHIL ABS', 'EOSINOPHILS ABS', 'ABSOLUTE EOSINOPHIL COUNT', 'EOSINOPHIL COUNT'] },
-  { canonical: 'BASO#', discipline: 'haematology', aliases: ['BA ABS', 'BASO ABS', 'BASOPHIL ABS', 'BASOPHILS ABS', 'ABSOLUTE BASOPHIL COUNT', 'BASOPHIL COUNT'] },
-  { canonical: 'NEUT%', discipline: 'haematology', aliases: ['NE PCT', 'NEUT PCT', 'NEUTROPHIL PCT', 'NEUTROPHILS PCT', 'NEUTROPHILS'] },
-  { canonical: 'LYMPH%', discipline: 'haematology', aliases: ['LY PCT', 'LYMPH PCT', 'LYMPHOCYTE PCT', 'LYMPHOCYTES PCT', 'LYMPHOCYTES'] },
-  { canonical: 'MONO%', discipline: 'haematology', aliases: ['MO PCT', 'MONO PCT', 'MONOCYTE PCT', 'MONOCYTES PCT', 'MONOCYTES'] },
-  { canonical: 'EO%', discipline: 'haematology', aliases: ['EO PCT', 'EOS PCT', 'EOSINOPHIL PCT', 'EOSINOPHILS PCT', 'EOSINOPHILS'] },
-  { canonical: 'BASO%', discipline: 'haematology', aliases: ['BA PCT', 'BASO PCT', 'BASOPHIL PCT', 'BASOPHILS PCT', 'BASOPHILS'] },
+  { canonical: 'NEUT#', discipline: 'haematology', aliases: ['NEUTROPHILS', 'NEUTROPHIL', 'NE ABS', 'NEUT ABS', 'NEUTROPHIL ABS', 'NEUTROPHILS ABS', 'ABSOLUTE NEUTROPHIL COUNT', 'ANC', 'NEUTROPHIL COUNT'] },
+  { canonical: 'LYMPH#', discipline: 'haematology', aliases: ['LYMPHOCYTES', 'LYMPHOCYTE', 'LY ABS', 'LYMPH ABS', 'LYMPHOCYTE ABS', 'LYMPHOCYTES ABS', 'ABSOLUTE LYMPHOCYTE COUNT', 'LYMPHOCYTE COUNT'] },
+  { canonical: 'MONO#', discipline: 'haematology', aliases: ['MONOCYTES', 'MONOCYTE', 'MO ABS', 'MONO ABS', 'MONOCYTE ABS', 'MONOCYTES ABS', 'ABSOLUTE MONOCYTE COUNT', 'MONOCYTE COUNT'] },
+  { canonical: 'EO#', discipline: 'haematology', aliases: ['EOSINOPHILS', 'EOSINOPHIL', 'EO ABS', 'EOS ABS', 'EOSINOPHIL ABS', 'EOSINOPHILS ABS', 'ABSOLUTE EOSINOPHIL COUNT', 'EOSINOPHIL COUNT'] },
+  { canonical: 'BASO#', discipline: 'haematology', aliases: ['BASOPHILS', 'BASOPHIL', 'BA ABS', 'BASO ABS', 'BASOPHIL ABS', 'BASOPHILS ABS', 'ABSOLUTE BASOPHIL COUNT', 'BASOPHIL COUNT'] },
+  { canonical: 'NEUT%', discipline: 'haematology', aliases: ['NE PCT', 'NEUT PCT', 'NEUTROPHIL PCT', 'NEUTROPHILS PCT'] },
+  { canonical: 'LYMPH%', discipline: 'haematology', aliases: ['LY PCT', 'LYMPH PCT', 'LYMPHOCYTE PCT', 'LYMPHOCYTES PCT'] },
+  { canonical: 'MONO%', discipline: 'haematology', aliases: ['MO PCT', 'MONO PCT', 'MONOCYTE PCT', 'MONOCYTES PCT'] },
+  { canonical: 'EO%', discipline: 'haematology', aliases: ['EO PCT', 'EOS PCT', 'EOSINOPHIL PCT', 'EOSINOPHILS PCT'] },
+  { canonical: 'BASO%', discipline: 'haematology', aliases: ['BA PCT', 'BASO PCT', 'BASOPHIL PCT', 'BASOPHILS PCT'] },
   { canonical: 'IG#', discipline: 'haematology', aliases: ['IG ABS', 'IMMATURE GRANULOCYTE ABS', 'IMMATURE GRANULOCYTES ABS'] },
   { canonical: 'IG%', discipline: 'haematology', aliases: ['IG PCT', 'IMMATURE GRANULOCYTE PCT', 'IMMATURE GRANULOCYTES PCT'] },
-  { canonical: 'RET#', discipline: 'haematology', aliases: ['RET ABS', 'RETIC ABS', 'RETICULOCYTE ABS', 'RETICULOCYTES ABS', 'ABSOLUTE RETICULOCYTE COUNT'] },
+  { canonical: 'RET#', discipline: 'haematology', aliases: ['RETICULOCYTES', 'RETICULOCYTE', 'RET ABS', 'RETIC ABS', 'RETICULOCYTE ABS', 'RETICULOCYTES ABS', 'ABSOLUTE RETICULOCYTE COUNT'] },
   { canonical: 'RET%', discipline: 'haematology', aliases: ['RET PCT', 'RETIC PCT', 'RETICULOCYTE PCT', 'RETICULOCYTES PCT'] },
   { canonical: 'IRF', discipline: 'haematology', aliases: ['IMMATURE RETICULOCYTE FRACTION'] },
   { canonical: 'LFR', discipline: 'haematology', aliases: ['LOW FLUORESCENCE RATIO', 'LOW FLUORESCENCE RETICULOCYTE'] },
@@ -139,6 +139,10 @@ export const ANALYTE_DICTIONARY: AnalyteEntry[] = [
   { canonical: 'HFR', discipline: 'haematology', aliases: ['HIGH FLUORESCENCE RATIO'] },
   { canonical: 'RET-HE', discipline: 'haematology', aliases: ['RET HE', 'RETHE', 'RETICULOCYTE HAEMOGLOBIN EQUIVALENT', 'RETICULOCYTE HEMOGLOBIN'] },
   { canonical: 'PLT', discipline: 'haematology', aliases: ['PLATELET', 'PLATELETS', 'PLATELET COUNT', 'PLT I', 'PLT F', 'PLT O'] },
+  { canonical: 'MID#', discipline: 'haematology', aliases: ['MID ABS', 'MID CELLS', 'MID CELL', 'MIDDLE CELLS'] },
+  { canonical: 'MID%', discipline: 'haematology', aliases: ['MID PCT', 'MID CELLS PCT', 'MIDDLE CELLS PCT'] },
+  { canonical: 'GRAN#', discipline: 'haematology', aliases: ['GRAN ABS', 'GRANULOCYTES', 'GRANULOCYTE'] },
+  { canonical: 'GRAN%', discipline: 'haematology', aliases: ['GRAN PCT', 'GRANULOCYTES PCT'] },
   { canonical: 'NRBC#', discipline: 'haematology', aliases: ['NRBC ABS', 'NUCLEATED RED BLOOD CELL ABS', 'NUCLEATED RBC ABS'] },
   { canonical: 'NRBC%', discipline: 'haematology', aliases: ['NRBC PCT', 'NUCLEATED RED BLOOD CELL PCT', 'NUCLEATED RBC PCT'] },
   { canonical: 'ESR', discipline: 'haematology', aliases: ['ERYTHROCYTE SEDIMENTATION RATE', 'SED RATE'] },
@@ -180,18 +184,32 @@ export const ANALYTE_DICTIONARY: AnalyteEntry[] = [
   { canonical: 'EGFR', discipline: 'chemistry', aliases: ['E GFR', 'ESTIMATED GFR', 'GFR'] },
 ];
 
+/** The same words in another order. `Calcium (Ionized)` is `Ionized calcium`. */
+function sortedKey(value: string): string {
+  const parts = analyteKey(value).split(' ').filter(Boolean);
+  return parts.length > 1 ? parts.slice().sort().join(' ') : '';
+}
+
 /** alias key → canonical, built once. */
 const ALIAS_INDEX: Map<string, string> = (() => {
   const index = new Map<string, string>();
+  const sorted = new Map<string, string>();
+  const claim = (map: Map<string, string>, key: string, canonical: string) => {
+    // First definition wins, so an alias listed under two parameters never
+    // silently changes meaning when the dictionary is extended.
+    if (key && !map.has(key)) map.set(key, canonical);
+  };
   for (const entry of ANALYTE_DICTIONARY) {
-    index.set(analyteKey(entry.canonical), entry.canonical);
+    claim(index, analyteKey(entry.canonical), entry.canonical);
+    claim(sorted, sortedKey(entry.canonical), entry.canonical);
     for (const alias of entry.aliases) {
-      const key = analyteKey(alias);
-      // First definition wins, so an alias listed under two parameters never
-      // silently changes meaning when the dictionary is extended.
-      if (!index.has(key)) index.set(key, entry.canonical);
+      claim(index, analyteKey(alias), entry.canonical);
+      claim(sorted, sortedKey(alias), entry.canonical);
     }
   }
+  // Word order is a weaker signal than the exact words, so it is consulted
+  // only where the exact words say nothing.
+  for (const [key, canonical] of sorted) claim(index, key, canonical);
   return index;
 })();
 
@@ -210,9 +228,9 @@ export function canonicalAnalyte(raw: unknown, extra?: Map<string, string> | nul
   for (const candidate of labelCandidates(raw)) {
     const key = analyteKey(candidate);
     if (!key) continue;
-    const added = extra?.get(key);
+    const added = extra?.get(key) ?? extra?.get(sortedKey(candidate));
     if (added) return added;
-    const known = ALIAS_INDEX.get(key);
+    const known = ALIAS_INDEX.get(key) ?? ALIAS_INDEX.get(sortedKey(candidate));
     if (known) return known;
   }
   return null;
@@ -275,6 +293,37 @@ export function matchAnalyte(analyserCode: unknown, analyserName: unknown, field
   // by resemblance, and resemblance is never certainty.
   if (fieldCanonical && sourceCanonical && fieldCanonical !== sourceCanonical) {
     return { score: 0, how: `the form asks for ${fieldCanonical} and the analyser sent ${sourceCanonical}` };
+  }
+
+  /*
+   * The parameter's name buried in a cluttered label.
+   *
+   * A form does not always give the box a tidy caption. The label cell can
+   * carry the required marker, the previous value, the unit, a method note and
+   * the reference range, and a page whose markup runs them together hands all
+   * of it over as one name. The parameter is still in there, so each run of one
+   * to three words is tried — but only a run that IS a parameter counts, and
+   * only when no other run names a different one. Two parameters hiding in the
+   * same label is ambiguity, and ambiguity is never filled.
+   */
+  if (sourceCanonical) {
+    const windows = new Set<string>();
+    for (const fieldKey of fieldKeys) {
+      const words = fieldKey.split(' ').filter(Boolean);
+      if (words.length < 2) continue;
+      for (let size = 1; size <= Math.min(3, words.length); size++) {
+        for (let at = 0; at + size <= words.length; at++) {
+          const found = canonicalAnalyte(words.slice(at, at + size).join(' '), extra);
+          if (found) windows.add(found);
+        }
+      }
+    }
+    if (windows.size === 1 && windows.has(sourceCanonical)) {
+      return { score: 85, how: `${sourceCanonical} was read out of the label “${cleanLabel(fieldLabel)}”` };
+    }
+    if (windows.size > 1) {
+      return { score: 0, how: `the label “${cleanLabel(fieldLabel)}” names more than one parameter` };
+    }
   }
 
   let best = { score: 0, how: 'no resemblance' };

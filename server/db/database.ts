@@ -8503,6 +8503,7 @@ CREATE TABLE IF NOT EXISTS rf_report_templates (
   show_signature INTEGER NOT NULL DEFAULT 1,
   signature_line TEXT,
   show_delivery_state INTEGER NOT NULL DEFAULT 0,
+  show_range_population INTEGER NOT NULL DEFAULT 0,
   watermark TEXT,
   disclaimer TEXT,
   is_default INTEGER NOT NULL DEFAULT 0,
@@ -8526,6 +8527,12 @@ CREATE TABLE IF NOT EXISTS rf_report_templates (
     const cols = new Set((database.prepare("PRAGMA table_info(rf_adapters)").all() as Array<{ name: string }>).map(c => c.name));
     if (!cols.has('auto_detect')) database.exec('ALTER TABLE rf_adapters ADD COLUMN auto_detect INTEGER NOT NULL DEFAULT 1');
     if (!cols.has('service_title')) database.exec('ALTER TABLE rf_adapters ADD COLUMN service_title TEXT');
+  }
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(rf_report_templates)").all() as Array<{ name: string }>).map(c => c.name));
+    if (cols.size && !cols.has('show_range_population')) {
+      database.exec('ALTER TABLE rf_report_templates ADD COLUMN show_range_population INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   database.exec(`
@@ -8562,6 +8569,43 @@ CREATE TABLE IF NOT EXISTS rf_scan_records (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_rf_scan_fill ON rf_scan_records(fill_id);
+
+-- What a result is read against when it is printed.
+--
+-- A reference range is the laboratory's own clinical decision, not something a
+-- system may invent, so none is assumed: a parameter with no range on file
+-- prints a dash rather than a number somebody might trust. These rows are what
+-- the laboratory decides, and they are kept here rather than added to the
+-- verification module's own register so that module keeps working exactly as it
+-- did — the report reads both, and prefers what was set for it.
+--
+-- A range may be narrowed by sex and by age, because on a full blood count most
+-- of them are: a newborn's haematocrit and a grown man's are different numbers
+-- and printing one against the other is worse than printing neither.
+CREATE TABLE IF NOT EXISTS rf_reference_ranges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  analyte TEXT NOT NULL,
+  -- The comparable form of the name, so a range set for HGB is found for a
+  -- result the analyser called Haemoglobin.
+  analyte_key TEXT NOT NULL,
+  sex TEXT NOT NULL DEFAULT 'any',        -- any | male | female
+  age_min_days INTEGER,                   -- null is "from birth"
+  age_max_days INTEGER,                   -- null is "no upper limit"
+  age_label TEXT,                         -- what the laboratory calls that band
+  low TEXT,
+  high TEXT,
+  -- For a parameter whose expected result is a word rather than a number.
+  text_value TEXT,
+  unit TEXT,
+  source TEXT,
+  note TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rf_ranges_key ON rf_reference_ranges(analyte_key, is_active);
 `);
 
   // SQLite plans a query from the statistics it collected the last time it was

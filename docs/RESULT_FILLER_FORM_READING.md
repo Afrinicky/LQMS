@@ -203,3 +203,98 @@ on its own and none of which said so:
 
 The host element is also pinned and sized to nothing rather than left inline in
 the page's flow, where a long form pushed it below the fold.
+
+---
+
+## 8. "The parameters do not match"
+
+Reported from the bench on a live LHIMS page: the barcode verified, 33 fields
+were read, and then nothing could be placed — *None of the 43 parameters in
+this transmission matches a field on this form.* Two faults, found by replaying
+the page's own layout.
+
+### The label was the unit
+
+The page put the result box and its unit dropdown in one container. The label
+was taken from that container's text, and a `<select>`'s text is its selected
+option — so every parameter on the page was called `x10^3/uL`, `g/DL`, `%`.
+Replayed against the reader as it was, the labels came back:
+
+```
+["x10^3/uL %", "x10^12/L %", "g/DL %", "% %", "FL %", "pg %", …]
+```
+
+which is exactly nothing, on every row, on a page that looks perfectly
+readable.
+
+**A caption is text that is not inside another control.** Text within a
+`select`, `option`, `button`, `input` or `textarea` is no longer read as a
+name. Where what remains still does not read like a parameter — too long, too
+many words, or carrying a reference range — the leading words are used, which
+is where the name sits on every form laid out this way.
+
+The matcher also now looks for a parameter *inside* a cluttered label: each run
+of one to three words is tried, only a run that **is** a known parameter
+counts, and a label naming two of them is refused rather than guessed at.
+
+### "Neutrophils" meant the percentage
+
+SECHLIMS's own instrument map names the **absolute** count `Neutrophils` and
+the percentage `Neutrophils %`. The bare plural was listed in the dictionary
+under `NEUT%`, so an absolute neutrophil count would have been filed as a
+percentage — the single mistake the `#`/`%` rule exists to prevent, arriving
+through the back door of a synonym.
+
+The bare plurals — Neutrophils, Lymphocytes, Monocytes, Eosinophils,
+Basophils, Reticulocytes — now mean the absolute count, as this system means
+them. Mid cells and granulocytes were added for three-part differentials, and
+word order no longer hides a parameter: `Calcium (Ionized)` and
+`Ionized calcium` are one thing.
+
+### And the refusal now says what it saw
+
+A plan that cannot be built returns the labels the form asked for beside the
+parameters the transmission holds, and the bubble shows them in two columns
+with the closest near-misses underneath. "They do not match" was never
+something anybody could act on.
+
+---
+
+## 9. Reference ranges
+
+The printed report showed a dash in every reference column, because nothing was
+configured for it to read against. A reference range is a clinical decision the
+laboratory owns, so none is assumed — a dash is the honest answer where no
+range is on file, and a number nobody decided on would be worse than useless.
+
+**Result Reports → Reference ranges** is where they are kept. A range may be
+narrowed by sex and by age, because on a full blood count most of them are: a
+newborn's haematocrit and a grown man's are different numbers and printing one
+against the other is worse than printing neither. The most specific range wins
+— one set for this sex beats one set for anybody, a narrow age band beats a
+wide one — and a range whose band excludes the patient is not used at all,
+because a range that does not apply is the wrong answer rather than a fallback.
+Where the transmission carried no age or sex, only ranges that ask for neither
+are eligible.
+
+Two registers are read, in order of authority: the ranges set here, and then
+the verification module's own reference intervals for any parameter this one
+says nothing about — so a laboratory that recorded them there does not type
+them twice, and that module is untouched.
+
+**A starting point, not a decision.** *Load the ranges our forms use* writes
+the ranges this laboratory's own LHIMS result-entry forms already display,
+transcribed from them: the full blood count with its newborn, infant and
+paediatric haematocrit and red cell bands, and the urea, electrolyte, renal and
+liver panels. Every row is marked with where it came from, a parameter the
+laboratory has already decided on is left untouched, and the screen says they
+must be reviewed before a report is released on them.
+
+### The same mistake, caught once more
+
+The first version keyed a range on `codeKey`, which strips punctuation — so
+`NEUT#` and `NEUT%` shared a key and the neutrophil **percentage** printed
+against the absolute count's range, 2.00–7.00, on a result of 57.3. Ranges are
+keyed on `analyteKey` now, where `#` and `%` survive as words. It is the third
+time that distinction has had to be defended in this module, which is a fair
+measure of how easily it is lost.

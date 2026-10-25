@@ -93,6 +93,8 @@ export interface ReportTemplate {
   showSignature: boolean;
   signatureLine: string;
   showDeliveryState: boolean;
+  /** Print the sex or age band a range was set for, beside the range. */
+  showRangePopulation: boolean;
   watermark: string;
   disclaimer: string;
   isDefault?: boolean;
@@ -129,6 +131,7 @@ export const DEFAULT_TEMPLATE: ReportTemplate = {
   showSignature: true,
   signatureLine: 'Authorised by',
   showDeliveryState: false,
+  showRangePopulation: false,
   watermark: '',
   disclaimer: '',
   isDefault: true,
@@ -182,6 +185,121 @@ export function outsideRange(value: unknown, lower: unknown, upper: unknown): 'h
   if (Number.isFinite(hi) && v > hi) return 'high';
   if (Number.isFinite(lo) && v < lo) return 'low';
   return null;
+}
+
+/* ============================================================================
+   Reference ranges
+   ----------------------------------------------------------------------------
+   A range is the laboratory's clinical decision. Nothing here invents one: a
+   parameter with none on file prints a dash, because a number somebody might
+   trust is worse than an honest blank.
+
+   What this does decide is WHICH of the laboratory's ranges applies, when it
+   has set several — and on a full blood count it usually has, because a
+   newborn's haematocrit and a grown man's are different numbers.
+   ========================================================================= */
+export const RANGE_SEXES = ['any', 'male', 'female'] as const;
+export type RangeSex = (typeof RANGE_SEXES)[number];
+
+export const RANGE_SEX_LABELS: Record<RangeSex, string> = {
+  any: 'Any',
+  male: 'Male',
+  female: 'Female',
+};
+
+export const AGE_UNITS = [
+  { key: 'days', label: 'days', days: 1 },
+  { key: 'weeks', label: 'weeks', days: 7 },
+  { key: 'months', label: 'months', days: 30.4375 },
+  { key: 'years', label: 'years', days: 365.25 },
+] as const;
+export type AgeUnit = (typeof AGE_UNITS)[number]['key'];
+
+export function ageToDays(value: number | null | undefined, unit: AgeUnit): number | null {
+  if (value == null || !Number.isFinite(Number(value))) return null;
+  const found = AGE_UNITS.find(entry => entry.key === unit) ?? AGE_UNITS[3];
+  return Math.round(Number(value) * found.days);
+}
+
+/** `0–56` days reads as `birth – 8 weeks`, which is how a laboratory says it. */
+export function describeAgeBand(minDays: number | null, maxDays: number | null): string {
+  if (minDays == null && maxDays == null) return 'Any age';
+  const say = (days: number) => {
+    if (days < 14) return `${days} day${days === 1 ? '' : 's'}`;
+    if (days < 60) return `${Math.round(days / 7)} weeks`;
+    if (days < 730) return `${Math.round(days / 30.4375)} months`;
+    return `${Math.round(days / 365.25)} years`;
+  };
+  if (minDays == null) return `under ${say(maxDays as number)}`;
+  if (maxDays == null) return `${say(minDays)} and over`;
+  return `${say(minDays)} – ${say(maxDays)}`;
+}
+
+export interface ReferenceRange {
+  id?: number;
+  analyte: string;
+  sex: RangeSex;
+  ageMinDays: number | null;
+  ageMaxDays: number | null;
+  ageLabel: string | null;
+  low: string | null;
+  high: string | null;
+  textValue: string | null;
+  unit: string | null;
+  source: string | null;
+  note: string | null;
+  isActive?: boolean;
+}
+
+/** Whole days between a birth date and the day the sample was run. */
+export function ageInDays(birthDate: string | null | undefined, on: string | null | undefined): number | null {
+  if (!birthDate) return null;
+  const born = Date.parse(`${String(birthDate).slice(0, 10)}T00:00:00Z`);
+  const at = on ? Date.parse(`${String(on).replace(' ', 'T').slice(0, 19)}Z`) : Date.now();
+  if (!Number.isFinite(born) || !Number.isFinite(at) || at < born) return null;
+  return Math.floor((at - born) / 86_400_000);
+}
+
+/**
+ * Which of the laboratory's ranges applies to this result.
+ *
+ * The most specific wins: a range set for this sex beats one set for anybody,
+ * and a narrow age band beats a wide one. A range whose band excludes the
+ * patient is not used at all — a range that does not apply is not a fallback,
+ * it is the wrong answer.
+ *
+ * Where the patient's age or sex is unknown — the transmission carried none —
+ * only ranges that ask for neither are eligible, for the same reason.
+ */
+export function pickRange(
+  ranges: ReferenceRange[],
+  patient: { sex?: string | null; ageDays?: number | null },
+): ReferenceRange | null {
+  const sex = String(patient.sex ?? '').trim().toLowerCase().startsWith('m') ? 'male'
+    : String(patient.sex ?? '').trim().toLowerCase().startsWith('f') ? 'female' : null;
+  const age = patient.ageDays ?? null;
+
+  let best: { range: ReferenceRange; score: number } | null = null;
+  for (const range of ranges) {
+    if (range.isActive === false) continue;
+
+    let score = 0;
+    if (range.sex !== 'any') {
+      if (!sex || range.sex !== sex) continue;
+      score += 10;
+    }
+    const banded = range.ageMinDays != null || range.ageMaxDays != null;
+    if (banded) {
+      if (age == null) continue;
+      if (range.ageMinDays != null && age < range.ageMinDays) continue;
+      if (range.ageMaxDays != null && age > range.ageMaxDays) continue;
+      // A narrower band is a more deliberate decision than a wide one.
+      const width = (range.ageMaxDays ?? 40_000) - (range.ageMinDays ?? 0);
+      score += 20 + Math.max(0, 20 - Math.round(width / 2_000));
+    }
+    if (!best || score > best.score) best = { range, score };
+  }
+  return best?.range ?? null;
 }
 
 /** The export formats offered beside the on-screen report. */

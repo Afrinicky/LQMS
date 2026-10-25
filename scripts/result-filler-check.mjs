@@ -84,6 +84,9 @@ writeFileSync(join(WATCH, `${SAMPLE}.txt`), [
   'R|1|^^^^WBC^1|7.42|10*3/uL||N||F',
   'R|2|^^^^HGB^3|13.8|g/dL||N||F',
   'R|3|^^^^PLT^8|232|10*3/uL||N||F',
+  // A parameter no laboratory holds a range for, so the report has something
+  // to print a dash against whatever else has been set.
+  'R|4|^^^^ZZUNKNOWN^99|1.23|u||N||F',
   'L|1|N',
 ].join('\r'));
 
@@ -495,6 +498,105 @@ check('one name cannot be taught to mean two parameters', refusedAlias.status ==
 const repeatAlias = await j('/result-filler/aliases', { method: 'POST', token: ADMIN, body: { canonical: 'GLUCOSE', alias: LOCAL_NAME } });
 check('nor taught twice', repeatAlias.status === 409, `${repeatAlias.status}`);
 
+/* ============ the names SECHLIMS itself gives an analyser's parameters ===== */
+/**
+ * The bridge does not hand on the analyser's mnemonic alone: it maps it through
+ * the instrument profile, so a Sysmex XN's HGB arrives as "Haemoglobin" and its
+ * NEUT# as "Neutrophils". Those are the words the matcher actually sees, and
+ * the bare plural is the ABSOLUTE count — filing it as a percentage would be
+ * the one mistake this matcher exists to prevent.
+ */
+section('The names SECHLIMS gives an analyser’s parameters');
+
+const SYSMEX_SAMPLE = `SX${stamp}`;
+const sysmexLink = await j('/instrument-links', {
+  method: 'POST', token: ADMIN,
+  body: {
+    name: `Haematology scan ${stamp}`, mode: 'file_drop', protocol: 'astm',
+    role: 'sechlims_only', watchPath: WATCH, profileKey: 'sysmex_xn',
+  },
+});
+const SYSMEX = [
+  ['WBC', '8.92'], ['RBC', '4.40'], ['HGB', '10.2'], ['HCT', '30.9'], ['MCV', '70.2'],
+  ['MCH', '23.2'], ['MCHC', '33.1'], ['PLT', '288'],
+  ['NEUT#', '5.11'], ['LYMPH#', '2.80'], ['MONO#', '0.41'], ['EO#', '0.09'], ['BASO#', '0.03'],
+  ['NEUT%', '57.3'], ['LYMPH%', '31.4'], ['MONO%', '4.6'], ['EO%', '1.0'], ['BASO%', '0.3'],
+  ['RDW-SD', '41.1'], ['RDW-CV', '15.2'], ['PDW', '11.9'], ['MPV', '10.4'], ['P-LCR', '29.1'],
+  ['PCT', '0.30'], ['RET#', '55.0'], ['RET%', '1.25'],
+];
+writeFileSync(join(WATCH, `${SYSMEX_SAMPLE}.txt`), [
+  'H|\\^&|||XN-550^1|||||||P|1',
+  `P|1||AAN5678||ADOM^JADEN||19900101|M`,
+  `O|1|${SYSMEX_SAMPLE}||^^^FBC|R||||||||||||||||||F`,
+  ...SYSMEX.map(([code, value], i) => `R|${i + 1}|^^^^${code}^${i + 1}|${value}|u||N||F`),
+  'L|1|N',
+].join('\r'));
+await new Promise(resolve => setTimeout(resolve, 2_600));
+await j(`/instrument-links/${sysmexLink.json?.id}/fetch`, { method: 'POST', token: ADMIN, body: {} });
+
+const sysmexPlan = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: SYSMEX_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: FBC_FIELDS,
+  },
+});
+const byField = Object.fromEntries((sysmexPlan.json?.assignments ?? []).map(a => [a.fieldLabel, a.value]));
+check('every parameter a Sysmex XN sends reaches its LHIMS box',
+  (sysmexPlan.json?.assignments ?? []).length === SYSMEX.length,
+  `${(sysmexPlan.json?.assignments ?? []).length} of ${SYSMEX.length}; unmatched ${JSON.stringify(sysmexPlan.json?.unmatched)}`);
+check('“Haemoglobin” reached HGB and “Platelets” reached PLT',
+  byField['HGB'] === '10.2' && byField['PLT'] === '288', JSON.stringify(byField));
+check('“Neutrophils” reached NEUT#, and “Neutrophils %” reached NEUT%',
+  byField['NEUT#'] === '5.11' && byField['NEUT%'] === '57.3',
+  `NEUT#=${byField['NEUT#']} NEUT%=${byField['NEUT%']}`);
+check('and the same for the rest of the differential',
+  byField['LYMPH#'] === '2.80' && byField['LYMPH%'] === '31.4'
+  && byField['MONO#'] === '0.41' && byField['EO#'] === '0.09' && byField['BASO#'] === '0.03',
+  JSON.stringify(byField));
+check('“Reticulocytes” reached RET# rather than RET%',
+  byField['RET#'] === '55.0' && byField['RET%'] === '1.25',
+  `RET#=${byField['RET#']} RET%=${byField['RET%']}`);
+
+/* ---- a label a page ran together with everything in its cell ----------- */
+/**
+ * Reported from the bench as "it says the parameters do not match": a page that
+ * put the box and its unit dropdown in one container made every label read as
+ * the UNIT — "x10^3/uL" as the name of a parameter — so nothing matched
+ * anything. The page is read better now; the matcher also looks for the
+ * parameter inside a cluttered label, and refuses one naming two.
+ */
+const CLUTTERED = ['WBC * 0 x10^3/uL Machine 5-10', 'HGB * 0 g/DL Machine 11.00-16.00']
+  .map((label, index) => field(index, label));
+const cluttered = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: SYSMEX_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: CLUTTERED,
+  },
+});
+check('a parameter buried in a cluttered label is still placed',
+  (cluttered.json?.assignments ?? []).length === 2
+  && cluttered.json.assignments.every(a => /read out of the label/.test(a.how)),
+  JSON.stringify(cluttered.json?.assignments?.map(a => `${a.sourceCode}: ${a.how}`) ?? cluttered.json));
+
+const ambiguous = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: SYSMEX_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: [field(0, 'HGB and HCT on one line')],
+  },
+});
+check('a label naming two parameters is filled from neither', ambiguous.status === 409, `${ambiguous.status}`);
+
+check('a refusal says what the form asked for, so it can be acted on',
+  Array.isArray(ambiguous.json?.unfilled) && Array.isArray(ambiguous.json?.unmatched)
+  && ambiguous.json.unfilled.length > 0,
+  JSON.stringify(ambiguous.json).slice(0, 200));
+
 /* ------------------------------------------------------------- withdrawal */
 section('Revoking a browser');
 const deviceId = device.json?.id;
@@ -538,6 +640,94 @@ check('the report exports as Word', docx.status === 200 && docxBytes.length > 2_
 const xlsx = await fetch(`${BASE}/transmission-reports/export.xlsx?ids=${reportId}`, { headers: { Authorization: `Bearer ${ADMIN}` } });
 const xlsxBytes = Buffer.from(await xlsx.arrayBuffer());
 check('the report exports as Excel', xlsx.status === 200 && xlsxBytes.length > 2_000 && xlsxBytes.subarray(0, 2).toString() === 'PK');
+
+/* ===================================================== the reference ranges */
+/**
+ * A reference range is the laboratory's clinical decision, so none is assumed.
+ * What is proved here is that a parameter with no range prints a dash, that a
+ * range set once is found whatever the analyser called the parameter, and that
+ * the most specific range wins — a newborn's haematocrit is not an adult's.
+ */
+section('What a printed result is read against');
+
+const beforeRanges = await j(`/transmission-reports/${reportId}`, { token: ADMIN });
+const unranged = (beforeRanges.json?.report?.parameters ?? []).find(p => p.code === 'ZZUNKNOWN');
+check('a parameter with no range on file prints nothing',
+  Boolean(unranged) && !unranged.referenceLow && !unranged.referenceHigh && !unranged.referenceText,
+  JSON.stringify(unranged));
+
+const loaded = await j('/transmission-reports/ranges/load-form-ranges', { method: 'POST', token: ADMIN, body: {} });
+check('the ranges the laboratory’s own forms use are on the register',
+  ((loaded.json?.added ?? 0) + (loaded.json?.kept ?? 0)) > 50,
+  JSON.stringify(loaded.json).slice(0, 180));
+
+const loadedAgain = await j('/transmission-reports/ranges/load-form-ranges', { method: 'POST', token: ADMIN, body: {} });
+check('loading them again changes nothing the laboratory has set',
+  loadedAgain.json?.added === 0 && (loadedAgain.json?.kept ?? 0) > 50,
+  JSON.stringify(loadedAgain.json).slice(0, 160));
+
+const bands = await j('/transmission-reports/ranges', { token: ADMIN });
+check('a parameter that needs several bands got all of them',
+  (bands.json?.rows ?? []).filter(row => row.analyte === 'HCT').length >= 7,
+  `${(bands.json?.rows ?? []).filter(row => row.analyte === 'HCT').length} band(s) for HCT`);
+
+const afterRanges = await j(`/transmission-reports/${reportId}`, { token: ADMIN });
+const hgb = (afterRanges.json?.report?.parameters ?? []).find(p => /HGB|haemoglobin/i.test(p.analyte));
+check('and a result is then read against one',
+  hgb?.referenceLow === '11.00' && hgb?.referenceHigh === '16.00',
+  JSON.stringify(hgb));
+
+// The transmission in this check carries HGB; the range was set under HGB and
+// found for it however the analyser named the parameter.
+const printedWithRanges = await j(`/transmission-reports/${reportId}/print`, { token: ADMIN });
+check('the printed report shows the range', printedWithRanges.text.includes('11.00'),
+  printedWithRanges.text.slice(0, 0));
+
+const added = await j('/transmission-reports/ranges', {
+  method: 'POST', token: ADMIN,
+  body: { analyte: 'HCT', sex: 'male', low: '42', high: '52', unit: '%' },
+});
+check('a range can be set for one sex', added.status === 201, JSON.stringify(added.json));
+
+const newborn = await j('/transmission-reports/ranges', {
+  method: 'POST', token: ADMIN,
+  body: { analyte: 'HCT', ageMaxDays: 56, ageLabel: 'Newborn', low: '44', high: '64', unit: '%' },
+});
+check('and another for an age band', newborn.status === 201);
+
+const badBand = await j('/transmission-reports/ranges', {
+  method: 'POST', token: ADMIN,
+  body: { analyte: 'HCT', ageMinDays: 400, ageMaxDays: 100, low: '1', high: '2' },
+});
+check('an age band that ends before it begins is refused', badBand.status === 400, `${badBand.status}`);
+
+const emptyRange = await j('/transmission-reports/ranges', { method: 'POST', token: ADMIN, body: { analyte: 'HCT' } });
+check('a range with neither a number nor a word is refused', emptyRange.status === 400, `${emptyRange.status}`);
+
+/*
+ * The distinction that must survive everywhere it appears: an absolute count
+ * and a percentage are different parameters, and a range keyed on the letters
+ * of a name alone would print one against the other.
+ */
+const differentialReport = await j(`/transmission-reports?search=${encodeURIComponent(SYSMEX_SAMPLE)}`, { token: ADMIN });
+const differentialId = differentialReport.json?.rows?.[0]?.id;
+const differential = await j(`/transmission-reports/${differentialId}`, { token: ADMIN });
+const parameterRange = (code) => {
+  const found = (differential.json?.report?.parameters ?? []).find(p => p.code === code);
+  return found ? `${found.referenceLow}-${found.referenceHigh}` : null;
+};
+check('the absolute neutrophil count is read against the absolute range',
+  parameterRange('NEUT#') === '2.00-7.00', `NEUT# -> ${parameterRange('NEUT#')}`);
+check('and the percentage against the percentage range',
+  parameterRange('NEUT%') === '50.0-70.0', `NEUT% -> ${parameterRange('NEUT%')}`);
+check('the same holds for the reticulocytes',
+  parameterRange('RET#') === '0.0-999.9' && parameterRange('RET%') === '0.5-2',
+  `RET# -> ${parameterRange('RET#')}, RET% -> ${parameterRange('RET%')}`);
+
+const ranges = await j('/transmission-reports/ranges', { token: ADMIN });
+check('the register reads the age band back in words',
+  (ranges.json?.rows ?? []).some(row => row.analyte === 'HCT' && /weeks|days/.test(row.ageBand ?? '')),
+  JSON.stringify((ranges.json?.rows ?? []).filter(r => r.analyte === 'HCT').map(r => r.ageBand)));
 
 /* ------------------------------------------------------------ the package */
 section('The extension package');
