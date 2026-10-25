@@ -89,16 +89,65 @@
    * name. Joining the text nodes keeps them apart, which is what a person
    * reading the cell sees.
    */
+  const NOT_A_CAPTION = 'SELECT, OPTION, BUTTON, INPUT, TEXTAREA, SCRIPT, STYLE';
+
   function labelTextOf(element) {
     if (!element) return '';
     const parts = [];
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+      acceptNode: node => {
+        /*
+         * A caption is text that is not inside another control.
+         *
+         * Where a form puts the box and its unit dropdown in one cell, the
+         * cell's text is the UNIT — and a parameter called "x10^3/uL" matches
+         * nothing at all, on every row, which is exactly how a form that looks
+         * perfectly readable fills nothing. The selected option, the button
+         * faces and the fields' own values are not what the box is called.
+         */
+        const parent = node.parentElement;
+        return parent && parent.closest(NOT_A_CAPTION)
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT;
+      },
+    });
     while (walker.nextNode()) {
       const text = squash(walker.currentNode.textContent);
       if (text) parts.push(text);
       if (parts.length > 40) break;
     }
     return parts.join(' ');
+  }
+
+  /**
+   * Does this read like the name of a parameter?
+   *
+   * Used to tell a caption from a whole row swept up by a page whose markup
+   * gives nothing smaller to hold on to.
+   */
+  function looksLikeParameterName(label) {
+    if (!label || label.length > 56) return false;
+    if (/\d\s*[-\u2013]\s*\d/.test(label)) return false;      // a reference range
+    if (/\bmachine\b|\bsave\b|\bselect unit\b/i.test(label)) return false;
+    return label.split(' ').filter(Boolean).length <= 7;
+  }
+
+  /**
+   * The best name available for a box, out of what its container says.
+   *
+   * The whole text first; failing that, the leading words, which is where a
+   * parameter's name sits on every form laid out this way.
+   */
+  function bestLabelFrom(element, control) {
+    const own = labelTextOf(element).replace(textOf(control), '');
+    const joined = cleanLabel(own);
+    if (looksLikeParameterName(joined)) return joined;
+    const words = joined.split(' ').filter(Boolean);
+    for (let take = Math.min(4, words.length); take >= 1; take--) {
+      const candidate = cleanLabel(words.slice(0, take).join(' '));
+      if (looksLikeParameterName(candidate)) return candidate;
+    }
+    return joined;
   }
 
   /** The decoration a form puts on a label is not part of its name. */
@@ -327,8 +376,9 @@
     if (row) {
       const cells = cellsOf(row);
       const inputs = cells.flatMap(cell => Array.from(cell.querySelectorAll(FILLABLE)).filter(isFillable));
-      if (inputs.length <= 1 && cells.length) {
-        const label = cleanLabel(labelTextOf(cells[0]));
+      // A first cell holding the box itself is not its caption.
+      if (inputs.length <= 1 && cells.length && !cells[0].contains(control)) {
+        const label = bestLabelFrom(cells[0], control);
         if (label) return { label, row, cells };
       }
     }
@@ -339,7 +389,7 @@
     }
     const wrapping = control.closest('label');
     if (wrapping) {
-      const label = cleanLabel(labelTextOf(wrapping).replace(textOf(control), ''));
+      const label = bestLabelFrom(wrapping, control);
       if (label) return { label, row, cells: row ? cellsOf(row) : [] };
     }
     // A container a few levels up that holds this one box and some words.
@@ -347,8 +397,8 @@
     for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
       const inputs = Array.from(node.querySelectorAll(FILLABLE)).filter(isFillable);
       if (inputs.length !== 1) break;
-      const label = cleanLabel(labelTextOf(node).replace(textOf(control), ''));
-      if (label && label.length <= 80) return { label, row, cells: row ? cellsOf(row) : [] };
+      const label = bestLabelFrom(node, control);
+      if (label && label.length <= 90) return { label, row, cells: row ? cellsOf(row) : [] };
     }
     const previous = control.previousElementSibling;
     const label = previous ? cleanLabel(labelTextOf(previous)) : '';
@@ -523,6 +573,12 @@
 .results li .flag { font-weight: 700; margin-left: 4px; }
 .results li .flag.alert { color: #B91C1C; }
 .results li .flag.quiet { color: #94A3B8; font-weight: 400; }
+.card.compare { flex-direction: row; gap: 12px; }
+.card.compare .col { flex: 1; min-width: 0; }
+.card.compare h5 { margin: 0 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #64748B; font-weight: 700; }
+.card.compare ul { list-style: none; margin: 0; padding: 0; max-height: 150px; overflow-y: auto; }
+.card.compare li { font-size: 11px; padding: 1px 0; color: #0F172A; word-break: break-word; }
+.card.compare li.more { color: #94A3B8; }
 select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; border: 1px solid #CBD5E1;
   border-radius: 8px; background: #fff; }
 .ft { padding: 10px 12px; border-top: 1px solid #E2E8F0; background: #fff; display: flex; flex-direction: column; gap: 8px; }
@@ -557,6 +613,7 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     notice: null,
     chosenId: '',
     held: [],          // fields whose boxes already had something in them
+    mismatch: null,    // what the form asked for against what the transmission holds
     heldPlan: null,
     lastUrl: location.href,
     lastIdentifier: '',
@@ -768,6 +825,20 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     </div>`);
 
     if (state.error) parts.push(`<p class="msg crit">${escapeHtml(state.error)}</p>`);
+
+    if (state.mismatch) {
+      const column = (title, items) => `<div class="col"><h5>${title}</h5><ul>${
+        items.slice(0, 10).map(item => `<li>${escapeHtml(item)}</li>`).join('')
+      }${items.length > 10 ? `<li class="more">and ${items.length - 10} more</li>` : ''}</ul></div>`;
+      parts.push(`<div class="card compare">
+        ${column('This form asks for', state.mismatch.asksFor.map(f => f.label))}
+        ${column('The transmission has', state.mismatch.carries.map(r => r.analyte || r.code))}
+      </div>`);
+      if (state.mismatch.suggestions.length) {
+        parts.push(`<p class="msg warn">Closest: ${state.mismatch.suggestions.slice(0, 3)
+          .map(s => `${escapeHtml(s.sourceCode)} → ${escapeHtml(s.fieldLabel)}`).join(', ')}. Add an alias under Result Filler to accept it.</p>`);
+      }
+    }
     if (state.notice) parts.push(`<p class="msg">${escapeHtml(state.notice)}</p>`);
 
     if (verdict?.transmissions?.length > 1) {
@@ -928,7 +999,17 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     });
     state.busy = false;
 
-    if (!response.ok) { state.error = response.error; render(); return; }
+    if (!response.ok) {
+      state.error = response.error;
+      // Show the two lists side by side: a mismatch nobody can see is a
+      // mismatch nobody can fix.
+      state.mismatch = response.detail?.unmatched?.length || response.detail?.unfilled?.length
+        ? { carries: response.detail.unmatched || [], asksFor: response.detail.unfilled || [], suggestions: response.detail.suggestions || [] }
+        : null;
+      render();
+      return;
+    }
+    state.mismatch = null;
     const plan = response.data;
     const entries = plan.mode === 'detected' ? resolveAssignments(plan) : resolveConfigured(plan);
 

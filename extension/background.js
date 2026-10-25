@@ -394,7 +394,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!handler) { sendResponse({ ok: false, error: `Unknown request: ${message?.type}` }); return false; }
   handler(message.payload || message || {})
     .then(data => sendResponse({ ok: true, data }))
-    .catch(error => sendResponse({ ok: false, error: error?.message || String(error), code: error?.code || null }));
+    .catch(error => sendResponse({
+      ok: false,
+      error: error?.message || String(error),
+      code: error?.code || null,
+      // What SECHLIMS said along with the refusal — which parameters it holds
+      // and which fields it could not place them in. A refusal nobody can act
+      // on is the fault this whole panel exists to prevent.
+      detail: error?.payload || null,
+    }));
   return true; // the answer comes later
 });
 

@@ -495,6 +495,105 @@ check('one name cannot be taught to mean two parameters', refusedAlias.status ==
 const repeatAlias = await j('/result-filler/aliases', { method: 'POST', token: ADMIN, body: { canonical: 'GLUCOSE', alias: LOCAL_NAME } });
 check('nor taught twice', repeatAlias.status === 409, `${repeatAlias.status}`);
 
+/* ============ the names SECHLIMS itself gives an analyser's parameters ===== */
+/**
+ * The bridge does not hand on the analyser's mnemonic alone: it maps it through
+ * the instrument profile, so a Sysmex XN's HGB arrives as "Haemoglobin" and its
+ * NEUT# as "Neutrophils". Those are the words the matcher actually sees, and
+ * the bare plural is the ABSOLUTE count — filing it as a percentage would be
+ * the one mistake this matcher exists to prevent.
+ */
+section('The names SECHLIMS gives an analyser’s parameters');
+
+const SYSMEX_SAMPLE = `SX${stamp}`;
+const sysmexLink = await j('/instrument-links', {
+  method: 'POST', token: ADMIN,
+  body: {
+    name: `Haematology scan ${stamp}`, mode: 'file_drop', protocol: 'astm',
+    role: 'sechlims_only', watchPath: WATCH, profileKey: 'sysmex_xn',
+  },
+});
+const SYSMEX = [
+  ['WBC', '8.92'], ['RBC', '4.40'], ['HGB', '10.2'], ['HCT', '30.9'], ['MCV', '70.2'],
+  ['MCH', '23.2'], ['MCHC', '33.1'], ['PLT', '288'],
+  ['NEUT#', '5.11'], ['LYMPH#', '2.80'], ['MONO#', '0.41'], ['EO#', '0.09'], ['BASO#', '0.03'],
+  ['NEUT%', '57.3'], ['LYMPH%', '31.4'], ['MONO%', '4.6'], ['EO%', '1.0'], ['BASO%', '0.3'],
+  ['RDW-SD', '41.1'], ['RDW-CV', '15.2'], ['PDW', '11.9'], ['MPV', '10.4'], ['P-LCR', '29.1'],
+  ['PCT', '0.30'], ['RET#', '55.0'], ['RET%', '1.25'],
+];
+writeFileSync(join(WATCH, `${SYSMEX_SAMPLE}.txt`), [
+  'H|\\^&|||XN-550^1|||||||P|1',
+  `P|1||AAN5678||ADOM^JADEN||19900101|M`,
+  `O|1|${SYSMEX_SAMPLE}||^^^FBC|R||||||||||||||||||F`,
+  ...SYSMEX.map(([code, value], i) => `R|${i + 1}|^^^^${code}^${i + 1}|${value}|u||N||F`),
+  'L|1|N',
+].join('\r'));
+await new Promise(resolve => setTimeout(resolve, 2_600));
+await j(`/instrument-links/${sysmexLink.json?.id}/fetch`, { method: 'POST', token: ADMIN, body: {} });
+
+const sysmexPlan = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: SYSMEX_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: FBC_FIELDS,
+  },
+});
+const byField = Object.fromEntries((sysmexPlan.json?.assignments ?? []).map(a => [a.fieldLabel, a.value]));
+check('every parameter a Sysmex XN sends reaches its LHIMS box',
+  (sysmexPlan.json?.assignments ?? []).length === SYSMEX.length,
+  `${(sysmexPlan.json?.assignments ?? []).length} of ${SYSMEX.length}; unmatched ${JSON.stringify(sysmexPlan.json?.unmatched)}`);
+check('“Haemoglobin” reached HGB and “Platelets” reached PLT',
+  byField['HGB'] === '10.2' && byField['PLT'] === '288', JSON.stringify(byField));
+check('“Neutrophils” reached NEUT#, and “Neutrophils %” reached NEUT%',
+  byField['NEUT#'] === '5.11' && byField['NEUT%'] === '57.3',
+  `NEUT#=${byField['NEUT#']} NEUT%=${byField['NEUT%']}`);
+check('and the same for the rest of the differential',
+  byField['LYMPH#'] === '2.80' && byField['LYMPH%'] === '31.4'
+  && byField['MONO#'] === '0.41' && byField['EO#'] === '0.09' && byField['BASO#'] === '0.03',
+  JSON.stringify(byField));
+check('“Reticulocytes” reached RET# rather than RET%',
+  byField['RET#'] === '55.0' && byField['RET%'] === '1.25',
+  `RET#=${byField['RET#']} RET%=${byField['RET%']}`);
+
+/* ---- a label a page ran together with everything in its cell ----------- */
+/**
+ * Reported from the bench as "it says the parameters do not match": a page that
+ * put the box and its unit dropdown in one container made every label read as
+ * the UNIT — "x10^3/uL" as the name of a parameter — so nothing matched
+ * anything. The page is read better now; the matcher also looks for the
+ * parameter inside a cluttered label, and refuses one naming two.
+ */
+const CLUTTERED = ['WBC * 0 x10^3/uL Machine 5-10', 'HGB * 0 g/DL Machine 11.00-16.00']
+  .map((label, index) => field(index, label));
+const cluttered = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: SYSMEX_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: CLUTTERED,
+  },
+});
+check('a parameter buried in a cluttered label is still placed',
+  (cluttered.json?.assignments ?? []).length === 2
+  && cluttered.json.assignments.every(a => /read out of the label/.test(a.how)),
+  JSON.stringify(cluttered.json?.assignments?.map(a => `${a.sourceCode}: ${a.how}`) ?? cluttered.json));
+
+const ambiguous = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: SYSMEX_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: [field(0, 'HGB and HCT on one line')],
+  },
+});
+check('a label naming two parameters is filled from neither', ambiguous.status === 409, `${ambiguous.status}`);
+
+check('a refusal says what the form asked for, so it can be acted on',
+  Array.isArray(ambiguous.json?.unfilled) && Array.isArray(ambiguous.json?.unmatched)
+  && ambiguous.json.unfilled.length > 0,
+  JSON.stringify(ambiguous.json).slice(0, 200));
+
 /* ------------------------------------------------------------- withdrawal */
 section('Revoking a browser');
 const deviceId = device.json?.id;

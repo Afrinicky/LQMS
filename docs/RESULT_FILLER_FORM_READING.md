@@ -203,3 +203,57 @@ on its own and none of which said so:
 
 The host element is also pinned and sized to nothing rather than left inline in
 the page's flow, where a long form pushed it below the fold.
+
+---
+
+## 8. "The parameters do not match"
+
+Reported from the bench on a live LHIMS page: the barcode verified, 33 fields
+were read, and then nothing could be placed — *None of the 43 parameters in
+this transmission matches a field on this form.* Two faults, found by replaying
+the page's own layout.
+
+### The label was the unit
+
+The page put the result box and its unit dropdown in one container. The label
+was taken from that container's text, and a `<select>`'s text is its selected
+option — so every parameter on the page was called `x10^3/uL`, `g/DL`, `%`.
+Replayed against the reader as it was, the labels came back:
+
+```
+["x10^3/uL %", "x10^12/L %", "g/DL %", "% %", "FL %", "pg %", …]
+```
+
+which is exactly nothing, on every row, on a page that looks perfectly
+readable.
+
+**A caption is text that is not inside another control.** Text within a
+`select`, `option`, `button`, `input` or `textarea` is no longer read as a
+name. Where what remains still does not read like a parameter — too long, too
+many words, or carrying a reference range — the leading words are used, which
+is where the name sits on every form laid out this way.
+
+The matcher also now looks for a parameter *inside* a cluttered label: each run
+of one to three words is tried, only a run that **is** a known parameter
+counts, and a label naming two of them is refused rather than guessed at.
+
+### "Neutrophils" meant the percentage
+
+SECHLIMS's own instrument map names the **absolute** count `Neutrophils` and
+the percentage `Neutrophils %`. The bare plural was listed in the dictionary
+under `NEUT%`, so an absolute neutrophil count would have been filed as a
+percentage — the single mistake the `#`/`%` rule exists to prevent, arriving
+through the back door of a synonym.
+
+The bare plurals — Neutrophils, Lymphocytes, Monocytes, Eosinophils,
+Basophils, Reticulocytes — now mean the absolute count, as this system means
+them. Mid cells and granulocytes were added for three-part differentials, and
+word order no longer hides a parameter: `Calcium (Ionized)` and
+`Ionized calcium` are one thing.
+
+### And the refusal now says what it saw
+
+A plan that cannot be built returns the labels the form asked for beside the
+parameters the transmission holds, and the bubble shows them in two columns
+with the closest near-misses underneath. "They do not match" was never
+something anybody could act on.
