@@ -736,6 +736,18 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     let startX = 0, startY = 0, originX = 0, originY = 0, dragging = false;
     handle.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
+      /*
+       * A button inside the drag handle is a button, not a grab point.
+       *
+       * The panel is dragged by its header, and the close button sits in that
+       * header. Capturing the pointer here sends every event that follows —
+       * the click included — to the handle that captured it, so the close
+       * button was never told it had been pressed and the panel would not
+       * shut. The bubble itself is its own handle, which is why it opened
+       * perfectly well while the X did nothing at all.
+       */
+      const control = event.target instanceof Element ? event.target.closest('button') : null;
+      if (control && control !== handle) return;
       dragging = true; dragged = false;
       startX = event.clientX; startY = event.clientY;
       const rect = elements.wrap.getBoundingClientRect();

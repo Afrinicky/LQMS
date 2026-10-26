@@ -363,3 +363,22 @@ verified, the plan it holds and the fill it files are that tab's own, and the
 multi-tab check proves it end to end: three patients in three tabs, two of them
 populated one after the other, each form ending up with its own patient's white
 cell count, and the third — which nobody pressed Populate on — still empty.
+
+### The close button that did nothing
+
+Reported from the bench on the live LHIMS: the bubble opened, and the X in the
+corner of the panel would not shut it.
+
+The panel is dragged by its header, and the close button sits in that header.
+On `pointerdown` the header called `setPointerCapture`, and a captured pointer
+sends everything that follows — the click included — to the element that
+captured it. So the close button was never told it had been pressed. The bubble
+itself is its own drag handle, which is why it opened perfectly well while the
+X did nothing at all: there, the capture target and the button were the same
+element.
+
+A pointer that goes down on a button inside a drag handle no longer starts a
+drag. The check for it presses the X with a real mouse at the place it is
+painted, because a scripted `click()` on the button would have passed happily
+against the broken code: pointer capture is what the fault was made of, and
+only a real pointer has it.
