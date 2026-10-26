@@ -49,6 +49,24 @@ Open a result-entry form. The bubble appears in the corner by itself. It shows
 the form it recognised, the identifier it read, and whether SECHLIMS verified
 it. Press **Populate results**, then review and save the form as usual.
 
+### Many tabs, one sign-in
+
+A laboratory filters the pending list, opens several patients into several
+tabs, and works across them. The extension is built for that:
+
+* the bubble is on **every tab of an allowed site** — the pending list, each
+  patient opened out of it, and anything opened later. On a page with nothing
+  to fill it waits quietly and says so;
+* **one sign-in serves the whole browser.** The session is held by the
+  extension, not by a tab, so a patient opened in a new tab is ready to fill
+  with nothing to sign in to. A tab that was already open when somebody signs
+  in picks it up by itself, without being reloaded;
+* **each tab keeps its own patient.** The sample it read, the transmission it
+  verified and the fill it files are that tab's alone;
+* SECHLIMS being briefly out of reach does not sign anybody out. The bubble
+  says it cannot reach SECHLIMS, keeps trying, and carries on when it answers.
+  Only a session SECHLIMS says has ended ends it.
+
 ## If the bubble does not appear
 
 Click the extension in the toolbar. **This page** lists every condition that
@@ -65,13 +83,13 @@ has to hold, in order, and marks the one that does not:
 The button underneath does whatever the failing step needs. Two notes worth
 knowing:
 
-* **Allowing a site does not reach a page already open.** The browser injects a
-  newly allowed content script on the next visit. The button injects it into
-  the open tab as well, so you should not have to reload — but reloading always
-  works.
-* **Show the filler on this page now** works even where no form is configured.
-  It appears and says what it found, which is what tells an administrator
-  whether the page is readable at all.
+* **Allowing a site reaches the tabs already open.** A newly registered content
+  script would otherwise wait for each tab's next visit, so allowing a site,
+  signing in, or turning the bubble back on puts it on every open tab of that
+  site at once. Reloading always works too.
+* **Show the filler on this page now** opens it on the page in front of you and
+  says what it found, which is what tells an administrator whether the page is
+  readable at all.
 
 ## Teaching it
 

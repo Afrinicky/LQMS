@@ -62,7 +62,9 @@ async function allow(origins) {
   try {
     const granted = await chrome.permissions.request({ origins });
     if (!granted) { say('Permission was not given, so the filler will not appear there.'); return; }
-    say('Allowed. Reload any open result form to see the bubble.', 'notice');
+    // The worker registers the bubble and reaches the tabs that are already
+    // open as soon as the permission lands, so nothing has to be reloaded.
+    say('Allowed. The bubble appears on every tab of that site, including the ones already open.', 'notice');
     await paint();
   } catch (error) {
     say(`That site could not be allowed: ${error.message}`);

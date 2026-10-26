@@ -208,7 +208,7 @@ function Install({ overview, adapters, devices, onError, onNotice, setBusy, busy
           </li>
           <li>
             <strong>Allow the sites</strong>
-            <span>In the extension’s Settings, allow this SECHLIMS site and any other result-entry site. The bubble appears on those sites and nowhere else.</span>
+            <span>In the extension’s Settings, allow this SECHLIMS site and any other result-entry site. The bubble appears on every tab of those sites and nowhere else.</span>
           </li>
           <li>
             <strong>Pair and sign in</strong>
@@ -225,6 +225,10 @@ function Install({ overview, adapters, devices, onError, onNotice, setBusy, busy
           <li>Press <b>Populate results</b>. The fields fill.</li>
           <li><b>Review, save and authorise</b> exactly as before.</li>
         </ol>
+        <Note>
+          Staff sign in once. Every tab in that browser works from the one sign-in, including tabs opened
+          afterwards and tabs that were already open — and each keeps to its own patient.
+        </Note>
         <Note tone="warn">
           The extension fills fields. It does not save, authorise or release anything, and it never writes to the
           analyser connections or to any transmission.

@@ -6,8 +6,16 @@
  * identifier is one it holds results for, shows the answer, and — only then —
  * offers one button. Open the form, glance at the bubble, press Populate.
  *
- * It appears on supported pages by itself and stays through navigation, so
- * nobody has to go looking in the browser's toolbar for it.
+ * It appears by itself on every page of a site the laboratory has allowed —
+ * the pending list, each patient opened out of it, and back again — and stays
+ * through navigation, so nobody has to go looking in the browser's toolbar for
+ * it. On a page with nothing to fill it waits quietly and says so.
+ *
+ * One sign-in serves every tab. The credential lives in the background worker
+ * and is shared by the whole browser profile; this script is only ever told
+ * whether somebody is signed in and what they are called. Each tab keeps its
+ * own sample, its own verdict and its own fill — nothing about the shared
+ * session crosses between them.
  *
  * What it will not do is the point of it:
  *   · no identifier, an ambiguous one, or one that contradicts the record —
@@ -619,7 +627,23 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     lastIdentifier: '',
     /** The signature of the last page state scanned, so a re-scan is cheap. */
     lastShape: '',
+    /** Why there is nothing to fill here, when there is nothing to fill here. */
+    standBy: null,
+    /** What SECHLIMS called the last refusal, when it refused. */
+    errorCode: null,
   };
+
+  /**
+   * Who is signed in, as the background worker reports it.
+   *
+   * A name and a yes or no, never a token. The session itself is held by the
+   * worker for the whole browser profile, which is what lets six tabs work from
+   * one sign-in.
+   */
+  let session = { signedIn: null, user: null };
+
+  /** Turned off from Settings: the bubble leaves the page and stays away. */
+  let stopped = false;
 
   let shadow = null;
   let elements = {};
@@ -712,6 +736,18 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     let startX = 0, startY = 0, originX = 0, originY = 0, dragging = false;
     handle.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
+      /*
+       * A button inside the drag handle is a button, not a grab point.
+       *
+       * The panel is dragged by its header, and the close button sits in that
+       * header. Capturing the pointer here sends every event that follows —
+       * the click included — to the handle that captured it, so the close
+       * button was never told it had been pressed and the panel would not
+       * shut. The bubble itself is its own handle, which is why it opened
+       * perfectly well while the X did nothing at all.
+       */
+      const control = event.target instanceof Element ? event.target.closest('button') : null;
+      if (control && control !== handle) return;
       dragging = true; dragged = false;
       startX = event.clientX; startY = event.clientY;
       const rect = elements.wrap.getBoundingClientRect();
@@ -794,15 +830,19 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     if (!elements.dot) return;
     const tone = state.busy ? 'busy'
       : state.error ? 'crit'
-      : state.verdict ? (TONES[state.verdict.status] || 'idle') : 'idle';
+      : state.verdict ? (TONES[state.verdict.status] || 'idle')
+      : state.standBy?.tone === 'crit' ? 'crit'
+      : state.standBy?.tone === 'warn' ? 'warn'
+      : 'idle';
     elements.dot.className = `dot ${tone}`;
   }
 
   function render() {
     setDot();
     if (!elements.panel || !state.open) return;
+    if (!state.adapter) { renderStandBy(); return; }
 
-    elements.formName.textContent = state.adapter ? state.adapter.name : 'No form configured for this page';
+    elements.formName.textContent = state.adapter.name;
 
     const verdict = state.verdict;
     const chosen = verdict?.transmissions?.find(t => String(t.id) === String(state.chosenId)) ?? verdict?.transmissions?.[0];
@@ -868,6 +908,36 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     renderFooter(verdict);
   }
 
+  /**
+   * The panel on a page with nothing to fill.
+   *
+   * Which is most pages: the pending-results list, a search, whatever the bench
+   * had open already. The bubble is there because being there is the point —
+   * the next patient's form is one click away — so it says plainly why it is
+   * waiting, and nothing more.
+   */
+  function renderStandBy() {
+    const waiting = state.standBy || { title: 'Checking this page…', text: '' };
+    elements.formName.textContent = waiting.title;
+    const rows = [];
+    if (session.signedIn && session.user?.fullName) {
+      rows.push(`<div class="row"><span>Signed in</span><strong>${escapeHtml(session.user.fullName)}</strong></div>`);
+    }
+    if (state.scan.fields.length) {
+      rows.push(`<div class="row"><span>Read</span><strong>${state.scan.fields.length} result field(s)</strong></div>`);
+    }
+    elements.body.innerHTML = `<div class="card">
+      ${waiting.text ? `<p class="msg ${waiting.tone === 'crit' ? 'crit' : waiting.tone === 'warn' ? 'warn' : ''}">${escapeHtml(waiting.text)}</p>` : ''}
+      ${rows.join('')}
+    </div>`;
+    elements.footer.innerHTML = `<div class="pair">
+      <button class="btn ghost" data-action="recheck">Check again</button>
+      <button class="btn ghost" data-action="options">Settings</button>
+    </div>`;
+    wireFooter();
+    requestAnimationFrame(clampIntoView);
+  }
+
   function renderFooter(verdict) {
     const buttons = [];
     const canFill = Boolean(verdict?.mayFill) && Boolean(state.adapter) && !state.busy;
@@ -891,13 +961,22 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     buttons.push('<p class="note">Fills the form only. Review, save and authorise as usual.</p>');
 
     elements.footer.innerHTML = buttons.join('\n');
+    wireFooter();
+  }
+
+  function wireFooter() {
     elements.footer.querySelectorAll('button[data-action]').forEach(button => {
       button.addEventListener('click', () => {
         const action = button.dataset.action;
         if (action === 'populate') void populate({ confirmed: true, overwrite: false });
         if (action === 'overwrite') void fillHeld();
         if (action === 'keep') void keepHeld();
-        if (action === 'recheck') void refresh({ force: true });
+        if (action === 'recheck') {
+          // On a form, ask SECHLIMS again. On a page with nothing to fill, read
+          // the page again first — it may have become one since.
+          if (state.adapter) void refresh({ force: true });
+          else { state.scan = scanPage(); void evaluate(); }
+        }
         if (action === 'options') void ask('openOptions');
       });
     });
@@ -908,13 +987,24 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
      ======================================================================= */
   async function detectAdapter() {
     const response = await ask('adapters', { url: location.href });
-    if (!response.ok) { state.error = response.error; state.adapter = null; return false; }
+    if (!response.ok) {
+      state.error = response.error;
+      state.errorCode = response.code || null;
+      state.adapter = null;
+      return false;
+    }
     // The rules for recognising an identifier come from SECHLIMS, so the page
     // and the server can never disagree about what a barcode looks like.
     if (response.data.detection) detectionRules = response.data.detection;
+    // A sign-out carries no name, and keeping the last one would have the
+    // panel ask for a sign-in under the name of whoever signed out.
+    session = response.data.signedIn === false
+      ? { signedIn: false, user: null }
+      : { signedIn: true, user: response.data.user || session.user };
     const candidates = (response.data.matched || []).filter(formPresent);
     state.adapter = candidates[0] || null;
     state.error = null;
+    state.errorCode = null;
     return Boolean(state.adapter);
   }
 
@@ -933,7 +1023,15 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
   }
 
   async function refresh({ force = false } = {}) {
-    if (!state.adapter && !(await detectAdapter())) { render(); return; }
+    if (!state.adapter && !(await detectAdapter())) {
+      // Nothing to verify. Read the page anyway while somebody is looking at
+      // the panel, so it can say what it found rather than only what it could
+      // not do — "33 result fields and no form configured for this address" is
+      // the one answer an administrator can act on.
+      if (state.open && !state.scan.fields.length) state.scan = scanPage();
+      standBy();
+      return;
+    }
 
     state.scan = scanPage();
     const identifier = primaryIdentifier();
@@ -1170,29 +1268,81 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
    * fetched when asked for.
    */
   async function evaluate() {
+    if (stopped) return;
     const matched = await detectAdapter();
-    if (!matched && !forced) {
-      if (!state.open) unmount();
-      return;
-    }
+    /*
+     * The bubble belongs on the page whatever the page turns out to be.
+     *
+     * A laboratory works in tabs: the pending list, six patients opened out of
+     * it, back to the list, a search, another patient. A bubble that removed
+     * itself from everything but a recognised form was absent from most of that
+     * — and absent from every newly opened tab until its form was recognised,
+     * which is indistinguishable from broken. So it mounts here and stays, and
+     * says for itself when there is nothing to fill.
+     */
     mount();
-    if (!matched) {
-      // Read the page anyway: "23 result fields but no form configured for this
-      // address" tells an administrator exactly what to do next.
-      state.scan = scanPage();
-      const identifier = primaryIdentifier();
-      state.verdict = {
-        status: 'no_identifier',
-        label: 'Not a form the filler knows',
-        summary: `No form is configured for this address. The page offers ${state.scan.fields.length} result field(s)`
-          + `${identifier ? ` and an identifier that reads ${identifier.value}` : ' and no identifier this filler recognises'}`
-          + '. Add a form for it under Result Filler in SECHLIMS, or use Teach this form.',
-        mayFill: false, transmissions: [],
-      };
-      render();
+    if (matched) {
+      armRetry(false);
+      await refresh();
       return;
     }
-    await refresh();
+    if (state.open && !state.scan.fields.length) state.scan = scanPage();
+    standBy();
+  }
+
+  /**
+   * There is nothing to fill here, and this is why.
+   *
+   * Three reasons, and each needs a different thing from the person: sign in,
+   * wait for SECHLIMS, or open a patient's form. Only the first two are worth
+   * coming back from by themselves, so only they arm a retry.
+   */
+  function standBy() {
+    state.verdict = null;
+    state.held = [];
+    state.mismatch = null;
+    if (session.signedIn === false) {
+      state.standBy = {
+        title: 'Waiting for a sign-in',
+        tone: 'warn',
+        text: 'Sign in once from the SECHLIMS Result Filler button in the toolbar. '
+          + 'Every tab in this browser then works from that sign-in.',
+      };
+      armRetry(true);
+    } else if (state.error) {
+      state.standBy = { title: 'SECHLIMS could not be reached', tone: 'crit', text: state.error };
+      armRetry(true);
+    } else {
+      const identifier = primaryIdentifier();
+      state.standBy = {
+        title: 'Nothing to fill on this page',
+        tone: '',
+        text: state.scan.fields.length
+          ? `No form is configured for this address, though the page offers ${state.scan.fields.length} result field(s)`
+            + `${identifier ? ` and an identifier that reads ${identifier.value}` : ''}`
+            + '. Add a form for it under Result Filler in SECHLIMS, or use Teach this form.'
+          : 'Open a patient\u2019s result form and the filler will read it.',
+      };
+      armRetry(false);
+    }
+    render();
+  }
+
+  /**
+   * Come back and look again.
+   *
+   * SECHLIMS being unreachable for a moment, or nobody having signed in yet,
+   * used to settle the matter for the life of the tab: the first look decided
+   * it and nothing looked again. The bench would reload the page, or give up on
+   * the bubble. It now waits and tries again, a little longer each time.
+   */
+  let retryTimer = null;
+  let retryDelay = 0;
+  function armRetry(on) {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (!on || stopped) { retryDelay = 0; return; }
+    retryDelay = Math.min(retryDelay ? retryDelay * 2 : 4_000, 60_000);
+    retryTimer = setTimeout(() => { retryTimer = null; void evaluate(); }, retryDelay);
   }
 
   function watchNavigation() {
@@ -1248,7 +1398,7 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
     // A page that redraws its body would otherwise carry the bubble away with
     // it, and nothing would say why it vanished.
     setInterval(() => {
-      if (!state.adapter && !forced) return;
+      if (stopped) return;
       if (elements.host && !document.contains(elements.host)) {
         (document.body || document.documentElement).appendChild(elements.host);
         restorePosition();
@@ -1283,8 +1433,45 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
         });
         return true;
       }
+      /*
+       * Look at this page again, now.
+       *
+       * Sent when something outside the tab has changed: somebody signed in at
+       * the toolbar, the site was allowed, the bubble was turned back on. The
+       * tab catches up without being reloaded, which is what makes one sign-in
+       * serve the tabs that were already open.
+       */
+      if (message?.type === 'rf-wake') {
+        stopped = false;
+        retryDelay = 0;
+        void evaluate();
+        respond({ ok: true });
+        return true;
+      }
+
+      // Who is signed in has changed. Nothing here holds a credential; this is
+      // a name and a yes or no, and the page is re-read on the strength of it.
+      if (message?.type === 'rf-session') {
+        session = { signedIn: Boolean(message.signedIn), user: message.user || null };
+        retryDelay = 0;
+        void evaluate();
+        respond({ ok: true });
+        return true;
+      }
+
+      // Turned off in Settings: leave the page, and leave it alone.
+      if (message?.type === 'rf-hide') {
+        stopped = true;
+        armRetry(false);
+        state.open = false;
+        unmount();
+        respond({ ok: true });
+        return true;
+      }
+
       if (message?.type !== 'rf-show') return false;
       forced = true;
+      stopped = false;
       void (async () => {
         await evaluate();
         if (elements.panel) toggle(true);
@@ -1296,6 +1483,9 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
 
   void (async () => {
     await evaluate();
+    // Injected because somebody pressed "Show the filler on this page": open it,
+    // rather than leaving them to find the bubble they just asked for.
+    if (forced && elements.panel && !state.open) toggle(true);
     watchNavigation();
   })();
 })();

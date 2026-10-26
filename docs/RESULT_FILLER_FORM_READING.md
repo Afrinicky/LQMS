@@ -298,3 +298,87 @@ against the absolute count's range, 2.00–7.00, on a result of 57.3. Ranges are
 keyed on `analyteKey` now, where `#` and `%` survive as words. It is the third
 time that distinction has had to be defended in this module, which is a fair
 measure of how easily it is lost.
+
+## 10. Many tabs, one sign-in
+
+The bench does not work in one window. Staff filter the Pending Results list,
+open four or six patients out of it into their own tabs, and move between them
+for the rest of the hour. Two complaints came back from that, and they turned
+out to be one habit meeting two separate assumptions in the extension.
+
+### The bubble was absent from most of the morning
+
+`evaluate()` ran once per page and asked one question: is a form configured for
+this address? If the answer was no, the bubble **removed itself from the page**
+and nothing ever asked again.
+
+The pending list is not a configured form. Neither is a search, nor whatever
+the bench had open before. So the bubble was absent from the page staff stand
+on between patients — and absent from a newly opened tab whenever the first
+answer was no, including when the answer was no only because SECHLIMS had not
+answered yet. There was no retry: one unlucky moment settled the tab for its
+whole life, and the only cure a person could find was a reload.
+
+It now mounts on every page of an allowed site and stays there. On a page with
+nothing to fill it waits quietly and says which of the three things is true —
+nobody has signed in, SECHLIMS cannot be reached, or this is simply not a
+result form — because each needs something different from the person. Only the
+first two are worth coming back from by themselves, so only they arm a retry,
+which backs off from four seconds to a minute.
+
+A page with nothing to fill is also not scanned until somebody opens the panel.
+The bubble is on every allowed page now; it should not read every one of them.
+
+### The sign-in was thrown away on the first refusal
+
+The credential was already shared — it lives in the background worker, in
+storage the whole browser profile reads, and a tab is never told more than
+whether somebody is signed in and what they are called. The defect was not
+where the session was kept but how readily it was discarded: **any** 401 from
+**any** tab emptied it for all of them. A request that raced a restart, a
+moment of hospital network, one tab waking from a sleeping worker — and the
+bench was back at the toolbar typing a password between patients.
+
+A refusal is no longer taken at face value. SECHLIMS is asked outright whether
+that session has ended:
+
+* **it is alive** — the request is retried once and nobody is signed out;
+* **SECHLIMS cannot be asked** — nothing is discarded; the bubble says it
+  cannot reach SECHLIMS and keeps trying;
+* **it has really ended** — only then is the session cleared, and every open
+  tab is told at once so none of them goes on offering to fill anything.
+
+Three smaller things follow from the same working pattern. A burst of tabs
+asking for the form register at once now shares one request rather than making
+six. Signing in, allowing a site, or turning the bubble back on reaches the
+tabs that are **already open** — a content script registered now would
+otherwise wait for each tab's next visit, which looks exactly like nothing
+happening. And turning the bubble off takes it off the open tabs immediately,
+rather than after each has been reloaded.
+
+### What each tab still keeps to itself
+
+Nothing shared is per-patient. The sample a tab read, the transmission it
+verified, the plan it holds and the fill it files are that tab's own, and the
+multi-tab check proves it end to end: three patients in three tabs, two of them
+populated one after the other, each form ending up with its own patient's white
+cell count, and the third — which nobody pressed Populate on — still empty.
+
+### The close button that did nothing
+
+Reported from the bench on the live LHIMS: the bubble opened, and the X in the
+corner of the panel would not shut it.
+
+The panel is dragged by its header, and the close button sits in that header.
+On `pointerdown` the header called `setPointerCapture`, and a captured pointer
+sends everything that follows — the click included — to the element that
+captured it. So the close button was never told it had been pressed. The bubble
+itself is its own drag handle, which is why it opened perfectly well while the
+X did nothing at all: there, the capture target and the button were the same
+element.
+
+A pointer that goes down on a button inside a drag handle no longer starts a
+drag. The check for it presses the X with a real mouse at the place it is
+painted, because a scripted `click()` on the button would have passed happily
+against the broken code: pointer capture is what the fault was made of, and
+only a real pointer has it.
