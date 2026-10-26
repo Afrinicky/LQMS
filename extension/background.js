@@ -20,6 +20,15 @@ const CONTENT_SCRIPT_ID = 'sechlims-result-filler-bubble';
 const CONTEXT_TTL_MS = 5 * 60 * 1000;
 
 let contextCache = { at: 0, adapters: [], detection: null };
+/**
+ * The one request in flight, shared.
+ *
+ * A bench opens six patients at once and six content scripts ask for the form
+ * register in the same second. Answering each one separately asks SECHLIMS the
+ * same question six times and gives six tabs six chances to fail; they all wait
+ * on the same promise instead.
+ */
+let contextInFlight = null;
 
 /* ============================================================================
    Settings
@@ -41,7 +50,27 @@ const save = (values) => STORE.set(values);
 /* ============================================================================
    Talking to SECHLIMS
    ========================================================================= */
-async function call(path, { method = 'GET', body, auth = true } = {}) {
+/**
+ * Is the signed-in session still good?
+ *
+ * Asked before anybody is signed out. `true` the session is live, `false`
+ * SECHLIMS says it is gone, `null` SECHLIMS could not be asked — and the
+ * third answer is the important one: a blip on the hospital network must not
+ * empty the credential every open tab is working from.
+ */
+async function sessionAlive(token) {
+  const { host } = await settings();
+  if (!host || !token) return false;
+  try {
+    const response = await fetch(`${host}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    if (response.status === 401) return false;
+    return response.ok ? true : null;
+  } catch {
+    return null;
+  }
+}
+
+async function call(path, { method = 'GET', body, auth = true, retried = false } = {}) {
   const { host, deviceToken, sessionToken } = await settings();
   if (!host) throw Object.assign(new Error('No SECHLIMS address is set. Open the extension options.'), { code: 'no_host' });
 
@@ -61,9 +90,25 @@ async function call(path, { method = 'GET', body, auth = true } = {}) {
 
   const payload = await response.json().catch(() => null);
   if (response.status === 401 && payload?.code !== 'device_missing' && payload?.code !== 'device_unknown') {
-    // The person's session, not the browser's enrolment.
-    await save({ sessionToken: '', user: null });
-    throw Object.assign(new Error('Your SECHLIMS session has ended. Sign in again.'), { code: 'signed_out' });
+    /*
+     * The person's session, not the browser's enrolment — but a refusal is not
+     * taken at face value, because this credential is shared by every tab the
+     * bench has open. One request that raced a restart used to sign the whole
+     * browser out, and the bench would be back at the toolbar typing their
+     * password in between patients. So SECHLIMS is asked outright whether the
+     * session has ended, and only a straight answer ends it.
+     */
+    const alive = await sessionAlive(sessionToken);
+    if (alive === true && !retried) return call(path, { method, body, auth, retried: true });
+    if (alive === null) {
+      throw Object.assign(new Error(`SECHLIMS could not be reached at ${host}.`), { code: 'unreachable' });
+    }
+    if (alive === false) {
+      await save({ sessionToken: '', user: null });
+      void announceSession();
+      throw Object.assign(new Error('Your SECHLIMS session has ended. Sign in again.'), { code: 'signed_out' });
+    }
+    throw Object.assign(new Error('SECHLIMS refused the request.'), { code: 'refused', status: 401, payload });
   }
   if (!response.ok) {
     throw Object.assign(new Error(payload?.error || `SECHLIMS refused the request (${response.status}).`), {
@@ -93,16 +138,24 @@ async function adapters({ force = false } = {}) {
   if (!force && contextCache.adapters.length && Date.now() - contextCache.at < CONTEXT_TTL_MS) {
     return contextCache.adapters;
   }
-  const context = await call('/result-filler/context');
-  contextCache = {
-    at: Date.now(),
-    adapters: context.adapters || [],
-    // How to recognise an identifier, as SECHLIMS defines it. Without this the
-    // page scans with nothing to recognise anything BY, and finds no barcode
-    // on a page that prints one in bold.
-    detection: context.detection || null,
-  };
-  return contextCache.adapters;
+  if (contextInFlight) return contextInFlight;
+  contextInFlight = (async () => {
+    const context = await call('/result-filler/context');
+    contextCache = {
+      at: Date.now(),
+      adapters: context.adapters || [],
+      // How to recognise an identifier, as SECHLIMS defines it. Without this the
+      // page scans with nothing to recognise anything BY, and finds no barcode
+      // on a page that prints one in bold.
+      detection: context.detection || null,
+    };
+    return contextCache.adapters;
+  })();
+  try {
+    return await contextInFlight;
+  } finally {
+    contextInFlight = null;
+  }
 }
 
 /** The form this page is, or nothing. The page's own marker decides it, not the address. */
@@ -166,6 +219,83 @@ async function registerBubble() {
   }
 }
 
+/* ============================================================================
+   The tabs that are already open
+   ----------------------------------------------------------------------------
+   Everything below exists because a laboratory works in tabs. Staff filter the
+   pending list, open six patients into six tabs, and move between them for the
+   rest of the hour. A change made once — signing in, allowing the site, turning
+   the bubble on — has to reach all of them, and none of it may require a tab to
+   be reloaded or a password to be typed again.
+   ========================================================================= */
+
+/**
+ * The open tabs the extension is allowed to see, by the origins it holds.
+ *
+ * Asked for by match pattern first. A browser that will not filter on patterns
+ * without the blanket tabs permission — which this extension deliberately does
+ * not ask for — is asked for the list instead, and it then carries an address
+ * only for the tabs the extension already had permission for, which is exactly
+ * the set wanted.
+ */
+async function allowedTabs() {
+  const origins = await grantedOrigins();
+  if (!origins.length) return [];
+  const mine = tab => tab.id && /^https?:/.test(tab.url || '') && origins.some(origin => originCovers(origin, tab.url));
+  try {
+    const tabs = await chrome.tabs.query({ url: origins });
+    return (tabs || []).filter(tab => tab.id && /^https?:/.test(tab.url || ''));
+  } catch {
+    try {
+      const tabs = await chrome.tabs.query({});
+      return (tabs || []).filter(mine);
+    } catch {
+      return [];
+    }
+  }
+}
+
+/** Say the same thing to every tab, and never mind the ones not listening. */
+async function broadcast(message) {
+  const tabs = await allowedTabs();
+  await Promise.all(tabs.map(tab => chrome.tabs.sendMessage(tab.id, message).catch(() => null)));
+}
+
+/**
+ * Who is signed in, as the tabs are allowed to know it.
+ *
+ * A name and a yes or no. No token leaves this worker — a tab shares the
+ * session without ever holding it, which is the whole reason the credential
+ * lives here and not in the page.
+ */
+async function announceSession() {
+  const { sessionToken, user } = await settings();
+  await broadcast({
+    type: 'rf-session',
+    signedIn: Boolean(sessionToken),
+    user: user ? { fullName: user.fullName || user.username || '' } : null,
+  });
+}
+
+/**
+ * Put the bubble on every tab that should have one.
+ *
+ * A content script registered now reaches the next page load, not the six tabs
+ * already open — so allowing the site, signing in, or turning the bubble back
+ * on would appear to do nothing until each tab was reloaded.
+ */
+async function reachOpenTabs() {
+  const { bubbleEnabled } = await settings();
+  if (!bubbleEnabled) return { reached: 0 };
+  const tabs = await allowedTabs();
+  let reached = 0;
+  for (const tab of tabs) {
+    const outcome = await injectInto(tab.id);
+    if (outcome.injected) reached++;
+  }
+  return { reached, tabs: tabs.length };
+}
+
 /**
  * Put the bubble on a page that is already open.
  *
@@ -174,22 +304,23 @@ async function registerBubble() {
  * seeing nothing happen is the expected behaviour and the most confusing
  * possible one. Injecting into the open tab closes that gap.
  */
-async function injectInto(tabId) {
+async function injectInto(tabId, { reveal = false } = {}) {
   if (!tabId) return { injected: false, reason: 'no tab' };
-  // Already there but keeping quiet, because the page is not one it knows:
-  // ask it to show itself. Injecting again would do nothing at all.
+  // Already there: ask it to look at the page again, and to open itself if this
+  // was somebody pressing the button. Injecting again would do nothing at all.
   try {
-    const answer = await chrome.tabs.sendMessage(tabId, { type: 'rf-show' });
-    if (answer?.ok) return { injected: true, reason: 'asked the filler already on the page to show itself' };
+    const answer = await chrome.tabs.sendMessage(tabId, { type: reveal ? 'rf-show' : 'rf-wake' });
+    if (answer?.ok) return { injected: true, reason: 'the filler is already on the page' };
   } catch { /* not there yet — inject it below */ }
   try {
-    // Marked as deliberate, so the bubble shows itself and says what it found
-    // even on a page no form is configured for — which is the page somebody
-    // asking "why is it not here?" is most likely to be standing on.
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => { window.__sechlimsShowAnyway = true; },
-    });
+    if (reveal) {
+      // Marked as deliberate, so the panel opens on the page the person is
+      // standing on rather than waiting to be clicked.
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => { window.__sechlimsShowAnyway = true; },
+      });
+    }
     await chrome.scripting.executeScript({ target: { tabId }, files: ['bubble.js'] });
     return { injected: true };
   } catch (error) {
@@ -197,9 +328,16 @@ async function injectInto(tabId) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => { void registerBubble(); });
+/** Register, then catch up the tabs that were open before the change. */
+async function registerAndReach() {
+  const outcome = await registerBubble();
+  await reachOpenTabs();
+  return outcome;
+}
+
+chrome.runtime.onInstalled.addListener(() => { void registerAndReach(); });
 chrome.runtime.onStartup.addListener(() => { void registerBubble(); });
-chrome.permissions.onAdded.addListener(() => { void registerBubble(); });
+chrome.permissions.onAdded.addListener(() => { void registerAndReach(); });
 chrome.permissions.onRemoved.addListener(() => { void registerBubble(); });
 
 /* ============================================================================
@@ -229,9 +367,13 @@ const handlers = {
   },
 
   async setBubbleEnabled({ enabled }) {
-    await save({ bubbleEnabled: Boolean(enabled) });
+    const on = Boolean(enabled);
+    await save({ bubbleEnabled: on });
     await registerBubble();
-    return { enabled: Boolean(enabled) };
+    // Turned off means gone now, not gone after every tab has been reloaded.
+    if (on) await reachOpenTabs();
+    else await broadcast({ type: 'rf-hide' });
+    return { enabled: on };
   },
 
   async enrol({ pairingCode }) {
@@ -258,20 +400,39 @@ const handlers = {
     if (!response || !response.ok) throw new Error(payload?.error || 'That username and password were not accepted.');
     await save({ sessionToken: payload.token, user: payload.user });
     contextCache = { at: 0, adapters: [], detection: null };
-    // What the bubble can do has changed, so make sure it is registered.
+    // What the bubble can do has changed, so make sure it is registered — and
+    // tell the tabs that are already open, so the six patients the bench opened
+    // before signing in start working without being reloaded.
     await registerBubble();
+    // Waking each tab tells it the session changed; it reads the page again
+    // and starts offering results without anybody reloading anything.
+    await reachOpenTabs();
     return { user: payload.user };
   },
 
   async signOut() {
     await save({ sessionToken: '', user: null });
     contextCache = { at: 0, adapters: [], detection: null };
+    await announceSession();
     return { ok: true };
   },
 
   async adapters({ url, force }) {
+    const { sessionToken, user, bubbleEnabled } = await settings();
+    // Asked for first, so a page that is waiting on a sign-in can say so
+    // instead of reporting that SECHLIMS refused it.
+    if (!sessionToken) {
+      return { adapters: [], matched: [], detection: contextCache.detection, signedIn: false, bubbleEnabled };
+    }
     const list = await adapters({ force });
-    return { adapters: list, matched: url ? await adapterFor(url) : [], detection: contextCache.detection };
+    return {
+      adapters: list,
+      matched: url ? await adapterFor(url) : [],
+      detection: contextCache.detection,
+      signedIn: true,
+      user: user ? { fullName: user.fullName || user.username || '' } : null,
+      bubbleEnabled,
+    };
   },
 
   async verify(payload) {
@@ -375,9 +536,14 @@ const handlers = {
     return { steps, ok: steps.every(s => s.ok), matched: matched.map(a => ({ code: a.adapterCode, name: a.name })) };
   },
 
+  /** Put the bubble on every tab that is already open. */
+  async showOnOpenTabs() {
+    return reachOpenTabs();
+  },
+
   /** Put the bubble on the tab in front of the person, now. */
   async showHere({ tabId }) {
-    const outcome = await injectInto(tabId);
+    const outcome = await injectInto(tabId, { reveal: true });
     if (!outcome.injected && outcome.reason !== 'already running') {
       throw new Error(`The filler could not be shown on this page: ${outcome.reason}`);
     }
@@ -385,7 +551,7 @@ const handlers = {
   },
 
   async register() {
-    return registerBubble();
+    return registerAndReach();
   },
 };
 
