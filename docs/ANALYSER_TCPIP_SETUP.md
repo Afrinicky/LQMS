@@ -352,6 +352,40 @@ the analyte map on the link corrected.
 sample identifier to the control patterns on the link, and void the misfiled
 entry through the normal route.
 
+**The analyser connects, but nothing arrives.** Open **Live** on the link and
+read what it says about that connection. Since 2026-10-27 it distinguishes the
+two cases, because they need opposite things from you:
+
+* *“… was connected for 40s and sent nothing.”* The network is fine and this
+  end is fine. The analyser has not been told to transmit — look for its own
+  send or re-send command, and for a host/LIS setting that says *send on
+  request* rather than *send automatically*.
+* *“… sent 812 byte(s) but nothing that forms a complete message.”* The bytes
+  are printed underneath. Compare them with what the link is set to speak. A
+  message beginning `MSH|` is HL7, one beginning with `<ENQ>` or `<STX>` is
+  ASTM, and “work it out from what arrives” handles both.
+
+**One result came through and then the analyser went quiet.** Look at the
+acknowledgement in **Live** — the reply SECHLIMS sent is printed in full, with
+its control characters shown as `<VT>`, `<CR>` and `<FS>`. An HL7 analyser that
+cannot find an `MSA` segment in the reply, or finds one naming a message it did
+not send, concludes its result was never taken and stops transmitting until
+somebody re-sends by hand. The reply should read
+
+```
+<VT>MSH|^~\&|SECHLIMS|SECHLIMS|<the analyser>|<its facility>|…||ACK^R01|<ours>|P|<its version><CR>
+MSA|AA|<the analyser's own message control id><CR><FS><CR>
+```
+
+with the analyser's control id echoed exactly and a `<CR>` after **every**
+segment, the last one included.
+
+**The address offered to type into the analyser looks wrong.** The link's
+settings print this computer's ordinary network address first and say what each
+of its other addresses is. An address beginning `100.64`–`100.127` belongs to
+remote access (Tailscale and the like) and an analyser standing on the bench
+cannot reach it, whatever else is true.
+
 ---
 
 ## The rule behind all of this

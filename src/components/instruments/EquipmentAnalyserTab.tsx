@@ -7,7 +7,7 @@ import { api, apiRead, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { Notice } from '../ui/Feedback';
 import {
-  LINK_STATE_LABELS, LINK_MODE_LABELS, LINK_PROTOCOL_LABELS, modeIsPassive,
+  LINK_STATE_LABELS, LINK_MODE_LABELS, LINK_PROTOCOL_LABELS, linkForwards, modeIsPassive,
 } from '../../../shared/constants/instruments';
 import type { EquipmentItem } from '../../../shared/types/api';
 
@@ -134,7 +134,7 @@ export default function EquipmentAnalyserTab({ equipment }: { equipment: Equipme
                       </span>
                       {row.role === 'lhims_owned' && <span className="badge">LHIMS owns this</span>}
                       {modeIsPassive(row.mode) && <span className="badge">read-only copy</span>}
-                      {Boolean(row.forward_enabled) && <span className="badge">carries to LHIMS</span>}
+                      {linkForwards(row.role, row.forward_enabled) && <span className="badge">carries to LHIMS</span>}
                     </span>
                     <span className="il-meta">
                       <span>{LINK_MODE_LABELS[row.mode as keyof typeof LINK_MODE_LABELS] ?? row.mode}</span>
