@@ -162,6 +162,47 @@ export const LINK_MAX_FRAME_BYTES = 512 * 1024;
  */
 export const LINK_IDLE_FLUSH_MS = 2_000;
 
+/**
+ * How long an analyser is given to send anything more before a link set to
+ * close after each transmission hangs up. Long enough for a machine that sends
+ * two or three messages one after another to finish.
+ */
+export const LINK_CLOSE_AFTER_MS = 3_000;
+
+/* ============================================================================
+   What to do with the connection once a transmission is in
+   ----------------------------------------------------------------------------
+   Two kinds of analyser, and they want opposite things.
+
+   One dials the computer, keeps the connection for the rest of the day and
+   sends each result down it. Hanging up on that one costs a reconnection it
+   never asked for.
+
+   The other treats a connection as one transaction: dial, send, wait to be
+   acknowledged, and wait for the computer to hang up. Left waiting it eventually
+   abandons the link — and will not transmit again until somebody walks to the
+   machine and presses reconnect, which is precisely the complaint this setting
+   exists to answer.
+
+   Nothing in a transmission says which kind an analyser is, so the laboratory
+   is asked, and told what the symptom looks like.
+   ========================================================================= */
+export const AFTER_TRANSMISSION_LABELS = {
+  hold: 'Hold the connection open',
+  close: 'Close it once the result is acknowledged',
+} as const;
+
+export const AFTER_TRANSMISSION_HINTS = {
+  hold:
+    'The usual arrangement. The analyser keeps one connection and sends each result down it, and SECHLIMS '
+    + 'never hangs up.',
+  close:
+    'For an analyser that has to be reconnected by hand after every result. Such a machine treats one '
+    + 'connection as one transmission and waits for the computer to hang up once it has been acknowledged; '
+    + 'left waiting, it abandons the link. SECHLIMS closes politely a few seconds after the last message, and '
+    + 'the analyser dials again by itself for the next sample.',
+} as const;
+
 export const LINK_STATES = ['stopped', 'listening', 'connected', 'connecting', 'following', 'error', 'blocked'] as const;
 export type LinkState = (typeof LINK_STATES)[number];
 

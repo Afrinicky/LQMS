@@ -380,6 +380,36 @@ MSA|AA|<the analyser's own message control id><CR><FS><CR>
 with the analyser's control id echoed exactly and a `<CR>` after **every**
 segment, the last one included.
 
+**The analyser has to be reconnected by hand after every result.** This is the
+commonest shape of it: the result arrives, SECHLIMS acknowledges it, and twenty
+to forty seconds later the log says the analyser *dropped the connection
+without closing it*. The analyser then sits there until somebody walks over and
+presses reconnect.
+
+Such an analyser treats one connection as one transmission: it dials, sends,
+waits to be acknowledged, and then waits for the computer to hang up. Left
+waiting, it abandons the link. Open the link's settings and set **After each
+transmission** to *Close it once the result is acknowledged*. SECHLIMS then
+closes politely a few seconds after the last message — a few seconds, so a
+machine that sends two or three results in a row finishes them all — and the
+analyser dials again by itself for the next sample. Nobody touches it.
+
+Leave the setting on *Hold the connection open* for an analyser that keeps one
+connection all day and sends each result down it. Hanging up on that one costs a
+reconnection it never asked for.
+
+**“Could not reach the analyser on …:3121 — connect ECONNREFUSED”, after
+switching to “SECHLIMS connects out to the analyser”.** That mode dials the
+analyser, so the analyser must be *listening* on the port you give. Two things
+go wrong with it, and both produce the same bare refusal:
+
+* **The analyser does not listen at all.** Most analysers that transmit do the
+  dialling themselves. For those, the only arrangement that works is *SECHLIMS
+  listens; the analyser connects to it*.
+* **The port is SECHLIMS's own.** 3121 is the port SECHLIMS listens on for that
+  link, not a port on the analyser. The settings screen now says so when the two
+  match, and shows the address the analyser last transmitted from.
+
 **The address offered to type into the analyser looks wrong.** The link's
 settings print this computer's ordinary network address first and say what each
 of its other addresses is. An address beginning `100.64`–`100.127` belongs to

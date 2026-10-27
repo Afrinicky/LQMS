@@ -14,7 +14,7 @@ import {
   LINK_MODES, LINK_MODE_HINTS, LINK_MODE_LABELS,
   LINK_PROTOCOLS, LINK_PROTOCOL_HINTS, LINK_PROTOCOL_LABELS,
   LINK_ROLES, LINK_ROLE_HINTS, LINK_ROLE_LABELS, LINK_STATE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, linkForwards, modeIsPassive,
+  AFTER_TRANSMISSION_HINTS, AFTER_TRANSMISSION_LABELS, DEFAULT_CONTROL_PATTERNS, linkForwards, modeIsPassive,
   type LinkMode, type LinkProtocol, type LinkRole,
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
@@ -66,7 +66,8 @@ type Link = {
   state: string; state_detail: string | null; last_error: string | null;
   last_connected_at: string | null; last_message_at: string | null;
   messages_received: number; controls_matched: number;
-  message_count: number; control_count: number; forward_pending: number;
+  message_count: number; control_count: number; forward_pending: number; last_peer?: string | null;
+  close_after_message?: number;
   running: boolean; notes: string | null;
 };
 
@@ -105,7 +106,7 @@ const EMPTY = {
   role: 'sechlims_only' as LinkRole, mode: 'server' as LinkMode, protocol: 'astm' as LinkProtocol,
   listenHost: '', listenPort: '', remoteHost: '', remotePort: '', watchPath: '',
   controlPatterns: DEFAULT_CONTROL_PATTERNS.join(', '),
-  forwardEnabled: false, forwardHost: '', forwardPort: '',
+  forwardEnabled: false, forwardHost: '', forwardPort: '', closeAfterMessage: false,
   forwardTarget: 'lhims_api',
   lhimsUrl: '', lhimsUsername: '', lhimsPassword: '', lhimsMapKey: '',
   tapPath: '',
@@ -200,6 +201,7 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       remotePort: form.remotePort ? Number(form.remotePort) : null,
       watchPath: form.watchPath || null,
       controlPatterns: form.controlPatterns.split(',').map(p => p.trim()).filter(Boolean),
+      closeAfterMessage: form.closeAfterMessage,
       forwardEnabled: form.forwardEnabled,
       forwardHost: form.forwardHost || null,
       forwardPort: form.forwardPort ? Number(form.forwardPort) : null,
@@ -373,7 +375,8 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       {showForm && (
         <LinkForm form={form} setForm={setForm} profiles={profiles} lhimsMaps={lhimsMaps}
           equipment={equipment} sections={sections} host={host}
-          editing={Boolean(editing)} passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
+          editing={Boolean(editing)} lastPeer={editing?.last_peer ?? null}
+          passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
           onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
@@ -412,6 +415,7 @@ function formFrom(link: Link) {
     remoteHost: link.remote_host ?? '', remotePort: link.remote_port ? String(link.remote_port) : '',
     watchPath: link.watch_path ?? '',
     controlPatterns: (link.control_patterns ?? []).join(', '),
+    closeAfterMessage: Boolean(link.close_after_message),
     forwardEnabled: Boolean(link.forward_enabled),
     forwardHost: link.forward_host ?? '', forwardPort: link.forward_port ? String(link.forward_port) : '',
     forwardTarget: link.forward_target ?? 'lhims_api',
@@ -777,11 +781,11 @@ function Section({ step, title, children }: { step: number; title: string; child
    changed is that the reading is optional and the order matches the walk to
    the analyser.
    ------------------------------------------------------------------------- */
-function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, passwordSet, busy, host, onSave, onClose }: {
+function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, lastPeer, passwordSet, busy, host, onSave, onClose }: {
   form: typeof EMPTY; setForm: (fn: (f: typeof EMPTY) => typeof EMPTY) => void;
   profiles: Profile[]; lhimsMaps: LhimsMap[];
   equipment: Array<{ id: number; name: string }>; sections: Array<{ id: number; name: string }>;
-  editing: boolean; passwordSet: boolean; busy: boolean; host: HostInfo | null;
+  editing: boolean; lastPeer: string | null; passwordSet: boolean; busy: boolean; host: HostInfo | null;
   onSave: () => void; onClose: () => void;
 }) {
   const set = <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => setForm(f => ({ ...f, [key]: value }));
@@ -909,17 +913,54 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                   )}
                 </p>
               )}
+              {/*
+                * What to do with the connection once a result is in. The two
+                * kinds of analyser want opposite things, and nothing in a
+                * transmission says which kind this one is.
+                */}
+              <label className="lf-full"><span>After each transmission</span>
+                <select value={form.closeAfterMessage ? 'close' : 'hold'}
+                  onChange={e => set('closeAfterMessage', e.target.value === 'close')}>
+                  <option value="hold">{AFTER_TRANSMISSION_LABELS.hold}</option>
+                  <option value="close">{AFTER_TRANSMISSION_LABELS.close}</option>
+                </select>
+              </label>
+              <p className="lf-hint">
+                {form.closeAfterMessage ? AFTER_TRANSMISSION_HINTS.close : AFTER_TRANSMISSION_HINTS.hold}
+              </p>
             </>
           )}
           {form.mode === 'client' && (
-            <div className="lf-grid">
-              <label><span>Analyser address</span>
-                <TextField value={form.remoteHost} onValue={v => set('remoteHost', v)} placeholder="10.10.0.9" /></label>
-              <label><span>Port</span>
-                <NumberField min={1} max={65535} value={form.remotePort ? Number(form.remotePort) : null}
-                  onValue={n => set('remotePort', n ? String(n) : '')} />
-              </label>
-            </div>
+            <>
+              <div className="lf-grid">
+                <label><span>Analyser address</span>
+                  <TextField value={form.remoteHost} onValue={v => set('remoteHost', v)} placeholder="10.10.0.9" /></label>
+                <label><span>Port the analyser listens on</span>
+                  <NumberField min={1} max={65535} value={form.remotePort ? Number(form.remotePort) : null}
+                    onValue={n => set('remotePort', n ? String(n) : '')} />
+                </label>
+              </div>
+              {/*
+                * The two mistakes this mode invites, both of which produce the
+                * same bare "connection refused" and neither of which is the
+                * analyser's fault. Said here rather than in a log afterwards.
+                */}
+              <p className="lf-hint">
+                This dials the analyser, so the analyser has to be LISTENING on that port. Most analysers that
+                transmit do the dialling themselves and listen on nothing at all — for those, use
+                &ldquo;{LINK_MODE_LABELS.server}&rdquo; instead.
+                {lastPeer && (
+                  <> This one last transmitted to SECHLIMS from <code>{String(lastPeer).replace(/^::ffff:/, '').replace(/:\d+$/, '')}</code>,
+                  which is where it is, though not necessarily a port it accepts connections on.</>
+                )}
+              </p>
+              {form.remotePort && form.listenPort && form.remotePort === form.listenPort && (
+                <p className="lf-hint warn">
+                  Port {form.remotePort} is the port SECHLIMS itself listens on for this link, not a port on the
+                  analyser. Dialling it reaches nothing.
+                </p>
+              )}
+            </>
           )}
           {form.mode === 'file_drop' && (
             <>

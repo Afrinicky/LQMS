@@ -470,6 +470,112 @@ check('a SECHLIMS-only link cannot be made to carry results to LHIMS',
   Number(afterSave?.forward_enabled ?? 0) === 0,
   `${contradiction.status} forward_enabled=${afterSave?.forward_enabled}`);
 
+/* ==========================================================================
+   6c. What happens to the connection after a transmission
+   --------------------------------------------------------------------------
+   Two kinds of analyser. One holds a connection all day; the other sends,
+   waits to be acknowledged, waits for the computer to hang up, and — left
+   waiting — abandons the link until somebody presses reconnect on the machine.
+   The link carries the choice, and this proves both halves of it.
+   ======================================================================== */
+console.log('\n[6c] Holding the connection, or letting it go');
+
+/** Transmit, then report what the socket did for the next few seconds. */
+function transmitAndWatch(port, message, waitMs) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    const seen = { acked: false, endedByServer: false, stillOpen: false };
+    const finish = () => { socket.destroy(); resolve(seen); };
+    const timer = setTimeout(() => { seen.stillOpen = !seen.endedByServer; finish(); }, waitMs);
+    socket.on('connect', () => socket.write(
+      Buffer.concat([Buffer.from([0x0b]), Buffer.from(message, 'latin1'), Buffer.from([0x1c, 0x0d])])));
+    socket.on('data', chunk => { if (chunk.toString('latin1').includes('MSA')) seen.acked = true; });
+    // A FIN from SECHLIMS arrives as the end of our readable side.
+    socket.on('end', () => { seen.endedByServer = true; clearTimeout(timer); setTimeout(finish, 50); });
+    socket.on('error', e => { clearTimeout(timer); reject(e); });
+  });
+}
+
+const hl7For = id => [
+  `MSH|^~\\&|DF5x|Dymind|||20261027181312||ORU^R01|${id}|P|2.3.1`,
+  `OBR|1||${id}|01001^Automated Count^99MRC`,
+  'OBX|1|NM|6690-2^WBC^LN||7.42|10*9/L|4.0-10.0|N|||F',
+].join('\r');
+
+const held = await transmitAndWatch(PORT_ACK, hl7For(`HOLD_${stamp}`), 6_000);
+check('by default the connection is left open after a transmission',
+  held.acked && held.stillOpen && !held.endedByServer, JSON.stringify(held));
+
+const switched = await j(`/instrument-links/${ackLink.json.id}`, { token: A, method: 'PUT', body: {
+  closeAfterMessage: true,
+} });
+check('a link can be set to hang up once the result is acknowledged',
+  switched.status === 200 && Number(switched.json?.close_after_message ?? 0) === 1,
+  `${switched.status} ${JSON.stringify(switched.json?.close_after_message)}`);
+await wait(900);
+
+const letGo = await transmitAndWatch(PORT_ACK, hl7For(`CLOSE_${stamp}`), 9_000);
+check('and then SECHLIMS closes it itself, after acknowledging',
+  letGo.acked && letGo.endedByServer, JSON.stringify(letGo));
+await wait(600);
+const afterClose = (await j(`/instrument-links/${ackLink.json.id}/messages`, { token: A })).json ?? [];
+check('the result still arrived in full',
+  afterClose.some(m => String(m.raw_message ?? '').includes(`CLOSE_${stamp}`)), `${afterClose.length} message(s)`);
+
+/* ---- an analyser that aborts the way this one does --------------------- */
+/*
+ * The exact symptom from the bench: transmit, be acknowledged, then abandon the
+ * connection with a reset rather than closing it. What the log says about that
+ * is the whole of what a laboratory has to go on.
+ */
+await j(`/instrument-links/${ackLink.json.id}`, { token: A, method: 'PUT', body: { closeAfterMessage: false } });
+await wait(800);
+await new Promise((resolve, reject) => {
+  const socket = net.createConnection({ host: '127.0.0.1', port: PORT_ACK });
+  socket.on('connect', () => socket.write(Buffer.concat([
+    Buffer.from([0x0b]), Buffer.from(hl7For(`RESET_${stamp}`), 'latin1'), Buffer.from([0x1c, 0x0d])])));
+  socket.on('data', () => setTimeout(() => {
+    // A reset, not a close — which is what the analyser sends.
+    if (typeof socket.resetAndDestroy === 'function') socket.resetAndDestroy();
+    else socket.destroy();
+    resolve();
+  }, 300));
+  socket.on('error', () => resolve());
+  setTimeout(() => { socket.destroy(); reject(new Error('no acknowledgement came back')); }, 8_000);
+});
+await wait(1_200);
+const dropLog = JSON.stringify((await j(`/instrument-links/${ackLink.json.id}/events`, { token: A })).json ?? []);
+check('a connection the analyser abandons is explained in words, not in errno',
+  /dropped the connection without closing it/.test(dropLog), dropLog.slice(-400));
+check('and the one setting that answers it is named',
+  /After each transmission/.test(dropLog), dropLog.slice(-400));
+
+/* ---- an analyser that sends two messages down one connection ----------- */
+const batch = await new Promise((resolve, reject) => {
+  const socket = net.createConnection({ host: '127.0.0.1', port: PORT_ACK });
+  const frame = text => Buffer.concat([Buffer.from([0x0b]), Buffer.from(text, 'latin1'), Buffer.from([0x1c, 0x0d])]);
+  let acks = 0;
+  const timer = setTimeout(() => { socket.destroy(); resolve({ acks, closed: false }); }, 12_000);
+  socket.on('connect', () => {
+    socket.write(frame(hl7For(`BATCH1_${stamp}`)));
+    // The second one arrives a second later, well inside the quiet window.
+    setTimeout(() => { if (!socket.destroyed) socket.write(frame(hl7For(`BATCH2_${stamp}`))); }, 1_000);
+  });
+  socket.on('data', chunk => { acks += (chunk.toString('latin1').match(/MSA/g) ?? []).length; });
+  socket.on('end', () => { clearTimeout(timer); setTimeout(() => { socket.destroy(); resolve({ acks, closed: true }); }, 50); });
+  socket.on('error', e => { clearTimeout(timer); reject(e); });
+});
+await wait(800);
+const bothIn = (await j(`/instrument-links/${ackLink.json.id}/messages`, { token: A })).json ?? [];
+check('hanging up waits for an analyser that sends more than one message',
+  batch.acks >= 2
+  && bothIn.some(m => String(m.raw_message ?? '').includes(`BATCH1_${stamp}`))
+  && bothIn.some(m => String(m.raw_message ?? '').includes(`BATCH2_${stamp}`)),
+  JSON.stringify(batch));
+
+await j(`/instrument-links/${ackLink.json.id}`, { token: A, method: 'PUT', body: { closeAfterMessage: false } });
+await wait(700);
+
 /* ---- the address a technician is sent to type in ----------------------- */
 const hostInfo = (await j('/instrument-links/host', { token: A })).json ?? {};
 const offered = hostInfo.addresses ?? [];
