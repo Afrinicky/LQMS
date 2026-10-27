@@ -112,6 +112,20 @@ export function linkIsOurs(role?: string | null, mode?: string | null): boolean 
   return modeIsPassive(mode);
 }
 
+/**
+ * Does this link carry a copy of its results onward to LHIMS?
+ *
+ * The role decides it, and nothing else may. "SECHLIMS only — this analyser
+ * transmits to nothing else" is a sentence about where the results go, and a
+ * link saved under that role while an older setting still said "carry these to
+ * LHIMS" went on carrying them: the screen said one thing, the link did
+ * another, and only the badge on the card gave it away. Forwarding now belongs
+ * to the one role that describes it.
+ */
+export function linkForwards(role?: string | null, forwardEnabled?: unknown): boolean {
+  return role === 'shared_forward' && Boolean(Number(forwardEnabled ?? 0));
+}
+
 /* ============================================================================
    What it says on the wire
    ========================================================================= */
@@ -142,6 +156,11 @@ export const LINK_MESSAGE_TIMEOUT_MS = 30_000;
 export const LINK_RECONNECT_MS = 15_000;
 /** A frame larger than this is a runaway, not a result. */
 export const LINK_MAX_FRAME_BYTES = 512 * 1024;
+/**
+ * How long a stream with no end-of-transmission marker is given to go quiet
+ * before what it has sent is taken as a whole message.
+ */
+export const LINK_IDLE_FLUSH_MS = 2_000;
 
 export const LINK_STATES = ['stopped', 'listening', 'connected', 'connecting', 'following', 'error', 'blocked'] as const;
 export type LinkState = (typeof LINK_STATES)[number];

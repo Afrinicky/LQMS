@@ -37,7 +37,7 @@ import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
   DEFAULT_CONTROL_PATTERNS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
-  linkIsOurs, LINK_STATE_LABELS,
+  linkForwards, linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
 import {
   LHIMS_MEASURE_MAPS, LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS,
@@ -50,6 +50,29 @@ const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params
 function json<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string' || !value.trim()) return fallback;
   try { return (JSON.parse(value) ?? fallback) as T; } catch { return fallback; }
+}
+
+/* ============================================================================
+   Which of this computer's addresses to give an analyser
+   ========================================================================= */
+const ADDRESS_RANK: Record<string, number> = { lan: 0, other: 1, remote: 2 };
+const ADDRESS_NOTES: Record<string, string> = {
+  lan: 'on this hospital network — this is the one to type into an analyser',
+  other: 'on this computer',
+  remote: 'remote access only — an analyser on the bench cannot reach this one',
+};
+
+/**
+ * An ordinary network address, or one only a remote-access network can reach.
+ *
+ * 100.64.0.0/10 is the carrier-grade range Tailscale and similar networks hand
+ * out, and an interface named for one of them says the same thing.
+ */
+function addressKind(address: string, interfaceName: string): string {
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address)) return 'remote';
+  if (/^(tailscale|ts\d|zt|wg|tun|utun|ppp)/i.test(interfaceName)) return 'remote';
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address)) return 'lan';
+  return 'other';
 }
 
 /** Can this host see the path at all? A share that has gone is the usual answer. */
@@ -100,7 +123,11 @@ export function instrumentLinkRoutes() {
     const rows = db.prepare(`SELECT l.*, e.name AS equipment_name, e.equipment_number, s.name AS section_name,
           (SELECT COUNT(*) FROM instrument_messages m WHERE m.link_id = l.id) AS message_count,
           (SELECT COUNT(*) FROM instrument_messages m WHERE m.link_id = l.id AND m.kind = 'control') AS control_count,
-          (SELECT COUNT(*) FROM instrument_messages m WHERE m.link_id = l.id AND m.forward_status = 'pending') AS forward_pending
+          -- Only a link that actually carries results onward has anything waiting
+          -- to be carried. A link whose role was changed afterwards would
+          -- otherwise nag about a queue that must never be delivered.
+          (SELECT COUNT(*) FROM instrument_messages m
+             WHERE m.link_id = l.id AND m.forward_status = 'pending' AND l.role = 'shared_forward') AS forward_pending
         FROM instrument_links l
         LEFT JOIN equipment_items e ON e.id = l.equipment_id
         LEFT JOIN sections s ON s.id = l.section_id
@@ -147,7 +174,20 @@ export function instrumentLinkRoutes() {
       watchPath: pick(b.watchPath, existing.watch_path) ?? null,
       analyteMap: b.analyteMap !== undefined ? JSON.stringify(b.analyteMap ?? {}) : (existing.analyte_map ?? null),
       controlPatterns: b.controlPatterns !== undefined ? JSON.stringify(b.controlPatterns ?? []) : (existing.control_patterns ?? null),
-      forwardEnabled: b.forwardEnabled !== undefined ? (b.forwardEnabled ? 1 : 0) : (existing.forward_enabled ?? 0),
+      /*
+       * The role is what says where results go.
+       *
+       * "SECHLIMS only — this analyser transmits to nothing else" is a sentence
+       * about exactly this, so choosing it turns carrying-onward off rather
+       * than leaving an older setting to contradict the words on the screen.
+       * A link LHIMS owns is NOT quietly corrected here: asking to deliver one
+       * of those back into LHIMS is a dangerous request and is refused below,
+       * with the reason, which is worth more than silently doing something
+       * else.
+       */
+      forwardEnabled: String(pick(b.role, existing.role) ?? 'sechlims_only') === 'sechlims_only'
+        ? 0
+        : (b.forwardEnabled !== undefined ? (b.forwardEnabled ? 1 : 0) : (existing.forward_enabled ?? 0)),
       forwardHost: pick(b.forwardHost, existing.forward_host) ?? null,
       forwardPort: b.forwardPort !== undefined ? parseIntNullable(b.forwardPort) : (existing.forward_port ?? null),
       forwardTarget: String(pick(b.forwardTarget, existing.forward_target) ?? 'lhims_api'),
@@ -428,18 +468,29 @@ export function instrumentLinkRoutes() {
    * An analyser is configured by walking to it and entering a host address and
    * a port. The address is this machine's, and nobody should have to find it
    * from a command prompt in another room.
+   *
+   * WHICH address is not a detail. This computer may also be on a remote-access
+   * network — Tailscale and the like hand out an address in 100.64.0.0/10 —
+   * and an analyser standing on the hospital network cannot reach one of those
+   * at all. Offering it first, as the operating system's own interface order
+   * sometimes does, sends a technician to type an address into a machine that
+   * will then transmit into nothing. The ordinary network address comes first,
+   * and every address says what it is.
    */
   router.get('/host', requirePermission(MODULE, 'view'), (_req, res) => {
-    const addresses: Array<{ name: string; address: string }> = [];
+    const addresses: Array<{ name: string; address: string; kind: string; note: string }> = [];
     const interfaces = os.networkInterfaces();
     for (const [name, list] of Object.entries(interfaces)) {
       for (const entry of list ?? []) {
         // IPv4 only, and not the loopback: an analyser on the bench cannot
         // reach 127.0.0.1, and offering it is how an afternoon is lost.
         if (entry.family !== 'IPv4' || entry.internal) continue;
-        addresses.push({ name, address: entry.address });
+        const kind = addressKind(entry.address, name);
+        addresses.push({ name, address: entry.address, kind, note: ADDRESS_NOTES[kind] });
       }
     }
+    // The address an analyser can actually reach, first. See addressKind.
+    addresses.sort((a, b) => ADDRESS_RANK[a.kind] - ADDRESS_RANK[b.kind]);
     res.json({ hostname: os.hostname(), addresses });
   });
 
@@ -583,7 +634,7 @@ export function instrumentLinkRoutes() {
         : undefined);
 
     /* 7 — where patient results go */
-    if (link.forward_enabled) {
+    if (linkForwards(link.role, link.forward_enabled)) {
       const ready = link.forward_target === 'tcp'
         ? Boolean(link.forward_host && link.forward_port)
         : Boolean(link.lhims_url && link.lhims_username && link.lhims_map_key);
@@ -844,7 +895,7 @@ export function instrumentLinkRoutes() {
       } catch { return []; }
     })();
 
-    const carriesToLhims = Boolean(link.forward_enabled) && link.forward_target !== 'tcp';
+    const carriesToLhims = linkForwards(link.role, link.forward_enabled) && link.forward_target !== 'tcp';
     const unmapped = new Set<string>();
 
     const messages = parsed.map(message => {

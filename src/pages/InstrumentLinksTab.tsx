@@ -14,7 +14,7 @@ import {
   LINK_MODES, LINK_MODE_HINTS, LINK_MODE_LABELS,
   LINK_PROTOCOLS, LINK_PROTOCOL_HINTS, LINK_PROTOCOL_LABELS,
   LINK_ROLES, LINK_ROLE_HINTS, LINK_ROLE_LABELS, LINK_STATE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, modeIsPassive,
+  DEFAULT_CONTROL_PATTERNS, linkForwards, modeIsPassive,
   type LinkMode, type LinkProtocol, type LinkRole,
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
@@ -77,7 +77,7 @@ type Overview = {
   controlsWaiting: number; forwardPending: number; forwardFailed: number;
 };
 
-type HostInfo = { hostname: string; addresses: Array<{ name: string; address: string }> };
+type HostInfo = { hostname: string; addresses: Array<{ name: string; address: string; kind?: string; note?: string }> };
 
 type LinkCheck = { key: string; label: string; status: 'ok' | 'todo' | 'warn' | 'info'; detail: string; fix?: string };
 
@@ -470,7 +470,7 @@ function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMes
           </span>
           {link.role === 'lhims_owned' && <span className="badge">LHIMS</span>}
           {modeIsPassive(link.mode) && <span className="badge">read-only copy</span>}
-          {Boolean(link.forward_enabled) && <span className="badge">carries to LHIMS</span>}
+          {linkForwards(link.role, link.forward_enabled) && <span className="badge">carries to LHIMS</span>}
         </span>
         <span className="il-meta">
           {link.equipment_name && <span>{link.equipment_name}</span>}
@@ -787,6 +787,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
   const set = <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => setForm(f => ({ ...f, [key]: value }));
   const profile = profiles.find(p => p.key === form.profileKey);
   const lhimsOwned = form.role === 'lhims_owned';
+  const sharesForward = form.role === 'shared_forward';
   // The one combination the bridge refuses to open. Saying it here, beside the
   // two fields that cause it, is the difference between a link that works and
   // a morning spent wondering why nothing arrives.
@@ -889,9 +890,21 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                 <p className="lf-hint">
                   On the analyser, set the host to <code>{host.addresses[0].address}</code>
                   {form.listenPort ? <> and the port to <code>{form.listenPort}</code></> : null}.
+                  {/*
+                    * An analyser on the bench reaches this computer over the hospital
+                    * network and nothing else. Where the only address on offer is a
+                    * remote-access one, saying so beats letting somebody type it in
+                    * and wait for a transmission that cannot arrive.
+                    */}
+                  {host.addresses[0].kind === 'remote' && (
+                    <> This is a remote-access address; an analyser on the bench cannot reach it. Connect this
+                    computer to the hospital network, then read the address again.</>
+                  )}
                   {host.addresses.length > 1 && (
                     <Why summary="This machine has other addresses">
-                      {host.addresses.map(a => <div key={a.address}><code>{a.address}</code> — {a.name}</div>)}
+                      {host.addresses.map(a => (
+                        <div key={a.address}><code>{a.address}</code> — {a.name}{a.note ? ` · ${a.note}` : ''}</div>
+                      ))}
                     </Why>
                   )}
                 </p>
@@ -996,18 +1009,29 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             </>
           )}
 
-          <label className="ls-check">
-            <input type="checkbox" checked={form.forwardEnabled} disabled={lhimsOwned}
-              onChange={e => set('forwardEnabled', e.target.checked)} />
-            <span>
-              Also carry this analyser&rsquo;s patient results into LHIMS
-              <em>
-                {lhimsOwned
-                  ? ' — not available for a link LHIMS already receives; two copies of one result is worse than none.'
-                  : ' — only for an analyser LHIMS is not already receiving. Control runs are never sent.'}
-              </em>
-            </span>
-          </label>
+          {/*
+            * Carrying results onward belongs to the role that says so. Offering
+            * the choice under every role is how a link ends up describing
+            * itself as transmitting to nothing else while it quietly delivers
+            * to LHIMS.
+            */}
+          {sharesForward ? (
+            <label className="ls-check">
+              <input type="checkbox" checked={form.forwardEnabled}
+                onChange={e => set('forwardEnabled', e.target.checked)} />
+              <span>
+                Also carry this analyser&rsquo;s patient results into LHIMS
+                <em> — only for an analyser LHIMS is not already receiving. Control runs are never sent.</em>
+              </span>
+            </label>
+          ) : (
+            <p className="ls-note">
+              This link carries its results to SECHLIMS and nowhere else.
+              {lhimsOwned
+                ? ' A link LHIMS already receives is never delivered back into LHIMS; two copies of one result is worse than none.'
+                : ' To pass a copy on to LHIMS as well, set what this link is for to “SECHLIMS receives, and passes a copy on to LHIMS”.'}
+            </p>
+          )}
           {form.forwardEnabled && (
             <>
               <div className="lf-grid">

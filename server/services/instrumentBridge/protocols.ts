@@ -598,19 +598,127 @@ export function parseHl7(text: string): AnalyserMessage[] {
   return messages;
 }
 
-/** The acknowledgement an HL7 sender waits for before sending the next message. */
-export function buildHl7Ack(message: string): Buffer {
-  const msh = message.split(/[\r\n]+/).find(l => l.startsWith('MSH')) ?? '';
-  const fields = msh.split('|');
-  const sendingApp = fields[2] ?? '';
-  const sendingFacility = fields[3] ?? '';
-  const controlId = fields[9] ?? String(Date.now());
+/**
+ * What an analyser told us about itself in its MSH.
+ *
+ * Read with the separators the message itself declares rather than assumed to
+ * be pipes and carets, and read defensively: an analyser whose MSH is a field
+ * short — and several are — would otherwise have its processing ID echoed back
+ * as its message control id, which is an acknowledgement of a message it never
+ * sent.
+ */
+export interface Hl7Header {
+  separator: string;
+  encoding: string;
+  sendingApp: string;
+  sendingFacility: string;
+  trigger: string;
+  controlId: string;
+  version: string;
+}
+
+/** Does this field read like a message type — ORU^R01, ADT^A01, ACK? */
+function looksLikeMessageType(field: string): boolean {
+  return /^[A-Z]{3}(\^[A-Z0-9]+)*$/.test(String(field ?? '').trim());
+}
+
+export function readHl7Header(message: string): Hl7Header {
+  const msh = String(message ?? '').split(/[\r\n]+/).find(line => line.trim().startsWith('MSH')) ?? '';
+  const separator = msh.charAt(3) || '|';
+  const fields = msh.split(separator);
+  const at = (index: number) => String(fields[index] ?? '').trim();
+
+  /*
+   * MSH-9 belongs at index 8 and MSH-10 at index 9. Where it is not there —
+   * an analyser that omits a field, or a log that lost one — the message type
+   * is found by its shape and the control id is the field after it, because an
+   * acknowledgement carrying the wrong control id is worse than none at all:
+   * the analyser reads it, sees a reply to some other message, and stops.
+   */
+  let typeAt = 8;
+  if (!looksLikeMessageType(at(8))) {
+    const found = fields.findIndex((field, index) => index >= 4 && looksLikeMessageType(field));
+    if (found > 0) typeAt = found;
+  }
+  const messageType = at(typeAt);
+  const version = at(typeAt + 3) || at(11) || '2.3.1';
+
+  return {
+    separator,
+    encoding: at(1) || '^~\\&',
+    sendingApp: at(2),
+    sendingFacility: at(3),
+    trigger: messageType.includes('^') ? messageType.split('^')[1] ?? '' : '',
+    controlId: at(typeAt + 1),
+    version: /^\d+(\.\d+)*$/.test(version) ? version : '2.3.1',
+  };
+}
+
+/** A control id of our own, for the acknowledgement itself. */
+let ackSerial = 0;
+function newControlId(): string {
+  ackSerial = (ackSerial + 1) % 100000;
+  return `SECH${Date.now().toString(36).toUpperCase()}${String(ackSerial).padStart(5, '0')}`;
+}
+
+/**
+ * The acknowledgement an HL7 sender waits for before sending the next message.
+ *
+ * Every segment ends with a carriage return, the last one included. HL7 has no
+ * other segment terminator, so an acknowledgement whose MSA is not terminated
+ * is an acknowledgement whose MSA a strict reader discards — and an analyser
+ * that cannot find the MSA concludes its result was never taken, retries, and
+ * then stops transmitting altogether. It costs one byte to be correct.
+ */
+export function hl7AckText(message: string): string {
+  const header = readHl7Header(message);
   const now = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-  const ack = [
-    `MSH|^~\\&|SECHLIMS|SECHLIMS|${sendingApp}|${sendingFacility}|${now}||ACK^R01|${controlId}|P|2.3.1`,
-    `MSA|AA|${controlId}`,
+  const type = header.trigger ? `ACK^${header.trigger}` : 'ACK';
+  // The sender's own control id is echoed in MSA-2; MSH-10 is ours, as it is
+  // the control id OF the acknowledgement rather than of what it answers.
+  const echoed = header.controlId || newControlId();
+  return [
+    `MSH|^~\\&|SECHLIMS|SECHLIMS|${header.sendingApp}|${header.sendingFacility}|${now}||${type}|${newControlId()}|P|${header.version}`,
+    `MSA|AA|${echoed}`,
+    '',
   ].join('\r');
-  return Buffer.concat([Buffer.from([VT]), Buffer.from(ack, 'latin1'), Buffer.from([FS, CR])]);
+}
+
+export function buildHl7Ack(message: string): Buffer {
+  return Buffer.concat([Buffer.from([VT]), Buffer.from(hl7AckText(message), 'latin1'), Buffer.from([FS, CR])]);
+}
+
+/** The same acknowledgement for an analyser that sent no MLLP wrapper. */
+export function buildBareHl7Ack(message: string): Buffer {
+  return Buffer.from(hl7AckText(message), 'latin1');
+}
+
+/** Does this text carry an HL7 message, wrapper or no wrapper? */
+export function carriesHl7(text: string): boolean {
+  return /(^|[\r\n\x0b])\s*MSH\s*[|^]/.test(String(text ?? ''));
+}
+
+/**
+ * Bytes as a person can read them in a log.
+ *
+ * The control characters that do the framing are the ones worth seeing — a
+ * reply missing its terminator, or an analyser sending a bare ENQ, is invisible
+ * otherwise.
+ */
+export function printableBytes(raw: Buffer | string): string {
+  const text = typeof raw === 'string' ? raw : raw.toString('latin1');
+  return text
+    .replace(/\x0b/g, '<VT>')
+    .replace(/\x1c/g, '<FS>')
+    .replace(/\x05/g, '<ENQ>')
+    .replace(/\x06/g, '<ACK>')
+    .replace(/\x15/g, '<NAK>')
+    .replace(/\x04/g, '<EOT>')
+    .replace(/\x02/g, '<STX>')
+    .replace(/\x03/g, '<ETX>')
+    .replace(/\x17/g, '<ETB>')
+    .replace(/\r/g, '<CR>\n')
+    .replace(/\n\n/g, '\n');
 }
 
 /* ============================================================================
@@ -777,7 +885,16 @@ export class AstmFramer {
   }
 }
 
-/** HL7's MLLP framing: 0x0B … 0x1C 0x0D, with an ACK for each message. */
+/**
+ * HL7's MLLP framing: 0x0B … 0x1C 0x0D, with an ACK for each message.
+ *
+ * And HL7 without it. An analyser set to send plain HL7 — several offer it,
+ * and a firmware setting is all it takes — used to have every byte discarded
+ * here without a word in the log, because a buffer with no 0x0B in it was
+ * thrown away. It now keeps what it was sent, hands it over when the analyser
+ * pauses, and answers with an acknowledgement wrapped the same way the message
+ * came in: a sender that uses no wrapper is not expecting one back.
+ */
 export class Hl7Framer {
   private buffer = Buffer.alloc(0);
   private maxBytes: number;
@@ -791,7 +908,7 @@ export class Hl7Framer {
 
     for (;;) {
       const start = this.buffer.indexOf(VT);
-      if (start === -1) { this.buffer = Buffer.alloc(0); break; }
+      if (start === -1) break;
       const end = this.buffer.indexOf(FS, start + 1);
       if (end === -1) { if (start > 0) this.buffer = this.buffer.subarray(start); break; }
 
@@ -806,7 +923,22 @@ export class Hl7Framer {
     return out;
   }
 
-  flush(): string | null { return null; }
+  /** Something unwrapped is waiting, and only a pause can say it is complete. */
+  needsIdleFlush(): boolean {
+    return this.buffer.length > 0 && this.buffer.indexOf(VT) === -1 && carriesHl7(this.buffer.toString('latin1'));
+  }
+
+  flushOutput(): FramerOutput {
+    const text = this.buffer.toString('latin1');
+    this.buffer = Buffer.alloc(0);
+    if (!carriesHl7(text)) return { replies: [], messages: [] };
+    return { replies: [buildBareHl7Ack(text)], messages: [text.trim()] };
+  }
+
+  flush(): string | null {
+    const out = this.flushOutput();
+    return out.messages[0] ?? null;
+  }
 }
 
 /** A line-delimited stream, ended by a blank line or simply by time. */
@@ -829,6 +961,13 @@ export class LineFramer {
     return out;
   }
 
+  needsIdleFlush(): boolean { return this.buffer.trim().length > 0; }
+
+  flushOutput(): FramerOutput {
+    const text = this.flush();
+    return { replies: [], messages: text ? [text] : [] };
+  }
+
   flush(): string | null {
     const text = this.buffer.trim();
     this.buffer = '';
@@ -839,6 +978,24 @@ export class LineFramer {
 export interface Framer {
   push(chunk: Buffer): FramerOutput;
   flush(): string | null;
+  /**
+   * Is something waiting that only a pause can declare finished?
+   *
+   * A protocol with an end-of-transmission marker always answers no. One
+   * without — plain text, or HL7 an analyser sent without its MLLP wrapper —
+   * answers yes while it holds anything, and the link then gives it a moment's
+   * silence before taking what it has.
+   */
+  needsIdleFlush?(): boolean;
+  /** What is left, with any reply it has earned. Used on a pause and on close. */
+  flushOutput?(): FramerOutput;
+}
+
+/** What a framer has left at the end, for a framer that only implements flush(). */
+export function drainFramer(framer: Framer): FramerOutput {
+  if (typeof framer.flushOutput === 'function') return framer.flushOutput();
+  const text = framer.flush();
+  return { replies: [], messages: text && text.trim() ? [text] : [] };
 }
 
 /**
@@ -873,7 +1030,11 @@ class AutoFramer implements Framer {
       while (i < this.peeked.length && (this.peeked[i] === CR || this.peeked[i] === LF)) i++;
       if (i >= this.peeked.length) return { replies: [], messages: [] };
       const first = this.peeked[i];
-      this.inner = first === VT ? new Hl7Framer(this.maxBytes)
+      // A message that begins MSH| is HL7 whether or not anybody wrapped it.
+      // Read as lines it would be held until the socket closed and answered
+      // with nothing, which is how an analyser decides its result was lost.
+      const bare = carriesHl7(this.peeked.subarray(i, i + 8).toString('latin1'));
+      this.inner = (first === VT || bare) ? new Hl7Framer(this.maxBytes)
         : (first === ENQ || first === STX || first === EOT) ? new AstmFramer(this.maxBytes)
         : new LineFramer(this.maxBytes);
       const held = this.peeked;
@@ -881,6 +1042,14 @@ class AutoFramer implements Framer {
       return this.inner.push(held);
     }
     return this.inner.push(chunk);
+  }
+
+  needsIdleFlush(): boolean {
+    return Boolean(this.inner && typeof this.inner.needsIdleFlush === 'function' && this.inner.needsIdleFlush());
+  }
+
+  flushOutput(): FramerOutput {
+    return this.inner ? drainFramer(this.inner) : { replies: [], messages: [] };
   }
 
   flush(): string | null { return this.inner ? this.inner.flush() : null; }
@@ -1092,7 +1261,9 @@ export function buildHl7Oru(message: OutboundMessage, header: OutboundHeader): s
       control ? 'F' : 'F', '', '', observed,
     ].join('|'));
   }
-  return segments.join('\r');
+  // Every segment ends with a carriage return, the last one included: HL7 has
+  // no other terminator, and a reader that insists on one drops the segment.
+  return `${segments.join('\r')}\r`;
 }
 
 /** Frame a message for MLLP: VT, the message, FS CR. */

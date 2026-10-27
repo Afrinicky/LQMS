@@ -361,11 +361,131 @@ check('but one genuinely named QC-2 is', hyphenated.json?.messages?.[0]?.wouldBe
   `${hyphenated.json?.messages?.[0]?.wouldBeTreatedAs} for QC-2`);
 
 /* ==========================================================================
+   6b. The acknowledgement an analyser actually reads
+   --------------------------------------------------------------------------
+   A result that reaches SECHLIMS and is answered badly is worse than one that
+   never arrives: the analyser decides the transmission failed and stops
+   sending. So the reply is read back byte for byte, as the machine reads it.
+   ======================================================================== */
+console.log('\n[6b] The acknowledgement');
+
+const PORT_ACK = PORT_BASE + 4;
+const ackLink = await j('/instrument-links', { token: A, method: 'POST', body: {
+  name: `Humacount 5D ${stamp}`, sectionId,
+  role: 'sechlims_only', mode: 'server', protocol: 'auto', listenPort: PORT_ACK,
+} });
+check('a link that works the protocol out for itself starts', ackLink.status === 201,
+  JSON.stringify(ackLink.json)?.slice(0, 160));
+await wait(500);
+
+/*
+ * The MSH a Dymind-built counter sends, control id and all. It is the shape
+ * that matters: the reply has to echo THIS field and no other.
+ */
+const DYMIND_ID = `20250924_213756_${stamp}`;
+const dymind = [
+  `MSH|^~\\&|DF5x|Dymind|||20261027181312||ORU^R01|${DYMIND_ID}|P|2.3.1||||||UNICODE`,
+  `PID|1|||${`26090${stamp}`.slice(0, 10)}|Boafo^Kendrick|||Male`,
+  `OBR|1||${`26090${stamp}`.slice(0, 10)}|01001^Automated Count^99MRC||20261027181300`,
+  'OBX|1|NM|6690-2^WBC^LN||7.42|10*9/L|4.0-10.0|N|||F',
+  'OBX|2|NM|718-7^HGB^LN||13.8|g/dL|11.0-16.0|N|||F',
+].join('\r');
+
+const dymindAck = await sendHl7(PORT_ACK, dymind);
+const ackBody = dymindAck.replace(/^\x0b/, '').replace(/\x1c\r?$/, '');
+const ackSegments = ackBody.split('\r');
+
+check('the analyser is answered', /MSA\|AA/.test(ackBody), ackBody.slice(0, 120));
+check('the acknowledgement names the message it answers',
+  ackSegments.some(seg => seg === `MSA|AA|${DYMIND_ID}`),
+  JSON.stringify(ackSegments));
+check('every segment is terminated, the last one included',
+  ackBody.endsWith('\r') && ackSegments.filter(Boolean).length === 2,
+  JSON.stringify(ackBody));
+check('the acknowledgement carries a control id of its own',
+  (ackSegments[0] ?? '').split('|')[9] !== DYMIND_ID && Boolean((ackSegments[0] ?? '').split('|')[9]),
+  ackSegments[0]);
+check('and answers in the version the analyser spoke',
+  (ackSegments[0] ?? '').split('|')[11] === '2.3.1', ackSegments[0]);
+check('its message type answers the trigger that was sent',
+  (ackSegments[0] ?? '').split('|')[8] === 'ACK^R01', ackSegments[0]);
+
+await wait(700);
+const ackMessages = (await j(`/instrument-links/${ackLink.json.id}/messages`, { token: A })).json ?? [];
+check('and the result itself is recorded', ackMessages.length >= 1, `${ackMessages.length}`);
+
+/* ---- an MSH a field short, which several counters send ------------------ */
+const SHORT_ID = `SHORT_${stamp}`;
+const shortAck = await sendHl7(PORT_ACK, [
+  `MSH|^~\\&|DF5x|Dymind||20261027181312||ORU^R01|${SHORT_ID}|P|2.3.1`,
+  `OBR|1||SH${stamp}|01001^Automated Count^99MRC`,
+  'OBX|1|NM|6690-2^WBC^LN||5.10|10*9/L|4.0-10.0|N|||F',
+].join('\r'));
+check('an MSH that is a field short is still answered with ITS control id',
+  shortAck.includes(`MSA|AA|${SHORT_ID}`), shortAck.replace(/[\x0b\x1c]/g, '').slice(0, 160));
+
+/* ---- HL7 sent with no MLLP wrapper at all ------------------------------ */
+const BARE_ID = `BARE_${stamp}`;
+const bare = await new Promise((resolve, reject) => {
+  const socket = net.createConnection({ host: '127.0.0.1', port: PORT_ACK });
+  const timer = setTimeout(() => { socket.destroy(); resolve(''); }, 9000);
+  socket.on('connect', () => socket.write([
+    `MSH|^~\\&|DF5x|Dymind|||20261027181500||ORU^R01|${BARE_ID}|P|2.3.1`,
+    `OBR|1||BR${stamp}|01001^Automated Count^99MRC`,
+    'OBX|1|NM|6690-2^WBC^LN||6.60|10*9/L|4.0-10.0|N|||F',
+  ].join('\r'), 'latin1'));
+  socket.on('data', chunk => {
+    clearTimeout(timer);
+    setTimeout(() => { socket.end(); resolve(chunk.toString('latin1')); }, 150);
+  });
+  socket.on('error', e => { clearTimeout(timer); reject(e); });
+});
+check('an analyser that sends HL7 without the MLLP wrapper is still answered',
+  bare.includes(`MSA|AA|${BARE_ID}`), bare.slice(0, 160) || '(nothing came back)');
+check('and the reply is unwrapped too, as that analyser expects',
+  Boolean(bare) && !bare.startsWith('\x0b'), JSON.stringify(bare.slice(0, 12)));
+await wait(900);
+const bareMessages = (await j(`/instrument-links/${ackLink.json.id}/messages`, { token: A })).json ?? [];
+check('its result is recorded like any other',
+  bareMessages.some(m => String(m.raw_message ?? '').includes(BARE_ID)), `${bareMessages.length} message(s)`);
+
+/* ---- a connection that says nothing ------------------------------------ */
+await new Promise(resolve => {
+  const socket = net.createConnection({ host: '127.0.0.1', port: PORT_ACK });
+  socket.on('connect', () => setTimeout(() => { socket.end(); resolve(); }, 700));
+  socket.on('error', () => resolve());
+});
+await wait(600);
+const quietLog = (await j(`/instrument-links/${ackLink.json.id}/events`, { token: A })).json ?? [];
+const quietText = JSON.stringify(quietLog);
+check('a connection that sends nothing says so in the log',
+  /connected for .* and sent nothing/.test(quietText), quietText.slice(-300));
+
+/* ---- the role is what decides where results go -------------------------- */
+const contradiction = await j(`/instrument-links/${ackLink.json.id}`, { token: A, method: 'PUT', body: {
+  forwardEnabled: true, forwardTarget: 'tcp', forwardHost: '10.10.0.9', forwardPort: 3121,
+} });
+const afterSave = (await j('/instrument-links', { token: A })).json?.find(l => l.id === ackLink.json.id);
+check('a SECHLIMS-only link cannot be made to carry results to LHIMS',
+  Number(afterSave?.forward_enabled ?? 0) === 0,
+  `${contradiction.status} forward_enabled=${afterSave?.forward_enabled}`);
+
+/* ---- the address a technician is sent to type in ----------------------- */
+const hostInfo = (await j('/instrument-links/host', { token: A })).json ?? {};
+const offered = hostInfo.addresses ?? [];
+check('this computer offers an address to type into the analyser', offered.length > 0,
+  JSON.stringify(offered));
+check('and every address says what it is',
+  offered.every(a => typeof a.kind === 'string' && typeof a.note === 'string'), JSON.stringify(offered));
+check('a remote-access address is never the one offered first when an ordinary one exists',
+  !(offered[0]?.kind === 'remote' && offered.some(a => a.kind === 'lan')), JSON.stringify(offered));
+
+/* ==========================================================================
    7. Stopping cleanly
    ======================================================================== */
 console.log('\n[7] Stopping');
 
-for (const id of [haemLink.json.id, chemLink.json.id, hl7Link.json.id]) {
+for (const id of [haemLink.json.id, chemLink.json.id, hl7Link.json.id, ackLink.json.id]) {
   await j(`/instrument-links/${id}/stop`, { token: A, method: 'POST' });
 }
 await wait(300);

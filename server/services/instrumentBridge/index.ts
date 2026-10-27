@@ -39,11 +39,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  detectProtocol, effectiveProtocol, framerFor, parseFor, splitTransmissions,
+  detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes, splitTransmissions,
   type Framer, type AnalyserMessage,
 } from './protocols.js';
 import {
-  LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, classifyMessage, linkIsOurs, mapAnalyte, modeIsPassive,
+  LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, classifyMessage, linkForwards, linkIsOurs,
+  mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
 import {
   LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_MAX_CATCHUP_BYTES, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
@@ -814,27 +815,57 @@ class Link {
     const framer: Framer = framerFor(this.row.protocol, LINK_MAX_FRAME_BYTES);
     socket.setKeepAlive(true, 30_000);
 
-    this.emit('info', `${peer} connected`);
+    /*
+     * What this connection actually did, so that a silent one can be told from
+     * a misunderstood one.
+     *
+     * "It connected and nothing happened" was the whole of what the log could
+     * say, and it covers two completely different faults: an analyser that
+     * sent nothing, and an analyser that sent something this end could not
+     * make a message out of. They need opposite actions from the laboratory,
+     * so they are now different lines.
+     */
+    const openedAt = Date.now();
+    let bytes = 0;
+    let taken = 0;
+    let firstBytes: Buffer | null = null;
+
+    // In server mode the connection exists by the time this runs. A dialled
+    // one does not: its own connect handler says so, and saying it here as
+    // well announced a connection to an analyser that then refused it.
     if (this.row.mode === 'server') {
+      this.emit('info', `${peer} connected`);
       this.setState('connected', `${this.row.name} connected from ${peer}`);
       try {
         this.getDb().prepare('UPDATE instrument_links SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?').run(this.id);
       } catch { /* not worth dropping a connection over */ }
     }
 
+    /** Send what the framer wants sent, and write down exactly what that was. */
+    const answer = (replies: Buffer[]) => {
+      if (!replies.length) return;
+      for (const reply of replies) { if (!socket.destroyed) socket.write(reply); }
+      // The reply itself, in the log. An analyser that rejects an
+      // acknowledgement leaves no trace anywhere else, and a laboratory cannot
+      // be asked to take on faith what was sent back to its machine.
+      this.emit('out', `${replies.length} acknowledgement(s) sent back to ${peer}`,
+        replies.map(reply => printableBytes(reply)).join('\n'));
+    };
+
     socket.on('data', chunk => {
+      bytes += chunk.length;
+      if (!firstBytes) firstBytes = Buffer.from(chunk.subarray(0, 400));
       try {
         const { replies, messages } = framer.push(chunk);
         // Answer first. An analyser that does not get its ACK stops sending,
         // and every millisecond spent parsing before replying is a millisecond
         // it spends waiting.
-        for (const reply of replies) { if (!socket.destroyed) socket.write(reply); }
-        if (replies.length) this.emit('out', `${replies.length} acknowledgement(s) sent back to ${peer}`);
-        for (const message of messages) this.ingest(message, peer);
+        answer(replies);
+        for (const message of messages) { taken++; this.ingest(message, peer); }
       } catch (error) {
         this.setState('error', `Reading from ${peer}: ${(error as Error).message}`, (error as Error).message);
       }
-      this.resetIdle(socket, framer, peer);
+      this.resetIdle(socket, framer, peer, () => { taken++; });
     });
 
     socket.on('close', () => {
@@ -842,10 +873,12 @@ class Link {
       // Whatever arrived but was never terminated is still a record. A link
       // that drops mid-transmission should not silently lose the sample.
       try {
-        const remainder = framer.flush();
-        if (remainder && remainder.trim()) this.ingest(remainder, peer);
+        const left = drainFramer(framer);
+        answer(left.replies);
+        for (const message of left.messages) { taken++; this.ingest(message, peer); }
       } catch { /* nothing more can be done for it */ }
       this.emit('info', `${peer} disconnected`);
+      if (!taken) this.reportSilence(peer, Date.now() - openedAt, bytes, firstBytes);
       if (this.row.mode === 'server' && !this.stopping) {
         this.setState('listening', `${peer} disconnected; still listening`);
       }
@@ -858,16 +891,58 @@ class Link {
   }
 
   /**
-   * A delimited analyser has no end-of-transmission marker, so a pause in the
+   * Some analysers have no end-of-transmission marker, so a pause in the
    * stream is what says "that was the whole thing".
+   *
+   * Which analysers those are is the framer's business, not the link's. Asking
+   * the configured protocol instead meant a link set to "work it out" never
+   * armed this at all: it would decide the message was plain text, hold every
+   * byte until the socket closed, and answer the analyser with nothing in the
+   * meantime — which is exactly how a machine concludes its result was lost.
    */
-  private resetIdle(socket: net.Socket, framer: Framer, peer: string): void {
-    if (this.row.protocol !== 'delimited') return;
+  private resetIdle(socket: net.Socket, framer: Framer, peer: string, counted?: () => void): void {
     this.clearIdle(socket);
+    const waiting = typeof framer.needsIdleFlush === 'function'
+      ? framer.needsIdleFlush()
+      : this.row.protocol === 'delimited';
+    if (!waiting) return;
     this.idleTimers.set(socket, setTimeout(() => {
-      const remainder = framer.flush();
-      if (remainder && remainder.trim()) this.ingest(remainder, peer);
-    }, 2_000));
+      try {
+        const left = drainFramer(framer);
+        for (const reply of left.replies) { if (!socket.destroyed) socket.write(reply); }
+        if (left.replies.length) {
+          this.emit('out', `${left.replies.length} acknowledgement(s) sent back to ${peer}`,
+            left.replies.map(reply => printableBytes(reply)).join('\n'));
+        }
+        for (const message of left.messages) { counted?.(); this.ingest(message, peer); }
+      } catch (error) {
+        this.emit('warn', `Could not read what ${peer} left behind: ${(error as Error).message}`);
+      }
+    }, LINK_IDLE_FLUSH_MS));
+  }
+
+  /**
+   * A connection that produced no message, accounted for.
+   *
+   * Two different faults wear the same face in a log, and the laboratory has
+   * to tell them apart before it can do anything: an analyser that opened a
+   * connection and sent nothing is an analyser nobody has told to transmit,
+   * while one that sent bytes this end made nothing of is a protocol or a
+   * framing the link has wrong. The first needs the machine's own send button;
+   * the second needs the bytes, which are printed here.
+   */
+  private reportSilence(peer: string, heldMs: number, bytes: number, sample: Buffer | null): void {
+    const held = heldMs >= 1_000 ? `${Math.round(heldMs / 1000)}s` : `${heldMs}ms`;
+    if (!bytes) {
+      this.emit('warn',
+        `${peer} was connected for ${held} and sent nothing. The connection is working; the analyser has not been `
+        + 'asked to transmit, or has nothing waiting to send.');
+      return;
+    }
+    this.emit('warn',
+      `${peer} sent ${bytes} byte(s) in ${held} but nothing that forms a complete message. `
+      + `This link is set to ${String(this.row.protocol ?? 'auto').toUpperCase()}; what arrived is shown here.`,
+      sample ? printableBytes(sample) : null);
   }
 
   private clearIdle(socket: net.Socket): void {
@@ -987,7 +1062,7 @@ class Link {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(this.id, peer, text.slice(0, 60_000), message.sampleId, message.lotNumber,
             message.instrument, message.runAt, values.length, JSON.stringify(values), kind,
-            this.row.forward_enabled ? 'pending' : 'not_required', fingerprint);
+            linkForwards(this.row.role, this.row.forward_enabled) ? 'pending' : 'not_required', fingerprint);
         messageId = Number(inserted.lastInsertRowid);
 
         db.prepare(`UPDATE instrument_links SET last_message_at = CURRENT_TIMESTAMP,
@@ -1388,7 +1463,8 @@ export class InstrumentBridge {
             l.lhims_url, l.lhims_username, l.lhims_password, l.lhims_map_key, l.measure_map,
             l.name AS link_name, l.role
           FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
-          WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND m.forward_attempts < ?
+          WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND l.role = 'shared_forward'
+            AND m.forward_attempts < ?
           ORDER BY m.id LIMIT 25`).all(LHIMS_MAX_ATTEMPTS) as any[];
     } catch { return; }
     if (!pending.length) return;
