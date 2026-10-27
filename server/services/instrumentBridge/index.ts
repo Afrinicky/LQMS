@@ -43,8 +43,8 @@ import {
   type Framer, type AnalyserMessage,
 } from './protocols.js';
 import {
-  LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, classifyMessage, linkForwards, linkIsOurs,
-  mapAnalyte, modeIsPassive,
+  LINK_CLOSE_AFTER_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
+  classifyMessage, linkForwards, linkIsOurs, mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
 import {
   LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_MAX_CATCHUP_BYTES, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
@@ -207,6 +207,7 @@ interface LinkRow {
   watch_path: string | null;
   analyte_map: string | null; control_patterns: string | null;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
+  close_after_message?: number;
   forward_target: string | null;
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
   lhims_map_key: string | null; measure_map: string | null;
@@ -852,9 +853,34 @@ class Link {
         replies.map(reply => printableBytes(reply)).join('\n'));
     };
 
+    /*
+      * Hanging up, for the analyser that is waiting to be hung up on.
+      *
+      * Armed only after something has actually been received, and pushed back
+      * by anything that arrives afterwards, so a machine that sends three
+      * messages in a row finishes all three before the connection goes.
+      */
+    let hangUp: NodeJS.Timeout | null = null;
+    const closeWhenQuiet = () => {
+      if (!this.row.close_after_message || this.row.mode !== 'server') return;
+      if (hangUp) clearTimeout(hangUp);
+      hangUp = setTimeout(() => {
+        hangUp = null;
+        if (socket.destroyed) return;
+        this.emit('info',
+          `Closed the connection to ${peer} now the transmission is acknowledged, as this link is set to. `
+          + 'The analyser dials again by itself for the next sample.');
+        // end(), not destroy(): the acknowledgement still in the write queue
+        // goes out first, and the analyser sees an orderly close rather than a
+        // connection that simply vanished.
+        socket.end();
+      }, LINK_CLOSE_AFTER_MS);
+    };
+
     socket.on('data', chunk => {
       bytes += chunk.length;
       if (!firstBytes) firstBytes = Buffer.from(chunk.subarray(0, 400));
+      if (hangUp) { clearTimeout(hangUp); hangUp = null; }
       try {
         const { replies, messages } = framer.push(chunk);
         // Answer first. An analyser that does not get its ACK stops sending,
@@ -862,13 +888,15 @@ class Link {
         // it spends waiting.
         answer(replies);
         for (const message of messages) { taken++; this.ingest(message, peer); }
+        if (messages.length) closeWhenQuiet();
       } catch (error) {
         this.setState('error', `Reading from ${peer}: ${(error as Error).message}`, (error as Error).message);
       }
-      this.resetIdle(socket, framer, peer, () => { taken++; });
+      this.resetIdle(socket, framer, peer, () => { taken++; closeWhenQuiet(); });
     });
 
     socket.on('close', () => {
+      if (hangUp) { clearTimeout(hangUp); hangUp = null; }
       this.clearIdle(socket);
       // Whatever arrived but was never terminated is still a record. A link
       // that drops mid-transmission should not silently lose the sample.
@@ -885,7 +913,9 @@ class Link {
     });
 
     socket.on('error', error => {
-      this.setState('error', `${peer}: ${(error as Error).message}`, (error as Error).message);
+      const { text, hint } = this.explainDrop(error as NodeJS.ErrnoException, peer, taken);
+      this.setState('error', text, (error as Error).message);
+      if (hint) this.emit('warn', hint);
       socket.destroy();
     });
   }
@@ -919,6 +949,38 @@ class Link {
         this.emit('warn', `Could not read what ${peer} left behind: ${(error as Error).message}`);
       }
     }, LINK_IDLE_FLUSH_MS));
+  }
+
+  /**
+   * What a dropped connection means, in words, and what to do about it.
+   *
+   * "read ECONNRESET" is the operating system's way of saying the other end
+   * went away without closing, and on a laboratory bench it has one overwhelmingly
+   * common cause: an analyser that has transmitted, been acknowledged, and is
+   * waiting for the computer to hang up. It waits, gives up, abandons the link —
+   * and then will not transmit again until somebody walks to the machine and
+   * presses reconnect. There is a setting for exactly that, and the moment the
+   * symptom appears is the moment to name it.
+   */
+  private explainDrop(error: NodeJS.ErrnoException, peer: string, delivered: number): { text: string; hint: string | null } {
+    if (error.code === 'ECONNRESET') {
+      const waiting = this.row.mode === 'server' && delivered > 0 && !this.row.close_after_message;
+      return {
+        text: `${peer} dropped the connection without closing it. SECHLIMS is still listening.`,
+        hint: waiting
+          ? 'If this analyser has to be reconnected by hand before it will transmit again, open this link\u2019s '
+            + 'settings and set "After each transmission" to close the connection. An analyser of that kind treats one '
+            + 'connection as one transmission and waits for the computer to hang up once it has acknowledged the result.'
+          : null,
+      };
+    }
+    if (error.code === 'ETIMEDOUT') {
+      return { text: `${peer} stopped answering, so the connection was given up.`, hint: null };
+    }
+    if (error.code === 'EPIPE') {
+      return { text: `${peer} closed the connection while SECHLIMS was still writing to it.`, hint: null };
+    }
+    return { text: `${peer}: ${error.message}`, hint: null };
   }
 
   /**
@@ -1375,8 +1437,13 @@ export class InstrumentBridge {
           (SELECT COUNT(*) FROM instrument_messages WHERE date(received_at) = date('now')) AS today,
           (SELECT MAX(received_at) FROM instrument_messages) AS last_at,
           (SELECT COUNT(*) FROM iqc_feed_messages WHERE status IN ('matched','unmatched')) AS waiting,
-          (SELECT COUNT(*) FROM instrument_messages WHERE forward_status = 'pending') AS pending,
-          (SELECT COUNT(*) FROM instrument_messages WHERE forward_status = 'failed') AS failed`).get() as any;
+          -- Only the links that carry results onward have anything outstanding.
+          -- A link whose role was changed afterwards must never deliver what it
+          -- queued, so counting it would be reporting work that will never happen.
+          (SELECT COUNT(*) FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
+             WHERE m.forward_status = 'pending' AND l.role = 'shared_forward') AS pending,
+          (SELECT COUNT(*) FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
+             WHERE m.forward_status = 'failed' AND l.role = 'shared_forward') AS failed`).get() as any;
       return {
         links: links.length,
         // A blocked link is not a broken one: it is the bridge deliberately

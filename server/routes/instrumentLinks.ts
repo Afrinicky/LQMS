@@ -122,6 +122,10 @@ export function instrumentLinkRoutes() {
     const db = getDb();
     const rows = db.prepare(`SELECT l.*, e.name AS equipment_name, e.equipment_number, s.name AS section_name,
           (SELECT COUNT(*) FROM instrument_messages m WHERE m.link_id = l.id) AS message_count,
+          -- Where this analyser last transmitted from. The one piece of evidence
+          -- anybody has about its address, and the settings screen shows it
+          -- rather than leaving somebody to guess at one.
+          (SELECT m.peer FROM instrument_messages m WHERE m.link_id = l.id ORDER BY m.id DESC LIMIT 1) AS last_peer,
           (SELECT COUNT(*) FROM instrument_messages m WHERE m.link_id = l.id AND m.kind = 'control') AS control_count,
           -- Only a link that actually carries results onward has anything waiting
           -- to be carried. A link whose role was changed afterwards would
@@ -206,6 +210,10 @@ export function instrumentLinkRoutes() {
       filePattern: pick(b.filePattern, existing.file_pattern) ?? null,
       archivePath: pick(b.archivePath, existing.archive_path) ?? null,
       deleteAfterRead: b.deleteAfterRead !== undefined ? (b.deleteAfterRead ? 1 : 0) : (existing.delete_after_read ?? 0),
+      // Hang up once a transmission has been acknowledged, for an analyser that
+      // waits to be hung up on. See AFTER_TRANSMISSION_HINTS.
+      closeAfterMessage: b.closeAfterMessage !== undefined
+        ? (b.closeAfterMessage ? 1 : 0) : (existing.close_after_message ?? 0),
       autoStart: b.autoStart !== undefined ? (b.autoStart ? 1 : 0) : (existing.auto_start ?? 1),
       isActive: b.isActive !== undefined ? (b.isActive ? 1 : 0) : (existing.is_active ?? 1),
       notes: pick(b.notes, existing.notes) ?? null,
@@ -311,14 +319,14 @@ export function instrumentLinkRoutes() {
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
          lhims_password, lhims_map_key, measure_map, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
-         auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         close_after_message, auto_start, is_active, notes, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
-        v.autoStart, v.isActive, v.notes, req.user!.id);
+        v.closeAfterMessage, v.autoStart, v.isActive, v.notes, req.user!.id);
 
     const id = Number(result.lastInsertRowid);
     if (v.isActive && v.autoStart) bridge.restart(id);
@@ -340,13 +348,13 @@ export function instrumentLinkRoutes() {
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
         fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
-        auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        close_after_message = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
-        v.autoStart, v.isActive, v.notes, req.params.id);
+        v.closeAfterMessage, v.autoStart, v.isActive, v.notes, req.params.id);
 
     // Settings changed means the socket has to be rebuilt; a link that is now
     // LHIMS's, or now inactive, is stopped rather than restarted.
@@ -654,7 +662,9 @@ export function instrumentLinkRoutes() {
 
     const pending = db.prepare(`SELECT COUNT(*) AS n FROM instrument_messages
         WHERE link_id = ? AND forward_status = 'failed'`).get(link.id) as any;
-    if (Number(pending?.n ?? 0) > 0) {
+    // Only while this link still carries results onward. One whose role changed
+    // afterwards would otherwise report a refusal it must never try again.
+    if (Number(pending?.n ?? 0) > 0 && linkForwards(link.role, link.forward_enabled)) {
       add('forward_failed', 'Everything sent onward was accepted', 'warn',
         `${pending.n} result(s) were refused by the far end.`,
         'Open Messages and read the refusal on one of them.');

@@ -7027,6 +7027,10 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       ['file_pattern', 'file_pattern TEXT'],
       ['archive_path', 'archive_path TEXT'],
       ['delete_after_read', 'delete_after_read INTEGER NOT NULL DEFAULT 0'],
+      // Whether to hang up once a transmission has been acknowledged. Off by
+      // default: an analyser that holds one connection all day must not have it
+      // taken away. See AFTER_TRANSMISSION_LABELS for the two kinds of machine.
+      ['close_after_message', 'close_after_message INTEGER NOT NULL DEFAULT 0'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }
