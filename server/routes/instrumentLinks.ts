@@ -660,6 +660,18 @@ export function instrumentLinkRoutes() {
           : 'Patient results this analyser sends are kept on the link, and can be enrolled as previously run samples for QC.');
     }
 
+    // The network fault that looks exactly like a broken analyser.
+    if (link.peer_conflict) {
+      add('one_device', 'Only one device answers for the analyser', 'todo',
+        String(link.peer_conflict),
+        'Two machines are configured with the same address. Give the analyser an address nothing else uses — '
+        + 'its own Setup > Host Communication screen — keep the subnet mask the same as this computer\u2019s, '
+        + 'and leave the gateway blank unless the analyser has to cross a router.');
+    } else if (link.last_peer_mac) {
+      add('one_device', 'Only one device answers for the analyser', 'ok',
+        `The address it transmits from answers from ${link.last_peer_mac}.`);
+    }
+
     const pending = db.prepare(`SELECT COUNT(*) AS n FROM instrument_messages
         WHERE link_id = ? AND forward_status = 'failed'`).get(link.id) as any;
     // Only while this link still carries results onward. One whose role changed

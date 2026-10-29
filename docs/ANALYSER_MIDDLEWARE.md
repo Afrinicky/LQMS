@@ -92,8 +92,9 @@ log read-only (`lhims_tap`).
 Analyser profiles ship for Sysmex XN/XS/XT/KX-21N, Mindray BC-3600/5300/5800
 and BS-380/240, DIRUI, HORIBA ABX Pentra and Micros, Abbott Cell-Dyn, URIT,
 ELITech Selectra and Flexor, Biotecnica BT-3000, Ortho VITROS and Cepheid
-GeneXpert, plus generic ASTM and HL7 profiles. A profile is a starting point;
-every map is editable per link.
+GeneXpert, HUMAN HumaCount 5D and HumaStar 100/200/300SR, plus generic ASTM and
+HL7 profiles. A profile is a starting point; every map is editable per link,
+under Parameter Mappings, against the codes that analyser has actually sent.
 
 **Serial (RS-232) is not implemented.** See §7.
 
@@ -172,6 +173,41 @@ nobody has signed for.
 `Discovered → Configured → Testing → Awaiting approval → Active`, with
 `Degraded` (a delivery failed, the interface still works), `Disconnected`
 (stood down) and `Failed`.
+
+### Parameter mappings — what a result is called at each step
+
+A result changes name twice between the analyser and the record it ends up in,
+and both translations live under **Parameter Mappings**, one sub-tab each.
+
+**Analyser → SECHLIMS.** What the machine's own mnemonic means. Most analysers
+need nothing: choosing the model under Connection Setup brings its whole
+vocabulary with it, and the tab shows what that model already understands. The
+tab is for the machine that disagrees with the book, and for the parameter
+nobody has named yet — which it finds by itself. *Codes this analyser has
+actually sent* reads the transmissions on the record, lists every mnemonic with
+how often it has arrived and what it currently becomes, and puts the ones
+nothing names at the top. A laboratory never has to guess what its machine
+calls a parameter, or notice unaided that one has been arriving unnamed for a
+fortnight.
+
+**SECHLIMS → LIS.** What the receiving system calls it. Three vocabularies:
+the names a result-entry form uses, which the Result Filler types on the
+laboratory's behalf; the numeric measure ids LHIMS files a result under, per
+link; and a destination's own codes, names, units and linear conversions. A
+parameter with no measure id, and a code with no destination mapping, are both
+**withheld and named** on the delivery rather than filed under a guess.
+
+The built-in list of what a parameter may be called is a default, not a fact.
+A laboratory can add a name, add a parameter the list has never heard of, and
+**withdraw** a built-in name it uses for something else — after which nothing
+reads that word as that parameter. A withdrawal is recorded with what the name
+used to mean, and putting it back is one press.
+
+**Saving a mapping never costs a connection.** A name is not a socket: the
+running link takes the new settings in place, so an analyser mid-transmission
+notices nothing, and a machine that has to be reconnected by hand is not made
+to be. The check proves it — a rename, then the very next message read under
+the new name, with the link never leaving the state it was in.
 
 ---
 

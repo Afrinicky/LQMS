@@ -268,7 +268,7 @@ export const FEATURES: FeatureDef[] = [
     tabs: ['Discovery'] },
   { key: 'analyser_middleware.configuration', module: 'analyser_middleware', label: 'Connections & routing', sensitive: true,
     desc: 'Configuring analyser connections, LIS/HIS destinations, routing rules and mappings, and approving and activating an interface that carries results.',
-    tabs: ['Connection Setup', 'Destinations', 'Routing & Mappings'] },
+    tabs: ['Connection Setup', 'Destinations', 'Routing & Mappings', 'Parameter Mappings'] },
   { key: 'analyser_middleware.diagnostics', module: 'analyser_middleware', label: 'Diagnostics & test messages',
     desc: 'Running layered diagnostics, testing a destination in isolation and playing a message through the engine.',
     tabs: ['Diagnostics'] },

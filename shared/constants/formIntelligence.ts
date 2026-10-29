@@ -230,6 +230,16 @@ export function canonicalAnalyte(raw: unknown, extra?: Map<string, string> | nul
     if (!key) continue;
     const added = extra?.get(key) ?? extra?.get(sortedKey(candidate));
     if (added) return added;
+    /*
+     * A name mapped to nothing has been withdrawn by the laboratory.
+     *
+     * The built-in list is a good default and not a fact: a laboratory that
+     * uses TLC for something other than a white cell count has to be able to
+     * say so, and saying so has to stop the built-in list from answering. An
+     * empty string is the one value a real parameter can never have, which is
+     * what makes it safe to mean this.
+     */
+    if (added === '') continue;
     const known = ALIAS_INDEX.get(key) ?? ALIAS_INDEX.get(sortedKey(candidate));
     if (known) return known;
   }

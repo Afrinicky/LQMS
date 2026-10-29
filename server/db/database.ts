@@ -7031,6 +7031,12 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       // default: an analyser that holds one connection all day must not have it
       // taken away. See AFTER_TRANSMISSION_LABELS for the two kinds of machine.
       ['close_after_message', 'close_after_message INTEGER NOT NULL DEFAULT 0'],
+      // Which physical device last answered for the analyser's address, and the
+      // other one if the address turned out to be shared. Two machines on one
+      // address is the quietest network fault there is and the hardest to see
+      // from inside an application; recording it is how it gets seen.
+      ['last_peer_mac', 'last_peer_mac TEXT'],
+      ['peer_conflict', 'peer_conflict TEXT'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }
@@ -8611,6 +8617,21 @@ CREATE TABLE IF NOT EXISTS rf_reference_ranges (
 );
 CREATE INDEX IF NOT EXISTS idx_rf_ranges_key ON rf_reference_ranges(analyte_key, is_active);
 `);
+
+
+  /*
+   * A name the laboratory has WITHDRAWN rather than added.
+   *
+   * The built-in list of what each parameter may be called is a good default,
+   * not a fact: a laboratory that uses one of those names for something else
+   * has to be able to say so. A withdrawn row carries the name and the
+   * parameter it used to mean, and the matching reads it as "this is not a
+   * parameter name here".
+   */
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(rf_aliases)").all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('withdrawn')) database.exec('ALTER TABLE rf_aliases ADD COLUMN withdrawn INTEGER NOT NULL DEFAULT 0');
+  }
 
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE

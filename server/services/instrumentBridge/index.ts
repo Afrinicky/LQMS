@@ -35,6 +35,7 @@
  * result is a worse failure than none.
  */
 import net from 'node:net';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -208,6 +209,8 @@ interface LinkRow {
   analyte_map: string | null; control_patterns: string | null;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
   close_after_message?: number;
+  last_peer_mac?: string | null;
+  peer_conflict?: string | null;
   forward_target: string | null;
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
   lhims_map_key: string | null; measure_map: string | null;
@@ -216,6 +219,50 @@ interface LinkRow {
   fetch_enabled: number; fetch_interval_seconds: number | null;
   file_pattern: string | null; archive_path: string | null; delete_after_read: number;
   auto_start: number; is_active: number;
+}
+
+/* ============================================================================
+   Which device is actually answering for an address
+   ----------------------------------------------------------------------------
+   Two machines configured with the same IP address is the quietest fault a
+   hospital network has. Everything works until the two disagree about who owns
+   the address, and then a connection that has been running all morning is reset
+   by a machine that knows nothing about it. From inside an application it looks
+   like the analyser dropping the link for no reason — which is exactly what the
+   laboratory sees, and exactly what it cannot diagnose.
+
+   The host's own neighbour table knows the answer. Looking it up costs one
+   command per connection and turns an unexplainable reset into a sentence.
+   ========================================================================= */
+const MAC_PATTERN = /\b([0-9a-f]{2}(?:[:-][0-9a-f]{2}){5})\b/i;
+
+function run(command: string, args: string[]): Promise<string> {
+  return new Promise(resolve => {
+    try {
+      execFile(command, args, { timeout: 2_000, windowsHide: true }, (error, stdout) => {
+        resolve(error ? '' : String(stdout ?? ''));
+      });
+    } catch { resolve(''); }
+  });
+}
+
+/** The hardware address answering for an IP, as this host currently believes. */
+export async function hardwareAddressOf(ip: string): Promise<string | null> {
+  const address = String(ip ?? '').replace(/^::ffff:/i, '').replace(/:\d+$/, '').trim();
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) return null;
+  for (const [command, args] of [
+    ['arp', ['-a', address]],        // Windows, macOS
+    ['ip', ['neigh', 'show', address]],
+    ['arp', ['-n', address]],
+  ] as Array<[string, string[]]>) {
+    const output = await run(command, args);
+    for (const line of output.split(/\r?\n/)) {
+      if (!line.includes(address)) continue;
+      const found = line.match(MAC_PATTERN);
+      if (found) return found[1].toLowerCase().replace(/-/g, ':');
+    }
+  }
+  return null;
 }
 
 function json<T>(value: unknown, fallback: T): T {
@@ -277,6 +324,37 @@ class Link {
     } catch { /* a state note must never take the link down */ }
   }
 
+  /**
+   * Take a changed setting without re-opening anything.
+   *
+   * What a parameter is CALLED is not a socket. Restarting a link to pick up a
+   * renamed analyte would close the listener, drop whatever the analyser had
+   * open, and on a machine that does not re-dial by itself would cost the
+   * laboratory a walk across the room — for a change that affects nothing but
+   * how an arriving code is read. Only the settings that are safe to change
+   * mid-connection are taken this way; anything touching the address, the
+   * port, the protocol or the mode still goes through a restart.
+   */
+  applySettings(row: LinkRow): void {
+    this.row = {
+      ...this.row,
+      name: row.name,
+      profile_key: row.profile_key,
+      analyte_map: row.analyte_map,
+      control_patterns: row.control_patterns,
+      measure_map: row.measure_map,
+      lhims_map_key: row.lhims_map_key,
+      lhims_url: row.lhims_url,
+      lhims_username: row.lhims_username,
+      lhims_password: row.lhims_password,
+      forward_enabled: row.forward_enabled,
+      forward_host: row.forward_host,
+      forward_port: row.forward_port,
+      forward_target: row.forward_target,
+      close_after_message: row.close_after_message,
+    };
+  }
+
   /** What this link is set to, for the screen that shows it beside the log. */
   snapshot(): Record<string, unknown> {
     return {
@@ -291,6 +369,11 @@ class Link {
   start(): void {
     this.stopping = false;
     this.opened = false;
+    // A clash is reported until somebody has acted on it; starting the link
+    // again is that act, and the next two connections prove whether it worked.
+    this.peerHardware.clear();
+    try { this.getDb().prepare('UPDATE instrument_links SET peer_conflict = NULL WHERE id = ?').run(this.id); }
+    catch { /* the warning will simply be raised again */ }
 
     // The guard that matters. A link belonging to LHIMS is not started, and
     // the register says so rather than leaving somebody to wonder.
@@ -840,6 +923,8 @@ class Link {
       try {
         this.getDb().prepare('UPDATE instrument_links SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?').run(this.id);
       } catch { /* not worth dropping a connection over */ }
+      // After the handshake, so the host's neighbour table has an entry.
+      setTimeout(() => { void this.noteHardware(socket.remoteAddress ?? ''); }, 600);
     }
 
     /** Send what the framer wants sent, and write down exactly what that was. */
@@ -952,6 +1037,44 @@ class Link {
   }
 
   /**
+   * Record which device answered for the analyser's address, and say so loudly
+   * when the answer changes.
+   *
+   * One address answered by two different machines explains, on its own, every
+   * symptom of this fault: a connection that works, then is reset by a machine
+   * that never opened it, then works again the moment somebody makes the
+   * analyser announce itself afresh. Nothing inside SECHLIMS can repair it —
+   * but the laboratory can, in a minute, once somebody says what it is.
+   */
+  private async noteHardware(remote: string): Promise<void> {
+    const address = String(remote ?? '').replace(/^::ffff:/i, '');
+    if (!address || address === '127.0.0.1') return;
+    let mac: string | null = null;
+    try { mac = await hardwareAddressOf(address); } catch { mac = null; }
+    if (!mac) return;
+
+    const known = this.peerHardware.get(address);
+    this.peerHardware.set(address, mac);
+    try {
+      this.getDb().prepare('UPDATE instrument_links SET last_peer_mac = ? WHERE id = ?').run(mac, this.id);
+    } catch { /* a note, not the transmission */ }
+    if (!known || known === mac) return;
+
+    const note = `${address} answered from ${known} before and from ${mac} now`;
+    try {
+      this.getDb().prepare('UPDATE instrument_links SET peer_conflict = ? WHERE id = ?').run(note, this.id);
+    } catch { /* as above */ }
+    this.emit('error',
+      `Two different devices are answering for ${address}. It was ${known}, and it is now ${mac}. `
+      + 'Two machines sharing one address is what makes a connection work, stop for no reason, and come back '
+      + 'when the analyser is reconnected by hand. Give the analyser an address nothing else on the network '
+      + 'uses, and the transmissions will stay up.', note);
+  }
+
+  /** Which hardware address each peer has been seen at, to notice a clash. */
+  private peerHardware = new Map<string, string>();
+
+  /**
    * What a dropped connection means, in words, and what to do about it.
    *
    * "read ECONNRESET" is the operating system's way of saying the other end
@@ -967,10 +1090,23 @@ class Link {
       const waiting = this.row.mode === 'server' && delivered > 0 && !this.row.close_after_message;
       return {
         text: `${peer} dropped the connection without closing it. SECHLIMS is still listening.`,
+        /*
+         * Two causes, in the order they actually occur. A connection reset by
+         * something that is not the analyser is overwhelmingly a network fault,
+         * and the commonest of those by far is two machines sharing one
+         * address — which SECHLIMS now watches for by itself. Only after that
+         * is it worth asking whether this analyser is the kind that expects to
+         * be hung up on, because most are not: an analyser whose manual says it
+         * holds a persistent connection should simply be left alone.
+         */
         hint: waiting
-          ? 'If this analyser has to be reconnected by hand before it will transmit again, open this link\u2019s '
-            + 'settings and set "After each transmission" to close the connection. An analyser of that kind treats one '
-            + 'connection as one transmission and waits for the computer to hang up once it has acknowledged the result.'
+          ? 'A connection reset after a result has gone through is usually the network rather than the analyser. '
+            + 'Check first that no other machine is using the analyser\u2019s address: on this computer run '
+            + '"arp -a" and compare the hardware address against the analyser\u2019s own Details screen. '
+            + 'If the address is the analyser\u2019s alone and it still has to be reconnected by hand before each '
+            + 'result, this is one of the analysers that waits to be hung up on \u2014 set "After each transmission" '
+            + 'on this link to close the connection. Leave it on hold for an analyser whose manual says it keeps a '
+            + 'persistent connection, as the HumaCount 5D does.'
           : null,
       };
     }
@@ -1475,6 +1611,22 @@ export class InstrumentBridge {
   }
 
   /** Restart one link after its settings changed. */
+  /**
+   * A settings change that cannot affect the connection, applied to the
+   * running link. Falls back to a restart only for a link that is not running,
+   * where there is nothing to disturb.
+   */
+  refreshSettings(linkId: number): void {
+    let row: LinkRow | undefined;
+    try { row = this.getDb().prepare('SELECT * FROM instrument_links WHERE id = ?').get(linkId) as LinkRow; }
+    catch { return; }
+    if (!row) return;
+    const link = this.links.get(linkId);
+    if (!link) return;
+    link.applySettings(row);
+    this.record(linkId, 'info', 'Parameter names reloaded. The connection was not disturbed.');
+  }
+
   restart(linkId: number): void {
     let row: LinkRow | undefined;
     try { row = this.getDb().prepare('SELECT * FROM instrument_links WHERE id = ?').get(linkId) as LinkRow; }

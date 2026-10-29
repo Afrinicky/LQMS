@@ -197,10 +197,12 @@ export const AFTER_TRANSMISSION_HINTS = {
     'The usual arrangement. The analyser keeps one connection and sends each result down it, and SECHLIMS '
     + 'never hangs up.',
   close:
-    'For an analyser that has to be reconnected by hand after every result. Such a machine treats one '
-    + 'connection as one transmission and waits for the computer to hang up once it has been acknowledged; '
-    + 'left waiting, it abandons the link. SECHLIMS closes politely a few seconds after the last message, and '
-    + 'the analyser dials again by itself for the next sample.',
+    'For an analyser that treats one connection as one transmission and waits for the computer to hang up '
+    + 'once it has been acknowledged; left waiting, it abandons the link. SECHLIMS closes politely a few '
+    + 'seconds after the last message, and the analyser dials again by itself for the next sample. '
+    + 'Not for an analyser whose manual says it holds a persistent connection and reconnects by itself — the '
+    + 'HumaCount 5D is one of those, and on those a connection that keeps dropping is a network fault, most '
+    + 'often two machines sharing one address, not something this setting can mend.',
 } as const;
 
 export const LINK_STATES = ['stopped', 'listening', 'connected', 'connecting', 'following', 'error', 'blocked'] as const;
@@ -432,6 +434,27 @@ const FBC_MINDRAY_3PART: Record<string, string> = {
   'LYM%': 'Lymphocytes %', 'MID%': 'Mid cells %', 'GRAN%': 'Granulocytes %',
 };
 
+/**
+ * The HumaCount 5D's own mnemonics, as its HL7 messages carry them.
+ *
+ * Its OBX records name each parameter in the text component of the test
+ * identifier — `770-8^NEU%^LN` — so NEU% and NEU# are what arrive, and the
+ * two are deliberately kept apart here: one is a proportion and the other a
+ * count, and the system that confuses them reports a control as failed.
+ */
+const FBC_HUMACOUNT: Record<string, string> = {
+  WBC: 'WBC', RBC: 'RBC', HGB: 'Haemoglobin', HCT: 'Haematocrit',
+  MCV: 'MCV', MCH: 'MCH', MCHC: 'MCHC', PLT: 'Platelets',
+  'NEU%': 'Neutrophils %', 'LYM%': 'Lymphocytes %', 'MON%': 'Monocytes %',
+  'EOS%': 'Eosinophils %', 'BAS%': 'Basophils %',
+  'NEU#': 'Neutrophils', 'LYM#': 'Lymphocytes', 'MON#': 'Monocytes',
+  'EOS#': 'Eosinophils', 'BAS#': 'Basophils',
+  'ALY%': 'Atypical lymphocytes %', 'ALY#': 'Atypical lymphocytes',
+  'LIC%': 'Large immature cells %', 'LIC#': 'Large immature cells',
+  'RDW-CV': 'RDW-CV', 'RDW-SD': 'RDW-SD', PDW: 'PDW', MPV: 'MPV',
+  PCT: 'PCT', 'P-LCR': 'P-LCR', 'P-LCC': 'P-LCC',
+};
+
 const CHEMISTRY_SELECTRA: Record<string, string> = {
   GLU: 'Glucose', FBS: 'Glucose', RBS: 'Glucose',
   TP: 'Total protein', ALB: 'Albumin', GLOB: 'Globulin',
@@ -446,6 +469,43 @@ const CHEMISTRY_SELECTRA: Record<string, string> = {
   CA: 'Calcium', AMY: 'Amylase', 'CK-MB': 'CK-MB', CKMB: 'CK-MB',
   CK: 'CK', 'CK-NAC': 'CK', LDH: 'LDH',
   NA: 'Sodium', K: 'Potassium', CL: 'Chloride',
+};
+
+/**
+ * The HumaStar's own method names.
+ *
+ * HUMAN's interface manual is explicit that the assay name in a work list
+ * "must exactly match the name of the same assay in the software", and those
+ * method names are configured by the laboratory that installed it. So this is
+ * a starting vocabulary rather than a specification: the spellings HUMAN's own
+ * documentation uses, and the ones their methods ship under. A laboratory
+ * whose machine says something else names it once under Parameter Mappings,
+ * where the codes it has actually sent are listed for exactly that purpose.
+ */
+const CHEMISTRY_HUMASTAR: Record<string, string> = {
+  GLU: 'Glucose', GLUC: 'Glucose', GLUCOSE: 'Glucose',
+  UREA: 'Urea', BUN: 'Urea', 'UREA-UV': 'Urea',
+  CREA: 'Creatinine', CREAA: 'Creatinine', 'CREA-A': 'Creatinine', CREAJ: 'Creatinine',
+  UA: 'Uric acid', URIC: 'Uric acid',
+  TP: 'Total protein', ALB: 'Albumin', ALBU: 'Albumin',
+  BILT: 'Total bilirubin', BILTA: 'Total bilirubin', TBIL: 'Total bilirubin',
+  BILD: 'Direct bilirubin', BILDA: 'Direct bilirubin', DBIL: 'Direct bilirubin',
+  GOT: 'AST', AST: 'AST', SGOT: 'AST',
+  GPT: 'ALT', ALT: 'ALT', SGPT: 'ALT',
+  ALP: 'ALP', ALKP: 'ALP', GGT: 'Gamma GT',
+  AMY: 'Amylase', LIP: 'Lipase', LDH: 'LDH',
+  CK: 'CK', 'CK-NAC': 'CK', CKMB: 'CK-MB', 'CK-MB': 'CK-MB',
+  CHOL: 'Total cholesterol', HDL: 'HDL cholesterol', LDL: 'LDL cholesterol',
+  TRIG: 'Triglycerides', TG: 'Triglycerides',
+  CA: 'Calcium', MG: 'Magnesium', PHOS: 'Phosphate', IP: 'Phosphate',
+  FE: 'Iron', UIBC: 'UIBC', TIBC: 'TIBC', TRF: 'Transferrin', FERR: 'Ferritin',
+  NA: 'Sodium', K: 'Potassium', CL: 'Chloride', LI: 'Lithium',
+  CRP: 'C-reactive protein', ASO: 'ASO', RF: 'Rheumatoid factor', 'RF-2': 'Rheumatoid factor',
+  C3: 'Complement C3', C4: 'Complement C4',
+  IGA: 'IgA', IGG: 'IgG', IGM: 'IgM',
+  CYSTC: 'Cystatin C', HCY: 'Homocysteine',
+  MALB: 'Microalbumin', HBA1C: 'HbA1c', 'HBA1C-2': 'HbA1c',
+  APOA1: 'Apolipoprotein A1', APOB: 'Apolipoprotein B',
 };
 
 export const INSTRUMENT_PROFILES: InstrumentProfile[] = [
@@ -505,6 +565,34 @@ export const INSTRUMENT_PROFILES: InstrumentProfile[] = [
   {
     key: 'selectra_pro', label: 'ELITech Selectra Pro S / Selectra Junior',
     vendor: 'ELITech', discipline: 'chemistry', protocol: 'astm', analytes: CHEMISTRY_SELECTRA,
+  },
+  {
+    key: 'humacount_5d', label: 'HUMAN HumaCount 5D / 5L',
+    vendor: 'HUMAN', discipline: 'haematology', protocol: 'hl7', analytes: FBC_HUMACOUNT,
+    notes: 'Speaks HL7 v2.3.1 over MLLP and dials the computer it transmits to, holding that connection '
+      + 'and re-dialling by itself if it drops. On the analyser: Setup \u2192 Communication \u2192 LIS '
+      + 'Communication, with Auto-communication and Communication Acknowledgement both on.',
+  },
+  {
+    key: 'humastar_300sr', label: 'HUMAN HumaStar 300SR',
+    vendor: 'HUMAN', discipline: 'chemistry', protocol: 'astm', analytes: CHEMISTRY_HUMASTAR,
+    notes: 'Two ways in, and the analyser\u2019s own manual validates both. A watched folder reads the '
+      + 'ASTM file the HI software writes to its Output Worklist when a worksheet is approved \u2014 that '
+      + 'works on every software version and needs no port opened. From version 1.5 the HI software can '
+      + 'instead listen for ASTM over TCP on its own port (6557 unless it was changed), which SECHLIMS '
+      + 'dials. A control request names itself Control in the patient record\u2019s sample-type field.',
+  },
+  {
+    key: 'humastar_200', label: 'HUMAN HumaStar 200',
+    vendor: 'HUMAN', discipline: 'chemistry', protocol: 'astm', analytes: CHEMISTRY_HUMASTAR,
+    notes: 'As the HumaStar 300SR. The QC request records are 300SR-only; a control run on this one is '
+      + 'recognised by its sample identifier, as on any other analyser.',
+  },
+  {
+    key: 'humastar_100', label: 'HUMAN HumaStar 100',
+    vendor: 'HUMAN', discipline: 'chemistry', protocol: 'astm', analytes: CHEMISTRY_HUMASTAR,
+    notes: 'As the HumaStar 300SR. The QC request records are 300SR-only; a control run on this one is '
+      + 'recognised by its sample identifier, as on any other analyser.',
   },
   {
     key: 'flexor', label: 'ELITech Flexor E / Flexor Junior',

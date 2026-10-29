@@ -668,11 +668,16 @@ export function resultFillerRoutes() {
    */
   router.get('/aliases', requirePermission(F, 'view'), (req, res) => {
     const db = getDb();
-    const rows = db.prepare(`SELECT a.*, f.name AS adapter_name, u.username AS created_by_name
+    const all = db.prepare(`SELECT a.*, COALESCE(a.withdrawn, 0) AS withdrawn,
+          f.name AS adapter_name, u.username AS created_by_name
         FROM rf_aliases a LEFT JOIN rf_adapters f ON f.id = a.adapter_id LEFT JOIN users u ON u.id = a.created_by
         ORDER BY a.canonical, a.alias`).all() as any[];
+    const rows = all.filter(row => Number(row.withdrawn) !== 1);
     res.json({
       rows,
+      // The names this laboratory has taken OUT of the built-in list. Kept
+      // apart from the ones it added, because they are opposite acts.
+      withdrawn: all.filter(row => Number(row.withdrawn) === 1),
       // The dictionary itself, so the screen can show what is already known and
       // nobody adds an alias the filler already understood.
       dictionary: ANALYTE_DICTIONARY.map(entry => ({
@@ -686,6 +691,30 @@ export function resultFillerRoutes() {
     const db = getDb();
     const canonical = text(req.body?.canonical, 80);
     const alias = text(req.body?.alias, 80);
+    const withdraw = Boolean(req.body?.withdraw);
+
+    /*
+     * Withdrawing a name is the opposite act, and has the opposite rule.
+     *
+     * A name is added only if nothing understands it yet; a name is withdrawn
+     * only if something DOES. Taking out a name nothing uses would read as a
+     * change having been made when none was.
+     */
+    if (withdraw) {
+      if (!alias) return res.status(400).json({ error: 'Name the word to withdraw.' });
+      const means = canonicalAnalyte(alias) ?? aliasIndex(db, null).get(analyteKey(alias)) ?? null;
+      if (!means) return res.status(409).json({ error: `Nothing understands “${alias}” at the moment, so there is nothing to withdraw.` });
+      try {
+        const inserted = db.prepare(`INSERT INTO rf_aliases (canonical, alias, adapter_id, note, created_by, withdrawn)
+            VALUES (?, ?, NULL, ?, ?, 1)`)
+          .run(canonical || means, alias, text(req.body?.note, 200), req.user!.id);
+        audit(req, { action: 'withdraw', entity: 'rf_aliases', entityId: Number(inserted.lastInsertRowid), newValue: { alias, was: means } });
+        return res.status(201).json({ id: Number(inserted.lastInsertRowid), withdrawn: true, was: means });
+      } catch (error) {
+        return res.status(400).json({ error: `That name could not be withdrawn: ${(error as Error).message}` });
+      }
+    }
+
     if (!canonical || !alias) return res.status(400).json({ error: 'Give both the parameter and the other name for it.' });
     if (analyteKey(canonical) === analyteKey(alias)) {
       return res.status(400).json({ error: 'That is the same name written twice.' });

@@ -73,7 +73,9 @@ import { askDennisMiddleware, dennisHistory, markApplied, reviewAction } from '.
 import { sealSecret, secretIsSet } from '../services/middleware/secrets.js';
 import { deliver, renderPayload } from '../services/middleware/transports.js';
 import { detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
-import { mapAnalyte } from '../../shared/constants/instruments.js';
+import { mapAnalyte, profileByKey } from '../../shared/constants/instruments.js';
+import { LHIMS_MEASURE_MAPS } from '../../shared/constants/lhims.js';
+import { currentBridge } from '../services/instrumentBridge/index.js';
 
 /* The features this surface is granted on. One decision each. */
 const F = {
@@ -1037,6 +1039,174 @@ export function middlewareRoutes() {
     if (!outcome.ok) return res.status(409).json({ error: outcome.note });
     audit(req, { action: `middleware_dennis_${decision}`, entity: 'mw_dennis_actions', entityId: req.params.id, newValue: { note: req.body?.note ?? null } });
     res.json(outcome);
+  });
+
+  /* ======================================================================
+     Parameter mappings
+     ----------------------------------------------------------------------
+     What a parameter is called at each step of its journey, in one place.
+
+     A result changes name twice. The analyser sends its own mnemonic, which
+     SECHLIMS has to read as a parameter; and when SECHLIMS passes that result
+     on — to LHIMS, or through the Result Filler into a form — it has to be
+     named in the receiving system's words. Those two translations were
+     configured in different screens, by different people, and neither screen
+     said the other existed.
+     ==================================================================== */
+
+  /** Everything the mappings screen reads, in one request. */
+  router.get('/parameter-mappings', requirePermission(F.overview, 'view'), (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`SELECT l.id, l.name, l.profile_key, l.role, l.mode, l.analyte_map,
+          l.lhims_map_key, l.measure_map, l.forward_enabled, l.messages_received,
+          e.name AS equipment_name, s.name AS section_name
+        FROM instrument_links l
+        LEFT JOIN equipment_items e ON e.id = l.equipment_id
+        LEFT JOIN sections s ON s.id = l.section_id
+        WHERE l.is_active = 1 ORDER BY l.name`).all() as any[];
+
+    res.json({
+      links: rows.map(row => ({
+        id: Number(row.id),
+        name: row.name,
+        profileKey: row.profile_key ?? null,
+        profileLabel: profileByKey(row.profile_key)?.label ?? null,
+        role: row.role,
+        mode: row.mode,
+        equipmentName: row.equipment_name ?? null,
+        sectionName: row.section_name ?? null,
+        messages: Number(row.messages_received ?? 0),
+        analyteMap: json<Record<string, string>>(row.analyte_map, {}),
+        lhimsMapKey: row.lhims_map_key ?? null,
+        measureMap: json<Record<string, number>>(row.measure_map, {}),
+        carriesOnward: row.role === 'shared_forward' && Number(row.forward_enabled ?? 0) === 1,
+      })),
+      // What each model is already understood to send, so a laboratory adds a
+      // name only where its own machine disagrees with the book.
+      profiles: INSTRUMENT_PROFILES.map(p => ({
+        key: p.key, label: p.label, vendor: p.vendor, discipline: p.discipline,
+        analytes: p.analytes,
+      })),
+      lhimsMaps: LHIMS_MEASURE_MAPS.map(m => ({
+        key: m.key, label: m.label, vendor: m.vendor,
+        measures: Object.entries(m.measures).map(([code, measure]) => ({
+          code, measureId: measure.measureId, label: measure.label ?? null,
+        })),
+      })),
+    });
+  });
+
+  /**
+   * Every code this analyser has actually sent, and what it currently becomes.
+   *
+   * The register is the evidence. A laboratory should not have to guess which
+   * mnemonics its machine uses, or notice that one of them has been arriving
+   * unnamed for a fortnight — the codes that resolve to nothing but their own
+   * spelling are listed first, with how often each has arrived.
+   */
+  router.get('/parameter-mappings/:id/codes', numericOnly, requirePermission(F.overview, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT id, profile_key, analyte_map FROM instrument_links WHERE id = ?')
+      .get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+
+    const linkMap = json<Record<string, string>>(link.analyte_map, {});
+    const messages = db.prepare(`SELECT parsed_values, received_at FROM instrument_messages
+        WHERE link_id = ? ORDER BY id DESC LIMIT 400`).all(req.params.id) as any[];
+
+    const seen = new Map<string, { code: string; analyte: string; count: number; lastSeen: string; unit: string | null }>();
+    for (const message of messages) {
+      for (const value of json<any[]>(message.parsed_values, [])) {
+        const code = String(value?.code ?? '').trim();
+        if (!code) continue;
+        const already = seen.get(code);
+        if (already) { already.count++; continue; }
+        seen.set(code, {
+          code,
+          analyte: mapAnalyte(code, linkMap, link.profile_key),
+          count: 1,
+          lastSeen: String(message.received_at ?? ''),
+          unit: value?.unit ? String(value.unit) : null,
+        });
+      }
+    }
+
+    /*
+     * Named by this link, named by the model's own profile, or not named at
+     * all — and the last is the one that needs somebody's attention.
+     *
+     * Asked of the maps themselves rather than of the answer they give. A
+     * profile that maps WBC to "WBC" has named it just as deliberately as one
+     * that maps it to "White cell count", and comparing the before with the
+     * after would report the first as unknown.
+     */
+    const profileAnalytes = profileByKey(link.profile_key)?.analytes ?? {};
+    const namedIn = (map: Record<string, unknown>, code: string) =>
+      Object.keys(map).some(key => key.toUpperCase() === code.toUpperCase());
+    const codes = [...seen.values()].map(entry => ({
+      ...entry,
+      namedBy: namedIn(linkMap, entry.code) ? 'link'
+        : namedIn(profileAnalytes, entry.code) ? 'profile' : 'none',
+    }));
+    codes.sort((a, b) => (a.namedBy === 'none' ? 0 : 1) - (b.namedBy === 'none' ? 0 : 1) || b.count - a.count);
+    res.json({ codes, messagesRead: messages.length });
+  });
+
+  /**
+   * Save what this analyser's codes mean, and what the receiving system calls
+   * them — without disturbing the transmission.
+   *
+   * A mapping change must never cost a connection. The link's settings are
+   * refreshed in place rather than restarted: nothing here affects the socket,
+   * the port or the protocol, so there is nothing to re-open, and an analyser
+   * mid-transmission notices nothing at all.
+   */
+  router.put('/parameter-mappings/:id', numericOnly, requirePermission(F.configuration, 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!existing) return res.status(404).json({ error: 'Link not found' });
+
+    const body = req.body ?? {};
+    const clean = (value: unknown): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [from, to] of Object.entries((value ?? {}) as Record<string, unknown>)) {
+        const code = String(from ?? '').trim();
+        const name = String(to ?? '').trim();
+        if (code && name) out[code] = name;
+      }
+      return out;
+    };
+    const measures = (value: unknown): Record<string, number> => {
+      const out: Record<string, number> = {};
+      for (const [from, to] of Object.entries((value ?? {}) as Record<string, unknown>)) {
+        const name = String(from ?? '').trim();
+        const id = Number(to);
+        if (name && Number.isFinite(id) && id > 0) out[name] = id;
+      }
+      return out;
+    };
+
+    const analyteMap = body.analyteMap !== undefined ? clean(body.analyteMap) : json<Record<string, string>>(existing.analyte_map, {});
+    const measureMap = body.measureMap !== undefined ? measures(body.measureMap) : json<Record<string, number>>(existing.measure_map, {});
+    const lhimsMapKey = body.lhimsMapKey !== undefined
+      ? (String(body.lhimsMapKey ?? '').trim() || null) : (existing.lhims_map_key ?? null);
+    if (lhimsMapKey && !LHIMS_MEASURE_MAPS.some(m => m.key === lhimsMapKey)) {
+      return res.status(400).json({ error: 'That is not a map this system knows.' });
+    }
+
+    db.prepare(`UPDATE instrument_links SET analyte_map = ?, measure_map = ?, lhims_map_key = ?,
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(JSON.stringify(analyteMap), JSON.stringify(measureMap), lhimsMapKey, req.params.id);
+
+    // In place, not a restart: a name is not a socket.
+    try { currentBridge()?.refreshSettings(Number(req.params.id)); } catch { /* the next start reads it anyway */ }
+
+    audit(req, {
+      action: 'middleware_parameter_mappings', entity: 'instrument_links', entityId: req.params.id,
+      oldValue: { analyteMap: json<Record<string, string>>(existing.analyte_map, {}) },
+      newValue: { analyteMap, lhimsMapKey },
+    });
+    res.json({ id: Number(req.params.id), analyteMap, measureMap, lhimsMapKey });
   });
 
   return router;

@@ -15,6 +15,7 @@
  *   node scripts/instrument-bridge-check.mjs
  */
 import net from 'node:net';
+import fs from 'node:fs';
 
 const BASE = process.env.API || 'http://127.0.0.1:4430/api';
 const PW = 'Passw0rd!test';
@@ -414,6 +415,27 @@ await wait(700);
 const ackMessages = (await j(`/instrument-links/${ackLink.json.id}/messages`, { token: A })).json ?? [];
 check('and the result itself is recorded', ackMessages.length >= 1, `${ackMessages.length}`);
 
+/* ---- a control run, which the analyser marks Q -------------------------- */
+/*
+ * The HumaCount's manual: "In an ACK message, the processing ID is consistent
+ * with the received message", and a QC response "differs from a counting result
+ * response message only in the value of MSH-11, which is Q". Answering a
+ * control run with P acknowledges something the analyser never sent.
+ */
+const QC_ID = `QC_${stamp}`;
+const qcAck = await sendHl7(PORT_ACK, [
+  `MSH|^~\\&|DF5x|Dymind|||20261027181312||ORU^R01|${QC_ID}|Q|2.3.1||||||UNICODE`,
+  `OBR|1||QC1|00002^Manual Count^99MRC`,
+  'OBX|1|NM|6690-2^WBC^LN||7.42|10*9/L|4.0-10.0|N|||F',
+].join('\r'));
+const qcBody = qcAck.replace(/^\x0b/, '').replace(/\x1c\r?$/, '');
+check('a control run is acknowledged as a control run, not as a patient result',
+  (qcBody.split('\r')[0] ?? '').split('|')[10] === 'Q', qcBody.split('\r')[0]);
+check('and it still names the message it answers',
+  qcBody.includes(`MSA|AA|${QC_ID}`), qcBody.slice(0, 160));
+check('the acknowledgement says which character set it is in',
+  /\|UNICODE/.test(qcBody.split('\r')[0] ?? ''), qcBody.split('\r')[0]);
+
 /* ---- an MSH a field short, which several counters send ------------------ */
 const SHORT_ID = `SHORT_${stamp}`;
 const shortAck = await sendHl7(PORT_ACK, [
@@ -575,6 +597,121 @@ check('hanging up waits for an analyser that sends more than one message',
 
 await j(`/instrument-links/${ackLink.json.id}`, { token: A, method: 'PUT', body: { closeAfterMessage: false } });
 await wait(700);
+
+/* ==========================================================================
+   6d. A HumaStar, both ways its own manual validates
+   --------------------------------------------------------------------------
+   HUMAN's interface manual offers two routes and validates both: the ASTM file
+   its HI software writes to an Output Worklist folder when a worksheet is
+   approved, and — from software 1.5 — ASTM over TCP on a port the analyser
+   listens on. The third, a RESTful API, the manual says outright is not
+   validated by HUMAN, so nothing here depends on it.
+
+   The payload is the manual's own worked example, including the sentinel it
+   writes for a test that was scheduled and never run.
+   ======================================================================== */
+console.log('\n[6d] A HumaStar, both ways');
+
+const HUMASTAR_RECORDS = [
+  'H|\\^&|||HS300SR^V1.0|||||Host||P|1|20261029134056',
+  `P|1||HS${stamp}1||HS${stamp}1|||MALE||||||||||||||||||||||`,
+  'O|1|||GOT|False||||||||Serum|||||||||||||',
+  'R|1|GOT||U / 1||||125.0||||20261029134012|',
+  'O|2|||GLU|False||||||||Serum|||||||||||||',
+  'R|1|GLU||mg / dL||||92.4||||20261029134015|',
+  // Scheduled, never run: the vendor writes this sentinel, and it is not a result.
+  'O|3|||CHOL|False||||||||Serum|||||||||||||',
+  'R|1|CHOL||mg / dL||||-99000000000||||00010101000000|',
+  `P|2||Serodos-${stamp}||Serodos-${stamp}|||Control||||||||||||||||||||`,
+  'O|1|||GOT|False||||||||Serum|||||||||||||',
+  'R|1|GOT||U / 1||||12.0||||20261029134042|',
+  'L||N',
+];
+
+/* ---- the file the HI software writes ----------------------------------- */
+const HUMASTAR_DIR = `/tmp/humastar-${stamp}`;
+fs.mkdirSync(HUMASTAR_DIR, { recursive: true });
+
+const fileLink = await j('/instrument-links', { token: A, method: 'POST', body: {
+  name: `HumaStar 300SR file ${stamp}`, sectionId, profileKey: 'humastar_300sr',
+  role: 'sechlims_only', mode: 'file_drop', protocol: 'astm',
+  watchPath: HUMASTAR_DIR, filePattern: '*.astm, *.txt',
+} });
+check('a link can watch the analyser’s Output Worklist', fileLink.status === 201,
+  JSON.stringify(fileLink.json)?.slice(0, 160));
+await wait(600);
+
+fs.writeFileSync(`${HUMASTAR_DIR}/WL${stamp}.astm`, HUMASTAR_RECORDS.join('\r\n'));
+await wait(2_800);
+await j(`/instrument-links/${fileLink.json.id}/fetch`, { token: A, method: 'POST', body: {} });
+await wait(900);
+
+const fromFile = (await j(`/instrument-links/${fileLink.json.id}/messages`, { token: A })).json ?? [];
+check('the approved worksheet is read out of the folder', fromFile.length >= 1, `${fromFile.length} message(s)`);
+
+const hsPatient = fromFile.find(m => String(m.sample_id ?? '').includes(`HS${stamp}1`));
+const hsControl = fromFile.find(m => String(m.sample_id ?? '').toUpperCase().includes('SERODOS'));
+check('the sample identifier is taken from the patient record, where this analyser puts it',
+  Boolean(hsPatient), JSON.stringify(fromFile.map(m => m.sample_id)));
+check('every test on that sample is one result, not one message each',
+  (hsPatient?.parsed_values ?? []).length === 3,
+  JSON.stringify((hsPatient?.parsed_values ?? []).map(v => `${v.code}=${v.value}`)));
+check('the readings are the numbers the analyser measured',
+  (hsPatient?.parsed_values ?? []).find(v => v.code === 'GOT')?.value === '125.0'
+  && (hsPatient?.parsed_values ?? []).find(v => v.code === 'GLU')?.value === '92.4',
+  JSON.stringify((hsPatient?.parsed_values ?? []).map(v => `${v.code}=${v.value}`)));
+check('a test that was scheduled and never run carries no result',
+  (hsPatient?.parsed_values ?? []).find(v => v.code === 'CHOL')?.value === '',
+  JSON.stringify((hsPatient?.parsed_values ?? []).find(v => v.code === 'CHOL')));
+check('the method names are read through the profile',
+  (hsPatient?.parsed_values ?? []).find(v => v.code === 'GOT')?.analyte === 'AST',
+  JSON.stringify((hsPatient?.parsed_values ?? []).map(v => `${v.code}->${v.analyte}`)));
+check('and the control request is recognised as a control',
+  hsControl?.kind === 'control', `${control?.kind} for ${hsControl?.sample_id}`);
+
+/* ---- ASTM over TCP, the analyser listening ----------------------------- */
+/*
+ * From software 1.5 the HI software listens and the LIS dials it, so here the
+ * test plays the ANALYSER: it listens, waits to be dialled, and then transmits
+ * with the ENQ/ACK handshake exactly as the manual's state diagram describes.
+ */
+const ANALYSER_PORT = PORT_BASE + 7;
+const analyser = net.createServer(socket => {
+  let index = -1;
+  socket.on('data', chunk => {
+    for (const byte of chunk) {
+      if (byte !== ACK) continue;
+      index++;
+      if (index < HUMASTAR_RECORDS.length) socket.write(astmFrame(index + 1, HUMASTAR_RECORDS[index]));
+      else { socket.write(Buffer.from([EOT])); setTimeout(() => socket.end(), 200); return; }
+    }
+  });
+  socket.on('error', () => {});
+  // The analyser opens the conversation once the LIS has connected.
+  setTimeout(() => { if (!socket.destroyed) socket.write(Buffer.from([ENQ])); }, 300);
+});
+await new Promise(resolve => analyser.listen(ANALYSER_PORT, '127.0.0.1', resolve));
+
+const tcpLink = await j('/instrument-links', { token: A, method: 'POST', body: {
+  name: `HumaStar 300SR tcp ${stamp}`, sectionId, profileKey: 'humastar_300sr',
+  role: 'sechlims_only', mode: 'client', protocol: 'astm',
+  remoteHost: '127.0.0.1', remotePort: ANALYSER_PORT,
+} });
+check('a link can dial the analyser, as ASTM over TCP needs', tcpLink.status === 201,
+  JSON.stringify(tcpLink.json)?.slice(0, 160));
+await wait(3_000);
+
+const fromTcp = (await j(`/instrument-links/${tcpLink.json.id}/messages`, { token: A })).json ?? [];
+const tcpPatient = fromTcp.find(m => String(m.sample_id ?? '').includes(`HS${stamp}1`));
+check('the same transmission arrives over TCP', Boolean(tcpPatient),
+  JSON.stringify(fromTcp.map(m => m.sample_id)));
+check('with the same readings',
+  (tcpPatient?.parsed_values ?? []).find(v => v.code === 'GOT')?.value === '125.0',
+  JSON.stringify((tcpPatient?.parsed_values ?? []).map(v => `${v.code}=${v.value}`)));
+
+await j(`/instrument-links/${tcpLink.json.id}/stop`, { token: A, method: 'POST' });
+await j(`/instrument-links/${fileLink.json.id}/stop`, { token: A, method: 'POST' });
+await new Promise(resolve => analyser.close(resolve));
 
 /* ---- the address a technician is sent to type in ----------------------- */
 const hostInfo = (await j('/instrument-links/host', { token: A })).json ?? {};

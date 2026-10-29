@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { api, apiRead, errorText } from '../../services/api';
-import { Facts, Field, Note, Panel, Pick, Switch, type Route, type SectionProps } from './shared';
+import { Field, Note, Panel, Pick, Switch, type Route, type SectionProps } from './shared';
 
 /**
  * Routing Rules and Mappings.
@@ -15,21 +15,11 @@ import { Facts, Field, Note, Panel, Pick, Switch, type Route, type SectionProps 
  * The preview uses the same matching function the engine does, so what this
  * screen predicts is what actually happens.
  */
-type Mapping = {
-  id: number; destination_id: number; source_code: string;
-  target_code: string | null; target_name: string | null; target_unit: string | null;
-  factor: number | null; offset_value: number | null; decimals: number | null;
-  value_map: Record<string, string>; is_required: number; is_active: number; note: string | null;
-};
-
 export default function MiddlewareRouting({
   reference, links, destinations, routes, canConfigure, reload, onError, onNotice,
 }: SectionProps) {
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [mappingFor, setMappingFor] = useState<number | null>(null);
-  const [mappings, setMappings] = useState<Mapping[]>([]);
-  const [observed, setObserved] = useState<Array<{ code: string; count: number }>>([]);
   const [draft, setDraft] = useState({
     name: '', destinationId: '', priority: '100', sourceLinkId: '', messageKind: 'patient',
     testCodes: '', sectionId: '', facility: '', department: '', stopOnMatch: false, notes: '',
@@ -39,18 +29,6 @@ export default function MiddlewareRouting({
 
   const usable = destinations.filter(d => !d.is_protected);
 
-  const loadMappings = useCallback(async (destinationId: number) => {
-    setMappingFor(destinationId);
-    const data = await apiRead<{ mappings: Mapping[]; observedCodes: Array<{ code: string; count: number }> }>(
-      `/middleware/destinations/${destinationId}/mappings`, { mappings: [], observedCodes: [] });
-    setMappings(data.mappings);
-    setObserved(data.observedCodes);
-  }, []);
-
-  useEffect(() => {
-    if (mappingFor == null && usable.length) void loadMappings(usable[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usable.length]);
 
   async function createRule() {
     setBusy('rule'); onError(null);
@@ -117,42 +95,6 @@ export default function MiddlewareRouting({
     finally { setBusy(null); }
   }
 
-  async function saveMapping(row: Partial<Mapping> & { sourceCode: string }) {
-    if (mappingFor == null) return;
-    setBusy(`m${row.sourceCode}`); onError(null);
-    try {
-      await api(`/middleware/destinations/${mappingFor}/mappings`, {
-        method: 'POST',
-        body: JSON.stringify({
-          rows: [{
-            sourceCode: row.sourceCode,
-            targetCode: row.target_code || null,
-            targetName: row.target_name || null,
-            targetUnit: row.target_unit || null,
-            factor: row.factor ?? null,
-            decimals: row.decimals ?? null,
-            required: Boolean(row.is_required),
-            active: row.is_active !== 0,
-            note: row.note || null,
-          }],
-        }),
-      });
-      await loadMappings(mappingFor);
-      onNotice(`${row.sourceCode} mapped.`);
-    } catch (e) { onError(errorText(e)); }
-    finally { setBusy(null); }
-  }
-
-  async function deleteMapping(id: number) {
-    setBusy(`m${id}`); onError(null);
-    try {
-      await api(`/middleware/mappings/${id}`, { method: 'DELETE', body: JSON.stringify({}) });
-      if (mappingFor != null) await loadMappings(mappingFor);
-    } catch (e) { onError(errorText(e)); }
-    finally { setBusy(null); }
-  }
-
-  const unmapped = observed.filter(entry => !mappings.some(m => m.source_code.toUpperCase() === entry.code.toUpperCase()));
 
   return (
     <>
@@ -287,77 +229,15 @@ export default function MiddlewareRouting({
       </Panel>
 
       <Panel
-        title="Field and code mappings"
-        subtitle="Per destination. A code with no mapping is withheld and named, never filed under a guess."
-        actions={
-          <Pick label="" value={mappingFor == null ? '' : String(mappingFor)}
-            onValue={v => v && void loadMappings(Number(v))}
-            options={usable.map(d => ({ key: String(d.id), label: d.name }))} blank="Choose a destination" />
-        }
+        title="What a destination calls each parameter"
+        subtitle="Moved, so every parameter mapping is configured in one place."
       >
-        {mappingFor == null ? (
-          <Note>Choose a destination to see its mappings.</Note>
-        ) : (
-          <>
-            {!mappings.length ? (
-              <Note>
-                No mapping is defined, so every result is sent with the analyser's own test code and unit. That is
-                correct for a system that already speaks the analyser's codes.
-              </Note>
-            ) : (
-              <table className="data-table mw-table">
-                <thead>
-                  <tr><th>Analyser code</th><th>Target code</th><th>Target name</th><th>Unit</th><th>Factor</th><th>Required</th><th /></tr>
-                </thead>
-                <tbody>
-                  {mappings.map(mapping => (
-                    <tr key={mapping.id} className={mapping.target_code ? undefined : 'mw-row-warn'}>
-                      <td className="mono">{mapping.source_code}</td>
-                      <td className="mono">{mapping.target_code ?? <span className="t-warn">not set — withheld</span>}</td>
-                      <td>{mapping.target_name ?? '—'}</td>
-                      <td>{mapping.target_unit ?? '—'}</td>
-                      <td className="num">{mapping.factor ?? '—'}</td>
-                      <td>{mapping.is_required ? 'Yes' : '—'}</td>
-                      <td className="mw-row-actions">
-                        {canConfigure && (
-                          <button type="button" className="pq-link" disabled={busy === `m${mapping.id}`} onClick={() => void deleteMapping(mapping.id)}>
-                            <Trash2 size={12} /> Remove
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-
-            {unmapped.length > 0 && (
-              <>
-                <h5 className="mw-side-head">Codes that have arrived and are not mapped</h5>
-                <Note tone="warn">
-                  These are being sent with the analyser's own code. If this destination uses its own codes, map them —
-                  until then the receiving system decides what to do with each.
-                </Note>
-                <ul className="mw-chips">
-                  {unmapped.slice(0, 40).map(entry => (
-                    <li key={entry.code}>
-                      <button type="button" className="mw-chip t-info" disabled={!canConfigure}
-                        onClick={() => void saveMapping({ sourceCode: entry.code, is_active: 1 })}>
-                        {entry.code} <span className="mw-sub">{entry.count}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-
-            <Facts items={[
-              { label: 'Unmapped code', value: 'Withheld from the delivery and named on it, rather than filed under a guess.' },
-              { label: 'Required mapping', value: 'A test the destination must receive. Its absence fails the delivery loudly.' },
-              { label: 'Factor and unit', value: 'A linear conversion, for a destination that stores a different unit.' },
-            ]} />
-          </>
-        )}
+        <Note>
+          A destination&rsquo;s own codes, names, units and conversions are under <strong>Parameter
+          Mappings &rarr; SECHLIMS &rarr; LIS</strong>, beside the other two vocabularies a result passes
+          through on its way out. A code with no mapping is still withheld and named on the delivery, never
+          filed under a guess.
+        </Note>
       </Panel>
     </>
   );

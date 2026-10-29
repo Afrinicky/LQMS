@@ -13,6 +13,7 @@ import MiddlewareDiagnostics from '../components/middleware/Diagnostics';
 import MiddlewareConnections from '../components/middleware/Connections';
 import MiddlewareDestinations from '../components/middleware/Destinations';
 import MiddlewareRouting from '../components/middleware/Routing';
+import MiddlewareParameterMappings from '../components/middleware/ParameterMappings';
 import MiddlewareMonitor from '../components/middleware/Monitor';
 import MiddlewareExplorer from '../components/middleware/Explorer';
 import MiddlewareQueues from '../components/middleware/Queues';
@@ -52,6 +53,7 @@ const TABS = [
   'Active Connections',
   'Destinations',
   'Routing & Mappings',
+  'Parameter Mappings',
   'Live Monitoring',
   'Message Explorer',
   'Queues & Failed Deliveries',
@@ -149,6 +151,7 @@ export default function MiddlewarePage() {
       {tab === 'Active Connections' && <MiddlewareConnections {...shared} onOpen={setTab} />}
       {tab === 'Destinations' && <MiddlewareDestinations {...shared} />}
       {tab === 'Routing & Mappings' && <MiddlewareRouting {...shared} />}
+      {tab === 'Parameter Mappings' && <MiddlewareParameterMappings {...shared} />}
       {tab === 'Live Monitoring' && <MiddlewareMonitor {...shared} />}
       {tab === 'Message Explorer' && <MiddlewareExplorer {...shared} />}
       {tab === 'Queues & Failed Deliveries' && <MiddlewareQueues {...shared} />}
