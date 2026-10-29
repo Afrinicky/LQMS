@@ -319,6 +319,92 @@ printout before the bench stops entering them by hand.
 
 ---
 
+## The HumaCount 5D, screen by screen
+
+Taken from the *HumaCount 5D LIS Interface Manual*, version 3. Two screens on
+the analyser, both under **Setup → Communication**, and they do different jobs:
+**Host Communication** is the analyser's own address on the network, and **LIS
+Communication** is where it sends results.
+
+### A. Host Communication — the analyser's own address
+
+| Field | Value |
+|---|---|
+| Obtain an IP address automatically | only if the laboratory runs DHCP; otherwise leave unticked |
+| Use the following address → IP Address | an address **nothing else on the network uses**, in the same segment as the SECHLIMS computer |
+| Subnet mask | **the same mask as the SECHLIMS computer** — the manual requires this |
+| Default gateway | leave blank unless the analyser has to cross a router |
+| DNS servers | leave blank |
+
+Two things the manual is explicit about: the analyser and the LIS must be *in
+the same network segment*, and their *subnet masks must be the same*. Everything
+else "can maintain null".
+
+A gateway from another segment — `192.168.1.1` on a `10.10.0.x` network — is not
+a valid gateway for this machine. It does no harm to traffic that stays on the
+segment, but it is a sign the values were copied from somewhere else, and the
+address itself is then worth checking too.
+
+**Before typing an address in, make sure it is free.** From the SECHLIMS
+computer, with the analyser's network cable unplugged:
+
+```
+ping <the address you intend to use>
+```
+
+Nothing should answer. If something does, that address is taken — pick another.
+Press **Details** on the analyser afterwards and write down its **Physical
+Address**; that is what `arp -a` on the SECHLIMS computer should show against
+the analyser's IP, and the pair is what proves no second machine has claimed it.
+
+### B. LIS Communication — where results go
+
+| Field | Value |
+|---|---|
+| IP Address | the **SECHLIMS computer's** address on the hospital network |
+| Port | the port the SECHLIMS link listens on — `3121` here |
+| Protocol Type / Version | HL7, 2.3.1 |
+| Communication Acknowledgement | **ticked** |
+| ACK timeout | 10 Sec is right; SECHLIMS answers immediately |
+| Auto-communication | **ticked** — this is what sends each result as it is counted |
+| Bidirectional LIS/HIS Communication | **unticked** |
+| Histogram / Scattergram transmission | *Not transmit* |
+
+**Leave bidirectional communication off.** With it on, the analyser sends a work
+order query (`ORM^O01`) before counting and waits ten seconds for a reply.
+SECHLIMS does not serve work orders, so every sample would wait out that timeout
+for nothing.
+
+Press **Apply**, then **OK**. The **LIS** icon at the top right of the analyser
+screen turns from grey to black when it is connected.
+
+### C. What the connection should then do, by itself
+
+The manual, section 3.2, is worth quoting because it settles what "normal" looks
+like:
+
+> The system software transmits messages through Transmission Control Protocol
+> (TCP) persistent connections. … After it connects to the LIS server
+> successfully, the connection will be held to ensure that data can be
+> transmitted at any time. If the connection fails during operation, the system
+> software will attempt to reconnect to the LIS server.
+
+So: the HumaCount dials SECHLIMS once, holds that connection, and re-dials by
+itself if it ever drops. It disconnects only when its software is shut down or
+its communication settings are changed. **It should never need the Reconnect
+button in normal use.** Having to press it means something outside the analyser
+is breaking the connection — see the first entry under Troubleshooting.
+
+### D. What SECHLIMS must have
+
+| Setting on the link | Value |
+|---|---|
+| What this link is for | SECHLIMS only — this analyser transmits to nothing else |
+| How it is reached | SECHLIMS listens; the analyser connects to it |
+| What it speaks | Work it out from what arrives (or HL7) |
+| Port the analyser sends to | `3121` |
+| After each transmission | **Hold the connection open** |
+
 ## Troubleshooting
 
 **“Could not listen on port :5000 — Address already in use: JVM_Bind”** (the
@@ -380,23 +466,42 @@ MSA|AA|<the analyser's own message control id><CR><FS><CR>
 with the analyser's control id echoed exactly and a `<CR>` after **every**
 segment, the last one included.
 
-**The analyser has to be reconnected by hand after every result.** This is the
-commonest shape of it: the result arrives, SECHLIMS acknowledges it, and twenty
-to forty seconds later the log says the analyser *dropped the connection
-without closing it*. The analyser then sits there until somebody walks over and
-presses reconnect.
+**The analyser has to be reconnected by hand after every result.** The result
+arrives, SECHLIMS acknowledges it, and twenty to forty seconds later the log
+says the analyser *dropped the connection without closing it*. The analyser
+then sits there until somebody walks over and presses reconnect.
 
-Such an analyser treats one connection as one transmission: it dials, sends,
-waits to be acknowledged, and then waits for the computer to hang up. Left
-waiting, it abandons the link. Open the link's settings and set **After each
-transmission** to *Close it once the result is acknowledged*. SECHLIMS then
-closes politely a few seconds after the last message — a few seconds, so a
-machine that sends two or three results in a row finishes them all — and the
-analyser dials again by itself for the next sample. Nobody touches it.
+**Check the network first, because this is nearly always the network.** A
+connection that is reset after a result has already gone through was almost
+certainly reset by something that is not the analyser, and the commonest cause
+by far is **two machines configured with the same IP address**. Everything works
+until the two disagree about who owns it; then packets for the analyser's
+connection reach the other machine, which knows nothing about them and replies
+with a reset. Pressing reconnect makes the analyser announce itself afresh,
+which is why it buys exactly one more result.
 
-Leave the setting on *Hold the connection open* for an analyser that keeps one
-connection all day and sends each result down it. Hanging up on that one costs a
-reconnection it never asked for.
+SECHLIMS watches for this by itself now. On each connection it records which
+device answered for the analyser's address, and if the answer changes it says so
+in the log and on the link's own panel — *Only one device answers for the
+analyser*. To check by hand, on the SECHLIMS computer:
+
+```
+arp -a
+```
+
+and compare the hardware address shown against the analyser's own **Setup →
+Host Communication → Details** screen. They must match. If they do not, two
+devices are sharing the address: give the analyser one nothing else uses.
+
+**Only if the address is the analyser's alone** is it worth asking whether this
+analyser is one that expects to be hung up on. Some do: they treat one
+connection as one transmission and wait for the computer to close it. For those,
+set **After each transmission** to *Close it once the result is acknowledged*,
+and SECHLIMS closes politely a few seconds after the last message — a few
+seconds, so a machine that sends two or three results in a row finishes them
+all. **The HumaCount 5D is not one of those.** Its interface manual is explicit
+that it holds a persistent connection and reconnects by itself, so leave it on
+*Hold the connection open*.
 
 **“Could not reach the analyser on …:3121 — connect ECONNREFUSED”, after
 switching to “SECHLIMS connects out to the analyser”.** That mode dials the

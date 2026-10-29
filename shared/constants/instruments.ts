@@ -197,10 +197,12 @@ export const AFTER_TRANSMISSION_HINTS = {
     'The usual arrangement. The analyser keeps one connection and sends each result down it, and SECHLIMS '
     + 'never hangs up.',
   close:
-    'For an analyser that has to be reconnected by hand after every result. Such a machine treats one '
-    + 'connection as one transmission and waits for the computer to hang up once it has been acknowledged; '
-    + 'left waiting, it abandons the link. SECHLIMS closes politely a few seconds after the last message, and '
-    + 'the analyser dials again by itself for the next sample.',
+    'For an analyser that treats one connection as one transmission and waits for the computer to hang up '
+    + 'once it has been acknowledged; left waiting, it abandons the link. SECHLIMS closes politely a few '
+    + 'seconds after the last message, and the analyser dials again by itself for the next sample. '
+    + 'Not for an analyser whose manual says it holds a persistent connection and reconnects by itself — the '
+    + 'HumaCount 5D is one of those, and on those a connection that keeps dropping is a network fault, most '
+    + 'often two machines sharing one address, not something this setting can mend.',
 } as const;
 
 export const LINK_STATES = ['stopped', 'listening', 'connected', 'connecting', 'following', 'error', 'blocked'] as const;

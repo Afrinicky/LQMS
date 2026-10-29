@@ -7031,6 +7031,12 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       // default: an analyser that holds one connection all day must not have it
       // taken away. See AFTER_TRANSMISSION_LABELS for the two kinds of machine.
       ['close_after_message', 'close_after_message INTEGER NOT NULL DEFAULT 0'],
+      // Which physical device last answered for the analyser's address, and the
+      // other one if the address turned out to be shared. Two machines on one
+      // address is the quietest network fault there is and the hardest to see
+      // from inside an application; recording it is how it gets seen.
+      ['last_peer_mac', 'last_peer_mac TEXT'],
+      ['peer_conflict', 'peer_conflict TEXT'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }

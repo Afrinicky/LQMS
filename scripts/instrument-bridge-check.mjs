@@ -414,6 +414,27 @@ await wait(700);
 const ackMessages = (await j(`/instrument-links/${ackLink.json.id}/messages`, { token: A })).json ?? [];
 check('and the result itself is recorded', ackMessages.length >= 1, `${ackMessages.length}`);
 
+/* ---- a control run, which the analyser marks Q -------------------------- */
+/*
+ * The HumaCount's manual: "In an ACK message, the processing ID is consistent
+ * with the received message", and a QC response "differs from a counting result
+ * response message only in the value of MSH-11, which is Q". Answering a
+ * control run with P acknowledges something the analyser never sent.
+ */
+const QC_ID = `QC_${stamp}`;
+const qcAck = await sendHl7(PORT_ACK, [
+  `MSH|^~\\&|DF5x|Dymind|||20261027181312||ORU^R01|${QC_ID}|Q|2.3.1||||||UNICODE`,
+  `OBR|1||QC1|00002^Manual Count^99MRC`,
+  'OBX|1|NM|6690-2^WBC^LN||7.42|10*9/L|4.0-10.0|N|||F',
+].join('\r'));
+const qcBody = qcAck.replace(/^\x0b/, '').replace(/\x1c\r?$/, '');
+check('a control run is acknowledged as a control run, not as a patient result',
+  (qcBody.split('\r')[0] ?? '').split('|')[10] === 'Q', qcBody.split('\r')[0]);
+check('and it still names the message it answers',
+  qcBody.includes(`MSA|AA|${QC_ID}`), qcBody.slice(0, 160));
+check('the acknowledgement says which character set it is in',
+  /\|UNICODE/.test(qcBody.split('\r')[0] ?? ''), qcBody.split('\r')[0]);
+
 /* ---- an MSH a field short, which several counters send ------------------ */
 const SHORT_ID = `SHORT_${stamp}`;
 const shortAck = await sendHl7(PORT_ACK, [

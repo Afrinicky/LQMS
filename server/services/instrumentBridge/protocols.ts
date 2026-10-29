@@ -614,6 +614,8 @@ export interface Hl7Header {
   sendingFacility: string;
   trigger: string;
   controlId: string;
+  /** MSH-11. P for a patient result, Q for a control run, on the machines that distinguish them. */
+  processingId: string;
   version: string;
 }
 
@@ -650,6 +652,7 @@ export function readHl7Header(message: string): Hl7Header {
     sendingFacility: at(3),
     trigger: messageType.includes('^') ? messageType.split('^')[1] ?? '' : '',
     controlId: at(typeAt + 1),
+    processingId: at(typeAt + 2) || 'P',
     version: /^\d+(\.\d+)*$/.test(version) ? version : '2.3.1',
   };
 }
@@ -677,8 +680,21 @@ export function hl7AckText(message: string): string {
   // The sender's own control id is echoed in MSA-2; MSH-10 is ours, as it is
   // the control id OF the acknowledgement rather than of what it answers.
   const echoed = header.controlId || newControlId();
+  /*
+   * MSH-11 is echoed, not assumed.
+   *
+   * An analyser that marks a QC transmission Q and a patient result P expects
+   * its own value back — the HumaCount's interface manual says so outright:
+   * "In an ACK message, the processing ID is consistent with the received
+   * message", and a QC response "differs from a counting result response
+   * message only in the value of MSH-11, which is Q". Answering every control
+   * run with P is an acknowledgement of something else, and the laboratory
+   * loses its quality control to a one-character mistake.
+   */
+  const processing = header.processingId || 'P';
   return [
-    `MSH|^~\\&|SECHLIMS|SECHLIMS|${header.sendingApp}|${header.sendingFacility}|${now}||${type}|${newControlId()}|P|${header.version}`,
+    `MSH|^~\\&|SECHLIMS|SECHLIMS|${header.sendingApp}|${header.sendingFacility}|${now}||${type}`
+      + `|${newControlId()}|${processing}|${header.version}|||||UNICODE`,
     `MSA|AA|${echoed}`,
     '',
   ].join('\r');
