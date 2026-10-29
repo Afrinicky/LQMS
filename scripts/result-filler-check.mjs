@@ -498,6 +498,69 @@ check('one name cannot be taught to mean two parameters', refusedAlias.status ==
 const repeatAlias = await j('/result-filler/aliases', { method: 'POST', token: ADMIN, body: { canonical: 'GLUCOSE', alias: LOCAL_NAME } });
 check('nor taught twice', repeatAlias.status === 409, `${repeatAlias.status}`);
 
+/* ---- a name the laboratory does NOT use that way ----------------------- */
+/*
+ * The built-in list of what a parameter may be called is a good default and
+ * not a fact. A laboratory whose own word for something collides with one of
+ * those names has to be able to take it out of use, and taking it out has to
+ * actually stop the filler reading it that way.
+ */
+const beforeWithdraw = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: CHEM_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: [field(0, 'FBS*')],
+  },
+});
+check('a built-in name is understood to begin with',
+  beforeWithdraw.json?.assignments?.[0]?.value === '5.4',
+  JSON.stringify(beforeWithdraw.json?.assignments ?? beforeWithdraw.json));
+
+const withdrawn = await j('/result-filler/aliases', {
+  method: 'POST', token: ADMIN, body: { alias: 'FBS', withdraw: true },
+});
+check('and can be withdrawn', withdrawn.status === 201 && withdrawn.json?.withdrawn === true,
+  `${withdrawn.status} ${JSON.stringify(withdrawn.json)}`);
+
+const afterWithdraw = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: CHEM_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: [field(0, 'FBS*')],
+  },
+});
+check('after which the filler no longer reads it that way', afterWithdraw.status === 409,
+  `${afterWithdraw.status} ${JSON.stringify(afterWithdraw.json)?.slice(0, 160)}`);
+
+const aliasRegister = await j('/result-filler/aliases', { token: ADMIN });
+const outRow = (aliasRegister.json?.withdrawn ?? []).find(r => r.alias === 'FBS');
+check('the withdrawal is on the register, with what it used to mean',
+  Boolean(outRow) && String(outRow.canonical).toUpperCase().includes('GLUCOSE'), JSON.stringify(outRow));
+check('and the names it added are still listed apart from it',
+  (aliasRegister.json?.rows ?? []).every(r => r.alias !== 'FBS'),
+  JSON.stringify((aliasRegister.json?.rows ?? []).map(r => r.alias).slice(0, 8)));
+
+const nothingToWithdraw = await j('/result-filler/aliases', {
+  method: 'POST', token: ADMIN, body: { alias: `NOSUCHNAME${stamp}`, withdraw: true },
+});
+check('a name nothing understands cannot be withdrawn', nothingToWithdraw.status === 409,
+  `${nothingToWithdraw.status}`);
+
+// Put it back, so the rest of the run and a second run see the usual vocabulary.
+if (outRow) await j(`/result-filler/aliases/${outRow.id}`, { method: 'DELETE', token: ADMIN });
+const restored = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: CHEM_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: [field(0, 'FBS*')],
+  },
+});
+check('and putting it back restores it', restored.json?.assignments?.[0]?.value === '5.4',
+  JSON.stringify(restored.json?.assignments ?? restored.json));
+
 /* ============ the names SECHLIMS itself gives an analyser's parameters ===== */
 /**
  * The bridge does not hand on the analyser's mnemonic alone: it maps it through

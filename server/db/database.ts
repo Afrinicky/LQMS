@@ -8618,6 +8618,21 @@ CREATE TABLE IF NOT EXISTS rf_reference_ranges (
 CREATE INDEX IF NOT EXISTS idx_rf_ranges_key ON rf_reference_ranges(analyte_key, is_active);
 `);
 
+
+  /*
+   * A name the laboratory has WITHDRAWN rather than added.
+   *
+   * The built-in list of what each parameter may be called is a good default,
+   * not a fact: a laboratory that uses one of those names for something else
+   * has to be able to say so. A withdrawn row carries the name and the
+   * parameter it used to mean, and the matching reads it as "this is not a
+   * parameter name here".
+   */
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(rf_aliases)").all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('withdrawn')) database.exec('ALTER TABLE rf_aliases ADD COLUMN withdrawn INTEGER NOT NULL DEFAULT 0');
+  }
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { api, apiRead, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
-import { Field, Note, Panel, Pick, when, type SectionProps } from './shared';
+import { Field, Note, Panel, Pick, Switch, when, type Destination, type SectionProps } from './shared';
 
 /**
  * Parameter mappings — what a result is CALLED at each step of its journey.
@@ -43,7 +43,7 @@ type SeenCode = {
 
 const EMPTY: Payload = { links: [], profiles: [], lhimsMaps: [] };
 
-export default function MiddlewareParameterMappings({ canConfigure, onError, onNotice }: SectionProps) {
+export default function MiddlewareParameterMappings({ destinations, canConfigure, onError, onNotice }: SectionProps) {
   const [tab, setTab] = useState<Tab>('Analyser → SECHLIMS');
   const [data, setData] = useState<Payload>(EMPTY);
   const [busy, setBusy] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export default function MiddlewareParameterMappings({ canConfigure, onError, onN
       </div>
 
       {tab === 'Analyser → SECHLIMS' && <FromAnalyser profiles={data.profiles} {...shared} />}
-      {tab === 'SECHLIMS → LIS' && <ToLis lhimsMaps={data.lhimsMaps} {...shared} />}
+      {tab === 'SECHLIMS → LIS' && <ToLis lhimsMaps={data.lhimsMaps} destinations={destinations} {...shared} />}
     </>
   );
 }
@@ -283,12 +283,15 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
    Result Filler types into a result-entry form, and the measure ids the LHIMS
    middleware files a result under.
    ========================================================================= */
-function ToLis({ links, lhimsMaps, canConfigure, busy, setBusy, onError, onNotice, reload }: PartProps & { lhimsMaps: LhimsMap[] }) {
+function ToLis({ links, lhimsMaps, destinations, canConfigure, busy, setBusy, onError, onNotice, reload }:
+PartProps & { lhimsMaps: LhimsMap[]; destinations: Destination[] }) {
   return (
     <>
       <ParameterNames canConfigure={canConfigure} busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} />
       <ToLhims links={links} lhimsMaps={lhimsMaps} canConfigure={canConfigure}
         busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} reload={reload} />
+      <ToDestination destinations={destinations} canConfigure={canConfigure}
+        busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} />
     </>
   );
 }
@@ -317,16 +320,19 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
   const mayEdit = canConfigure && can('analyser_middleware.result_filler', 'edit');
 
   const [rows, setRows] = useState<AliasRow[]>([]);
+  const [withdrawn, setWithdrawn] = useState<AliasRow[]>([]);
   const [dictionary, setDictionary] = useState<DictionaryEntry[]>([]);
   const [adapters, setAdapters] = useState<FillerAdapter[]>([]);
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ canonical: '', alias: '', adapterId: '', note: '' });
+  const [form, setForm] = useState({ canonical: '', alias: '', adapterId: '', note: '', newParameter: '' });
 
   const load = useCallback(async () => {
     if (!mayRead) return;
     try {
-      const data = await apiRead<{ rows: AliasRow[]; dictionary: DictionaryEntry[] }>('/result-filler/aliases', { rows: [], dictionary: [] });
+      const data = await apiRead<{ rows: AliasRow[]; withdrawn: AliasRow[]; dictionary: DictionaryEntry[] }>(
+        '/result-filler/aliases', { rows: [], withdrawn: [], dictionary: [] });
       setRows(data.rows);
+      setWithdrawn(data.withdrawn ?? []);
       setDictionary(data.dictionary);
       const forms = await apiRead<{ adapters: FillerAdapter[] }>('/result-filler/adapters', { adapters: [] });
       setAdapters(forms.adapters ?? []);
@@ -336,12 +342,39 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
   useEffect(() => { void load(); }, [load]);
 
   async function add() {
-    if (!form.canonical.trim() || !form.alias.trim()) { onError('Give the parameter and the other name for it.'); return; }
+    // A parameter typed in wins over one chosen from the list, so a laboratory
+    // can name something the built-in list has never heard of.
+    const canonical = form.newParameter.trim() || form.canonical.trim();
+    if (!canonical || !form.alias.trim()) { onError('Give the parameter and the other name for it.'); return; }
     setBusy('alias'); onError(null);
     try {
-      await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify(form) });
-      onNotice(`“${form.alias}” now means ${form.canonical}.`);
-      setForm({ canonical: '', alias: '', adapterId: '', note: '' });
+      await api('/result-filler/aliases', {
+        method: 'POST',
+        body: JSON.stringify({ canonical, alias: form.alias, adapterId: form.adapterId, note: form.note }),
+      });
+      onNotice(`“${form.alias}” now means ${canonical}.`);
+      setForm({ canonical: '', alias: '', adapterId: '', note: '', newParameter: '' });
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  /** Take a built-in name out of use, or put it back. */
+  async function withdraw(canonical: string, alias: string) {
+    setBusy(`w${alias}`); onError(null);
+    try {
+      await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify({ canonical, alias, withdraw: true }) });
+      onNotice(`“${alias}” is no longer read as ${canonical}.`);
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function restore(row: AliasRow) {
+    setBusy(`w${row.id}`); onError(null);
+    try {
+      await api(`/result-filler/aliases/${row.id}`, { method: 'DELETE' });
+      onNotice(`“${row.alias}” is understood as ${row.canonical} again.`);
       await load();
     } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
@@ -377,9 +410,12 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
       >
         {mayEdit && (
           <div className="mw-inset mw-grid">
-            <Pick label="Parameter" value={form.canonical} onValue={v => setForm(f => ({ ...f, canonical: v }))}
+            <Pick label="Parameter" value={form.canonical} onValue={v => setForm(f => ({ ...f, canonical: v, newParameter: '' }))}
               options={dictionary.map(entry => ({ key: entry.canonical, label: `${entry.canonical} (${entry.discipline})` }))}
               blank="Choose the parameter" />
+            <Field label="…or one not on the list" value={form.newParameter}
+              onValue={v => setForm(f => ({ ...f, newParameter: v, canonical: v ? '' : f.canonical }))}
+              placeholder="Procalcitonin" />
             <Field label="Is also called" value={form.alias} onValue={v => setForm(f => ({ ...f, alias: v }))} placeholder="HB CONC" />
             <Pick label="On which form" value={form.adapterId} onValue={v => setForm(f => ({ ...f, adapterId: v }))}
               options={adapters.map(a => ({ key: String(a.id), label: a.name }))} blank="Every form" />
@@ -414,7 +450,7 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
 
       <Panel
         title="Names it already knows"
-        subtitle="What an analyser may send, and what a form may ask for, for each parameter."
+        subtitle="What an analyser may send, and what a form may ask for. Press × on a name this laboratory uses for something else, and nothing reads it as that parameter any more."
         actions={<Field label="Find" value={search} onValue={setSearch} placeholder="sodium, SGPT, HGB" />}
       >
         {!shown.length ? <Note>No parameter matches.</Note> : (
@@ -426,9 +462,40 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
                   <td><strong>{entry.canonical}</strong></td>
                   <td>
                     <ul className="mw-chips">
-                      {entry.aliases.map(alias => <li key={alias}><span className="mw-chip">{alias}</span></li>)}
+                      {entry.aliases.map(alias => {
+                        const out = withdrawn.find(w => w.alias.toUpperCase() === alias.toUpperCase());
+                        if (out) {
+                          return (
+                            <li key={alias}>
+                              <span className="mw-chip t-warn"><s>{alias}</s></span>
+                              {mayEdit && (
+                                <button className="pq-link" disabled={busy === `w${out.id}`} onClick={() => void restore(out)}>
+                                  put back
+                                </button>
+                              )}
+                            </li>
+                          );
+                        }
+                        return (
+                          <li key={alias}>
+                            <span className="mw-chip">{alias}</span>
+                            {mayEdit && (
+                              <button className="pq-link" title={`Stop reading ${alias} as ${entry.canonical}`}
+                                disabled={busy === `w${alias}`} onClick={() => void withdraw(entry.canonical, alias)}>
+                                ×
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
                       {rows.filter(row => row.canonical === entry.canonical).map(row => (
-                        <li key={row.id}><span className="mw-chip t-info">{row.alias}</span></li>
+                        <li key={row.id}>
+                          <span className="mw-chip t-info">{row.alias}</span>
+                          {mayEdit && (
+                            <button className="pq-link" title="Remove this name" disabled={busy === `x${row.id}`}
+                              onClick={() => void remove(row)}>×</button>
+                          )}
+                        </li>
                       ))}
                       {!entry.aliases.length && !rows.some(row => row.canonical === entry.canonical) && <li className="mw-sub">its own name only</li>}
                     </ul>
@@ -573,6 +640,197 @@ function ToLhims({ links, lhimsMaps, canConfigure, busy, setBusy, onError, onNot
                 })}
               </tbody>
             </table>
+          )}
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------- a LIS destination */
+type DestinationMapping = {
+  id: number; destination_id: number; source_code: string;
+  target_code: string | null; target_name: string | null; target_unit: string | null;
+  factor: number | null; offset_value: number | null; decimals: number | null;
+  value_map: Record<string, string>; is_required: number; is_active: number; note: string | null;
+};
+
+const BLANK_MAPPING = {
+  sourceCode: '', targetCode: '', targetName: '', targetUnit: '',
+  factor: '', decimals: '', required: false,
+};
+
+/**
+ * What a destination calls each parameter, and in what unit.
+ *
+ * The third vocabulary, and the one with teeth: a destination that stores
+ * results against its own test codes gets nothing for a code nobody has
+ * mapped. SECHLIMS withholds it and names it on the delivery rather than
+ * sending the analyser's word and hoping — a haemoglobin filed under whatever
+ * test happened to answer to "HGB" at the far end is not a near miss.
+ *
+ * It lived beside the routing rules, where it was a register one could add a
+ * blank row to and delete a row from. It is editable here: the code, the name,
+ * the unit, a linear factor and the decimals, which is what a destination with
+ * its own vocabulary actually needs.
+ */
+function ToDestination({ destinations, canConfigure, busy, setBusy, onError, onNotice }: {
+  destinations: Destination[]; canConfigure: boolean; busy: string | null;
+  setBusy: (v: string | null) => void; onError: (m: string | null) => void; onNotice: (m: string | null) => void;
+}) {
+  // A protected destination is one SECHLIMS deliberately stays away from.
+  const usable = useMemo(() => destinations.filter(d => !d.is_protected), [destinations]);
+  const [forId, setForId] = useState('');
+  const [rows, setRows] = useState<DestinationMapping[]>([]);
+  const [observed, setObserved] = useState<Array<{ code: string; count: number }>>([]);
+  const [draft, setDraft] = useState(BLANK_MAPPING);
+
+  const load = useCallback(async (destinationId: string) => {
+    if (!destinationId) { setRows([]); setObserved([]); return; }
+    try {
+      const data = await apiRead<{ mappings: DestinationMapping[]; observedCodes: Array<{ code: string; count: number }> }>(
+        `/middleware/destinations/${destinationId}/mappings`, { mappings: [], observedCodes: [] });
+      setRows(data.mappings);
+      setObserved(data.observedCodes);
+    } catch (e) { onError(errorText(e)); }
+  }, [onError]);
+
+  useEffect(() => { void load(forId); }, [forId, load]);
+
+  async function save(row: typeof BLANK_MAPPING) {
+    if (!forId || !row.sourceCode.trim()) { onError('Name the code the analyser sends.'); return; }
+    setBusy(`d${row.sourceCode}`); onError(null);
+    try {
+      await api(`/middleware/destinations/${forId}/mappings`, {
+        method: 'POST',
+        body: JSON.stringify({ rows: [{
+          sourceCode: row.sourceCode.trim(),
+          targetCode: row.targetCode.trim() || null,
+          targetName: row.targetName.trim() || null,
+          targetUnit: row.targetUnit.trim() || null,
+          factor: row.factor.trim() ? Number(row.factor) : null,
+          decimals: row.decimals.trim() ? Number(row.decimals) : null,
+          required: row.required,
+          active: true,
+        }] }),
+      });
+      onNotice(`${row.sourceCode} mapped.`);
+      setDraft(BLANK_MAPPING);
+      await load(forId);
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function remove(id: number) {
+    setBusy(`d${id}`); onError(null);
+    try { await api(`/middleware/mappings/${id}`, { method: 'DELETE', body: JSON.stringify({}) }); await load(forId); }
+    catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  const unmapped = observed.filter(entry => !rows.some(r => r.source_code.toUpperCase() === entry.code.toUpperCase()));
+
+  return (
+    <Panel
+      title="What a connected system calls each parameter"
+      subtitle="Per destination. A code with no mapping is withheld and named on the delivery, never filed under a guess."
+    >
+      {!usable.length ? (
+        <Note>No destination is configured. One is added under Destinations before its codes can be mapped.</Note>
+      ) : (
+        <div className="mw-inset mw-grid">
+          <Pick label="Destination" value={forId} onValue={setForId} wide
+            options={usable.map(d => ({ key: String(d.id), label: `${d.name}${d.state ? ` · ${d.state}` : ''}` }))}
+            blank="Choose a destination" />
+        </div>
+      )}
+
+      {!forId ? null : (
+        <>
+          {!rows.length ? (
+            <Note>
+              No mapping is defined, so every result goes with the analyser&rsquo;s own test code and unit. That is
+              correct for a system that already speaks the analyser&rsquo;s codes.
+            </Note>
+          ) : (
+            <table className="data-table mw-table">
+              <thead>
+                <tr><th>The analyser sends</th><th>It is filed as</th><th>Name</th><th>Unit</th><th>Factor</th><th>Decimals</th><th>Required</th><th /></tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.id} className={row.target_code ? undefined : 'mw-row-warn'}>
+                    <td className="mono"><strong>{row.source_code}</strong></td>
+                    <td className="mono">{row.target_code ?? <span className="t-warn">not set — withheld</span>}</td>
+                    <td>{row.target_name ?? '—'}</td>
+                    <td>{row.target_unit ?? '—'}</td>
+                    <td className="num">{row.factor ?? '—'}</td>
+                    <td className="num">{row.decimals ?? '—'}</td>
+                    <td>{row.is_required ? 'Yes' : '—'}</td>
+                    <td className="mw-row-actions">
+                      {canConfigure && (
+                        <>
+                          <button className="btn ghost" onClick={() => setDraft({
+                            sourceCode: row.source_code,
+                            targetCode: row.target_code ?? '',
+                            targetName: row.target_name ?? '',
+                            targetUnit: row.target_unit ?? '',
+                            factor: row.factor == null ? '' : String(row.factor),
+                            decimals: row.decimals == null ? '' : String(row.decimals),
+                            required: row.is_required === 1,
+                          })}>Edit</button>
+                          <button className="btn ghost" disabled={busy === `d${row.id}`} onClick={() => void remove(row.id)}>
+                            <Trash2 size={12} />
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {canConfigure && (
+            <div className="mw-inset mw-grid">
+              <Field label="The analyser sends" value={draft.sourceCode} onValue={v => setDraft(d => ({ ...d, sourceCode: v }))} placeholder="HGB" />
+              <Field label="File it as" value={draft.targetCode} onValue={v => setDraft(d => ({ ...d, targetCode: v }))} placeholder="the destination's own code" />
+              <Field label="Name there" value={draft.targetName} onValue={v => setDraft(d => ({ ...d, targetName: v }))} />
+              <Field label="Unit there" value={draft.targetUnit} onValue={v => setDraft(d => ({ ...d, targetUnit: v }))} placeholder="g/dL" />
+              <Field label="Multiply by" value={draft.factor} type="number" onValue={v => setDraft(d => ({ ...d, factor: v }))} hint="For a destination that stores a different unit." />
+              <Field label="Decimals" value={draft.decimals} type="number" onValue={v => setDraft(d => ({ ...d, decimals: v }))} />
+              <Switch label="The destination must receive this one"
+                checked={draft.required} onChange={v => setDraft(d => ({ ...d, required: v }))}
+                hint="Its absence fails the delivery loudly, rather than quietly." />
+              <div className="mw-actions">
+                <button className="btn" disabled={busy?.startsWith('d') || !draft.sourceCode.trim()} onClick={() => void save(draft)}>
+                  {busy?.startsWith('d') ? <Loader2 size={13} className="spin" /> : <Save size={13} />} Save this mapping
+                </button>
+                {draft.sourceCode && (
+                  <button className="btn ghost" onClick={() => setDraft(BLANK_MAPPING)}>Clear</button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {unmapped.length > 0 && (
+            <>
+              <h5 className="mw-side-head">Codes that have arrived and are not mapped</h5>
+              <Note tone="warn">
+                These go with the analyser&rsquo;s own code, and the receiving system decides what to do with each.
+                Press one to start mapping it.
+              </Note>
+              <ul className="mw-chips">
+                {unmapped.slice(0, 40).map(entry => (
+                  <li key={entry.code}>
+                    <button type="button" className="mw-chip t-info" disabled={!canConfigure}
+                      onClick={() => setDraft({ ...BLANK_MAPPING, sourceCode: entry.code })}>
+                      {entry.code} <span className="mw-sub">{entry.count}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </>
       )}

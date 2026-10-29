@@ -190,13 +190,18 @@ nothing names at the top. A laboratory never has to guess what its machine
 calls a parameter, or notice unaided that one has been arriving unnamed for a
 fortnight.
 
-**SECHLIMS → LIS.** What the receiving system calls it. Two vocabularies: the
-names a result-entry form uses, which the Result Filler types on the
-laboratory's behalf; and the numeric measure ids LHIMS files a result under,
-per link. A parameter with no measure id is **withheld and named**, never filed
-under a guess — the same rule as a destination's own code map, which stays
-under Routing & Mappings because it belongs to a destination rather than to a
-parameter.
+**SECHLIMS → LIS.** What the receiving system calls it. Three vocabularies:
+the names a result-entry form uses, which the Result Filler types on the
+laboratory's behalf; the numeric measure ids LHIMS files a result under, per
+link; and a destination's own codes, names, units and linear conversions. A
+parameter with no measure id, and a code with no destination mapping, are both
+**withheld and named** on the delivery rather than filed under a guess.
+
+The built-in list of what a parameter may be called is a default, not a fact.
+A laboratory can add a name, add a parameter the list has never heard of, and
+**withdraw** a built-in name it uses for something else — after which nothing
+reads that word as that parameter. A withdrawal is recorded with what the name
+used to mean, and putting it back is one press.
 
 **Saving a mapping never costs a connection.** A name is not a socket: the
 running link takes the new settings in place, so an analyser mid-transmission

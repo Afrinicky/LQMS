@@ -32,7 +32,7 @@ export function aliasIndex(db: DB, adapterId?: number | null): Map<string, strin
   const index = new Map<string, string>();
   let rows: any[] = [];
   try {
-    rows = db.prepare(`SELECT canonical, alias FROM rf_aliases
+    rows = db.prepare(`SELECT canonical, alias, COALESCE(withdrawn, 0) AS withdrawn FROM rf_aliases
         WHERE adapter_id IS NULL OR adapter_id = ? ORDER BY adapter_id IS NULL DESC, id`)
       .all(adapterId ?? null) as any[];
   } catch { return index; }
@@ -40,7 +40,10 @@ export function aliasIndex(db: DB, adapterId?: number | null): Map<string, strin
   // is what makes a local override local.
   for (const row of rows) {
     const key = analyteKey(row.alias);
-    if (key) index.set(key, String(row.canonical));
+    if (!key) continue;
+    // A withdrawn name maps to nothing at all, which is how a laboratory
+    // overrules a built-in name it does not use. See canonicalAnalyte.
+    index.set(key, Number(row.withdrawn) === 1 ? '' : String(row.canonical));
   }
   return index;
 }
