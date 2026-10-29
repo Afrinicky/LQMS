@@ -12,6 +12,7 @@ import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import TextField from '../components/ui/TextField';
 import AnalyserFetch from '../components/AnalyserFetch';
 import { Notice } from '../components/ui/Feedback';
+import { formsAgree, identifyAnalyte } from '../../shared/constants/analyteIdentity';
 
 // ==========================================================================
 // Method Verification & Validation — ISO 15189:2022 (§7.3.3) / CLSI EP series.
@@ -415,11 +416,18 @@ function ParamDataEditor({ param, study, onClose, onComputed, setError }: { para
    * each landing on the next free line rather than replacing what is there.
    */
   function takeReading(sampleId: string | null, values: Array<{ analyte?: string; value?: number | string }>) {
-    const flat = (name?: string) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const wanted = flat(study.analyte || study.test_name);
-    const hit = values.find(v => flat(v.analyte) === wanted)
-      ?? values.find(v => wanted && flat(v.analyte).includes(wanted))
-      ?? (values.length === 1 ? values[0] : undefined);
+    /*
+     * A count is never taken for a percentage. A study of the absolute
+     * neutrophil count and one of the neutrophil percentage are different
+     * studies, and the two readings arrive in the same transmission a
+     * fraction of a second apart.
+     */
+    const wanted = identifyAnalyte(study.analyte || study.test_name);
+    const agrees = (v: { analyte?: string }) => formsAgree(identifyAnalyte(v.analyte).form, wanted.form);
+    const hit = values.find(v => identifyAnalyte(v.analyte).key === wanted.key)
+      ?? values.find(v => agrees(v) && identifyAnalyte(v.analyte).base === wanted.base)
+      ?? values.find(v => agrees(v) && wanted.flat && identifyAnalyte(v.analyte).flat.includes(wanted.flat))
+      ?? (values.length === 1 && agrees(values[0]) ? values[0] : undefined);
     if (!hit || hit.value === undefined || hit.value === null || String(hit.value) === '') {
       setError(`That transmission carried nothing for ${study.analyte || study.test_name}.`);
       return;

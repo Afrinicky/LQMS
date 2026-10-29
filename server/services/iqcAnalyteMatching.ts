@@ -11,63 +11,81 @@
  * through a named synonym, or by an UNAMBIGUOUS prefix — "MCH" against a
  * control holding both MCH and MCHC matches nothing, which is the right
  * answer, because a value in the wrong row is worse than a value in no row.
+ *
+ * ----------------------------------------------------------------------------
+ * THE ABSOLUTE AND THE PERCENTAGE ARE NOT THE SAME PARAMETER
+ * ----------------------------------------------------------------------------
+ * A differential sends each cell line twice: NEUT# is a count, NEUT% is a
+ * proportion, and they are different numbers measured in different units
+ * against different limits. Comparing names with punctuation stripped made
+ * "NEUT#" and "NEUT%" the same word, so whichever the analyser sent FIRST
+ * filled the control's absolute field and the second was discarded as a
+ * duplicate. A neutrophil percentage of 46.4 landed in a field whose limits
+ * were 6.79 to 9.19, and the control was reported as failed.
+ *
+ * So the form a parameter is in — a count, a percentage, or a name that does
+ * not say — is part of its identity here, and a count is never allowed to fill
+ * a percentage or the other way about. Where one side does not say which form
+ * it is, the control's own unit decides; and where nothing decides, nothing is
+ * filled, which is the whole rule this file is built on.
  */
+import {
+  type AnalyteForm, type AnalyteIdentity,
+  flattenAnalyte, formOfUnit, identifyAnalyte, analyteSynonymGroup,
+} from '../../shared/constants/analyteIdentity.js';
 
-const SYNONYMS: Record<string, string[]> = {
-  haemoglobin: ['hgb', 'hb', 'hemoglobin', 'haemoglobin'],
-  haematocrit: ['hct', 'pcv', 'hematocrit', 'haematocrit'],
-  wbc: ['wbc', 'leucocytes', 'leukocytes', 'whitecellcount', 'totalwbc'],
-  rbc: ['rbc', 'erythrocytes', 'redcellcount'],
-  platelets: ['plt', 'platelets', 'plateletcount'],
-  neutrophils: ['neut', 'ne', 'neutrophils', 'neu'],
-  lymphocytes: ['lymph', 'ly', 'lymphocytes', 'lym'],
-  monocytes: ['mono', 'mo', 'monocytes'],
-  eosinophils: ['eos', 'eo', 'eosinophils'],
-  basophils: ['baso', 'ba', 'basophils'],
-  glucose: ['glu', 'gluc', 'glucose'],
-  urea: ['urea', 'bun'],
-  creatinine: ['crea', 'creat', 'creatinine'],
-  sodium: ['na', 'sodium'],
-  potassium: ['k', 'potassium'],
-  chloride: ['cl', 'chloride'],
-  calcium: ['ca', 'calcium'],
-  albumin: ['alb', 'albumin'],
-  bilirubin: ['tbil', 'bili', 'bilirubin', 'totalbilirubin'],
-  alt: ['alt', 'sgpt', 'alanineaminotransferase'],
-  ast: ['ast', 'sgot', 'aspartateaminotransferase'],
-  alp: ['alp', 'alkalinephosphatase'],
-};
+export { formOfUnit, type AnalyteForm, type AnalyteIdentity };
 
 export function normalise(value: unknown): string {
-  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return flattenAnalyte(value);
 }
 
+/** Read a label as "which parameter, in which form". Defined in shared/. */
+export const identify = identifyAnalyte;
+
 export function synonymGroup(name: string): string | null {
-  const key = normalise(name);
-  for (const [group, members] of Object.entries(SYNONYMS)) {
-    if (members.includes(key) || normalise(group) === key) return group;
-  }
-  return null;
+  return analyteSynonymGroup(name);
 }
 
 /** Find the analyte a label refers to, or nothing. Never a near-miss. */
 export function findAnalyte(label: string, analytes: any[]): any | null {
-  const target = normalise(label);
-  if (!target) return null;
-  const exact = analytes.find(a => normalise(a.analyte) === target);
-  if (exact) return exact;
+  const target = identify(label);
+  if (!target.base) return null;
 
-  const group = synonymGroup(label);
-  if (group) {
-    const bySynonym = analytes.find(a => synonymGroup(a.analyte) === group);
-    if (bySynonym) return bySynonym;
+  const sameBase = analytes.filter(a => identify(a.analyte).base === target.base);
+  if (sameBase.length) {
+    // The same parameter in the same form: a count for a count, a percentage
+    // for a percentage. This is the ordinary case and the only exact one.
+    const sameForm = sameBase.filter(a => identify(a.analyte).form === target.form);
+    if (sameForm.length) return sameForm[0];
+
+    /*
+     * Nothing here is in that form. One side may still not SAY which form it
+     * is — a control parameter called plainly "Neutrophils", or an analyser
+     * sending plain "NEUT" — and those may cross, but only onto a single
+     * candidate and only when the unit does not contradict it. A count is
+     * never allowed into a percentage, whatever else is true.
+     */
+    const crossable = sameBase.filter(a => {
+      const candidate = identify(a.analyte);
+      if (candidate.form !== 'plain' && target.form !== 'plain') return false;
+      const declared = candidate.form === 'plain' ? formOfUnit(a.unit) : candidate.form;
+      return declared === 'plain' || target.form === 'plain' || declared === target.form;
+    });
+    return crossable.length === 1 ? crossable[0] : null;
   }
 
-  // A prefix match, but only where it is unambiguous. "MCH" against a control
-  // holding both MCH and MCHC matches nothing, which is the correct answer.
+  // A prefix match, but only within the same form and only where it is
+  // unambiguous. "MCH" against a control holding both MCH and MCHC matches
+  // nothing, which is the correct answer.
   const prefix = analytes.filter(a => {
-    const candidate = normalise(a.analyte);
-    return candidate.startsWith(target) || target.startsWith(candidate);
+    const candidate = identify(a.analyte);
+    if (candidate.form !== target.form) return false;
+    // Both the word as written and the synonym it resolves to: an analyser's
+    // PLT-I belongs in a control's "Platelets", and only the written form of
+    // each shows that.
+    return [candidate.base, candidate.flat].some(c =>
+      [target.base, target.flat].some(t => Boolean(c) && Boolean(t) && (c.startsWith(t) || t.startsWith(c))));
   });
   return prefix.length === 1 ? prefix[0] : null;
 }

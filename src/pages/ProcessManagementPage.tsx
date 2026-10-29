@@ -25,6 +25,7 @@ import type {
 import TextField from '../components/ui/TextField';
 import AnalyserFetch from '../components/AnalyserFetch';
 import { Notice } from '../components/ui/Feedback';
+import { formsAgree, identifyAnalyte } from '../../shared/constants/analyteIdentity';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -154,20 +155,24 @@ export function ProcessManagementPage() {
    * event in and the rule it breaches is selected if one is configured.
    */
   function takeCriticalReading(sampleId: string | null, values: Array<{ analyte?: string; value?: number | string }>) {
-    const flat = (name?: string | null) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    // A rule written for the absolute neutrophil count must not be tripped by
+    // the neutrophil percentage, which arrives in the same transmission.
+    const same = (a?: string | null, b?: string | null) => identifyAnalyte(a).key === identifyAnalyte(b).key;
     const live = rules.filter(r => r.is_active);
     const forTest = criticalForm.testCatalogId
       ? live.filter(r => String(r.test_catalog_id ?? '') === criticalForm.testCatalogId)
       : live;
     let rule: CriticalResultRule | undefined;
     let hit = values.find(v => {
-      rule = (forTest.length ? forTest : live).find(r => flat(r.analyte_name) === flat(v.analyte));
+      rule = (forTest.length ? forTest : live).find(r => same(r.analyte_name, v.analyte));
       return Boolean(rule);
     });
     if (!hit) {
       rule = undefined;
-      hit = values.find(v => flat(v.analyte) === flat(criticalForm.analyteName))
-        ?? (values.length === 1 ? values[0] : undefined);
+      const wanted = identifyAnalyte(criticalForm.analyteName);
+      hit = values.find(v => identifyAnalyte(v.analyte).key === wanted.key)
+        ?? (values.length === 1 && formsAgree(identifyAnalyte(values[0].analyte).form, wanted.form)
+          ? values[0] : undefined);
     }
     if (!hit) {
       setError('That transmission carried several analytes and none matches a critical-result rule. Name the analyte first.');

@@ -456,6 +456,66 @@ if (xbarWaiting) {
     JSON.stringify((xbarMap.json?.readings ?? []).map(r => r.label)));
 }
 
+/* ==========================================================================
+   The absolute and the percentage are not the same parameter
+   --------------------------------------------------------------------------
+   A differential sends each cell line twice. Comparing names with punctuation
+   stripped made NEUT# and NEUT% the same word, so whichever arrived FIRST
+   filled the control's absolute field and the second was dropped as a
+   duplicate: a neutrophil percentage of 46.4 landed in a field whose limits
+   were 6.79 to 9.19, and the control was reported as failed.
+
+   The analyser here sends the percentages first, exactly as a Sysmex does.
+   ======================================================================== */
+const diffControl = await j('/iqc/materials', { token: A, method: 'POST', body: {
+  materialName: `XN CHECK DIFF ${stamp}`, testName: 'Full blood count', lotNumber: `XD-${stamp}`,
+  levelLabel: 'Level 3 (High)', source: 'commercial', controlType: 'quantitative', qcFrequency: 'daily',
+  equipmentId: xbarEquipment.json.id,
+  analytes: [
+    { analyte: 'NEUT#', unit: '10^3/uL', targetMean: 7.99, targetSd: 0.4, decimalPlaces: 2 },
+    { analyte: 'LYMPH#', unit: '10^3/uL', targetMean: 4.23, targetSd: 0.28, decimalPlaces: 2 },
+    { analyte: 'NEUT%', unit: '%', targetMean: 46.8, targetSd: 2.3, decimalPlaces: 1 },
+    { analyte: 'LYMPH%', unit: '%', targetMean: 24.8, targetSd: 1.6, decimalPlaces: 1 },
+    { analyte: 'Neutrophil band', unit: '%', targetMean: 2.0, targetSd: 0.5, decimalPlaces: 1 },
+  ],
+} });
+check('a control holding both the counts and the percentages', diffControl.status === 201,
+  JSON.stringify(diffControl.json));
+
+await sendAstm(XBAR_PORT, [
+  `H|\\^&|||XN-550^1.0|||||||P|1|${stamp}`,
+  `O|1||^^ QCDIFF${stamp}^M|^^^^^FBC|||||||Q||||||||||||||F`,
+  // Percentages first, as the analyser sends them.
+  'R|1|^^^^NEUT%^1|46.4|%||N||F||||20261029152000',
+  'R|2|^^^^LYMPH%^1|25.0|%||N||F||||20261029152000',
+  'R|3|^^^^NEUT#^1|7.91|10*3/uL||N||F||||20261029152000',
+  'R|4|^^^^LYMPH#^1|4.26|10*3/uL||N||F||||20261029152000',
+  'L|1|N',
+]);
+await wait(1200);
+
+const diffStatus = await j(`/iqc/materials/${diffControl.json.id}/analyser`, { token: A });
+const diffWaiting = (diffStatus.json?.waiting ?? [])[0];
+check('the differential run reaches the bench', Boolean(diffWaiting),
+  JSON.stringify((diffStatus.json?.waiting ?? []).map(w => w.sample_id)));
+
+if (diffWaiting) {
+  const diffMap = await j(`/iqc/materials/${diffControl.json.id}/analyser/messages/${diffWaiting.id}/map`, { token: A });
+  const filled = Object.fromEntries((diffMap.json?.readings ?? []).map(r => [r.analyte, r.value]));
+  check('the neutrophil COUNT holds the count, not the percentage',
+    filled['NEUT#'] === 7.91, `NEUT# = ${filled['NEUT#']}`);
+  check('and the neutrophil PERCENTAGE holds the percentage',
+    filled['NEUT%'] === 46.4, `NEUT% = ${filled['NEUT%']}`);
+  check('the same for the lymphocytes',
+    filled['LYMPH#'] === 4.26 && filled['LYMPH%'] === 25.0,
+    `LYMPH# = ${filled['LYMPH#']}, LYMPH% = ${filled['LYMPH%']}`);
+  check('all four readings were placed, none dropped as a duplicate',
+    diffMap.json?.matched === 4, `${diffMap.json?.matched} matched`);
+  check('and the parameter the analyser never sent is left empty rather than guessed at',
+    (diffMap.json?.missingAnalytes ?? []).some(a => a.analyte === 'Neutrophil band'),
+    JSON.stringify((diffMap.json?.missingAnalytes ?? []).map(a => a.analyte)));
+}
+
 await j(`/instrument-links/${xbarLink.json.id}/stop`, { token: A, method: 'POST' });
 await j(`/instrument-links/${link.json.id}/stop`, { token: A, method: 'POST' });
 
