@@ -92,8 +92,9 @@ log read-only (`lhims_tap`).
 Analyser profiles ship for Sysmex XN/XS/XT/KX-21N, Mindray BC-3600/5300/5800
 and BS-380/240, DIRUI, HORIBA ABX Pentra and Micros, Abbott Cell-Dyn, URIT,
 ELITech Selectra and Flexor, Biotecnica BT-3000, Ortho VITROS and Cepheid
-GeneXpert, plus generic ASTM and HL7 profiles. A profile is a starting point;
-every map is editable per link.
+GeneXpert, HUMAN HumaCount 5D and HumaStar 100/200/300SR, plus generic ASTM and
+HL7 profiles. A profile is a starting point; every map is editable per link,
+under Parameter Mappings, against the codes that analyser has actually sent.
 
 **Serial (RS-232) is not implemented.** See §7.
 

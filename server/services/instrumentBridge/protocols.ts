@@ -369,6 +369,57 @@ function identifier(value: string): string {
  * numeric all the way through keeps the old answer, because then the number is
  * all there is.
  */
+/**
+ * The value SECHLIMS reads nothing into.
+ *
+ * The HumaStar writes a scheduled-but-unmeasured test out with the sentinel
+ * -99000000000 and a completion date of 00010101000000. It is not a result and
+ * must never be filed as one; a number that absurd would also sail through
+ * every range check as "critically low".
+ */
+const NOT_MEASURED = /^-9{2}0{9}$/;
+
+/** Does this field carry a reading, as opposed to a code, a flag or a date? */
+function looksLikeAReading(value: string): boolean {
+  const raw = String(value ?? '').trim();
+  if (!raw || NOT_MEASURED.test(raw)) return false;
+  // A lone number, or one decorated the way analysers decorate them: < 0.5,
+  // 12.4 H, *8.9. A date stamp is 12 or 14 digits and is not one of these.
+  if (/^\d{12,14}$/.test(raw)) return false;
+  return /^[<>]?\s*-?\d+(\.\d+)?\s*[A-Za-z*]{0,3}$/.test(raw);
+}
+
+/**
+ * Where this analyser put the reading.
+ *
+ * ASTM says R-4, and almost every analyser agrees. The HumaStar's own manual
+ * says R-4 in its field table and then shows R-9 in both of its worked
+ * examples, which is not a question a reader can settle — so it is not
+ * guessed at. R-4 is taken whenever it carries a reading. Otherwise the fields
+ * that have no business holding a number at all (R-8 to R-12: abnormality
+ * testing, result status, operator, start time) are looked at, and a reading
+ * is taken from there only when exactly ONE of them could be it.
+ *
+ * R-5 to R-7 are never considered however empty R-4 is: the unit, the
+ * reference range and the flag are full of numbers that are not the result,
+ * and "0.0 to 2.5" recorded as a haemoglobin is the fault this whole module
+ * exists to prevent.
+ */
+function readingFrom(record: string[]): { value: string; from: number } | null {
+  const direct = field(record, 4);
+  if (looksLikeAReading(direct)) return { value: direct, from: 4 };
+  // A qualitative result — POSITIVE, REACTIVE — is a reading too, and only
+  // ever appears where the standard puts it.
+  if (direct && !NOT_MEASURED.test(direct) && /[A-Za-z]{4,}/.test(direct)) return { value: direct, from: 4 };
+
+  const strays: Array<{ value: string; from: number }> = [];
+  for (let n = 8; n <= 12; n++) {
+    const candidate = field(record, n);
+    if (looksLikeAReading(candidate)) strays.push({ value: candidate, from: n });
+  }
+  return strays.length === 1 ? strays[0] : null;
+}
+
 function testCode(universalTestId: string): string {
   const raw = String(universalTestId ?? '').trim();
   // Both ASTM separators: components are ^, repeats are \.
@@ -445,25 +496,73 @@ export function parseAstm(text: string): AnalyserMessage[] {
     }
 
     if (type === 'O') {
-      push();
       // Field 3 is the specimen ID the laboratory gave it; field 4 is the
       // instrument's own. A control usually names itself in one or the other,
       // and either may be a composite with the identifier buried in it.
       const specimen = identifier(field(record, 3)) || identifier(field(record, 4));
-      current = {
-        ...blankMessage(instrument, text),
-        sampleId: specimen || null,
-        runAt: astmTime(field(record, 23) || field(record, 22) || null),
-        controlHint: astmSaysControl(record) ? true : null,
-      };
+
+      /*
+       * One order is not always one sample.
+       *
+       * Most analysers put the specimen identifier on every order record, so
+       * each O begins a new sample and starting one here is right. A chemistry
+       * analyser that runs ten tests on one tube writes ONE patient record and
+       * ten order records, with the identifier on the patient record and the
+       * order records carrying only the method name — the HumaStar does
+       * exactly this. Starting a new sample on each of those would file ten
+       * single-parameter results where the laboratory ran one panel, and no
+       * control would ever match a control material.
+       *
+       * So a new sample begins when the order names one, and otherwise the
+       * order joins the sample already open.
+       */
+      const runAt = astmTime(field(record, 23) || field(record, 22) || null);
+      const hint = astmSaysControl(record) ? true : null;
+
+      if (current && !current.results.length) {
+        // The sample is open and nothing has been reported for it yet — a
+        // patient record opened it a moment ago, or this is the first order on
+        // it. The order fills in what it knows rather than starting a second
+        // sample that would never carry a result.
+        if (specimen) current.sampleId = specimen;
+        if (runAt && !current.runAt) current.runAt = runAt;
+        if (hint !== null && current.controlHint === null) current.controlHint = hint;
+      } else if (specimen || !current) {
+        push();
+        current = { ...blankMessage(instrument, text), sampleId: specimen || null, runAt, controlHint: hint };
+      } else if (hint !== null && current.controlHint === null) {
+        // Another order on the sample already being reported.
+        current.controlHint = hint;
+      }
       continue;
     }
 
     if (type === 'P') {
-      // A control run often carries its level or lot in the patient name slot,
-      // because there is no patient. Kept when there is nothing better.
+      /*
+       * The patient record carries the sample identifier when the order
+       * records do not. The HumaStar's manual is explicit about it: its
+       * Laboratory ID field is the "default unique sample ID, for the order
+       * records (used when Order SampleID is not defined)". Its Sex field is
+       * used for the sample type, and reads "Control" for a control request.
+       */
+      const laboratoryId = identifier(field(record, 4)) || identifier(field(record, 3));
       const name = field(record, 6);
-      if (current && !current.sampleId && name) current.sampleId = identifier(name) || null;
+      const hint = /^control$/i.test(field(record, 9)) ? true : null;
+
+      if (current && !current.results.length) {
+        // A patient record that follows the order it belongs to, which is the
+        // other order analysers write these two records in. It adds what the
+        // order did not say and overrules nothing.
+        if (!current.sampleId) current.sampleId = laboratoryId || identifier(name) || null;
+        if (hint !== null && current.controlHint === null) current.controlHint = hint;
+      } else {
+        push();
+        current = {
+          ...blankMessage(instrument, text),
+          sampleId: laboratoryId || identifier(name) || null,
+          controlHint: hint,
+        };
+      }
       continue;
     }
 
@@ -471,12 +570,21 @@ export function parseAstm(text: string): AnalyserMessage[] {
       if (!current) current = blankMessage(instrument, text);
       // Field 3 is the universal test ID, and which component holds the
       // mnemonic is a vendor decision. See `testCode`.
-      const code = testCode(field(record, 3));
-      const value = field(record, 4);
+      // A HumaStar leaves R-3 empty and writes the method name in R-4, so the
+      // name is looked for in the next field when the standard one is bare.
+      const code = testCode(field(record, 3)) || testCode(field(record, 4));
       if (!code) continue;
+      const reading = readingFrom(record);
+      /*
+       * No reading, or more than one field that could be it: the parameter is
+       * recorded with no value rather than with a number out of the wrong
+       * column. A scheduled test the analyser never ran reaches here too, and
+       * is the commonest reason for an empty one.
+       */
+      const value = reading ? (component(reading.value, 1) || reading.value) : '';
       current.results.push({
         code,
-        value: component(value, 1) || value,
+        value,
         unit: field(record, 5) || null,
         flag: field(record, 7) || null,
         completedAt: astmTime(field(record, 13) || null),

@@ -405,6 +405,104 @@ is breaking the connection — see the first entry under Troubleshooting.
 | Port the analyser sends to | `3121` |
 | After each transmission | **Hold the connection open** |
 
+## The HumaStar 100 / 200 / 300SR, screen by screen
+
+Taken from the *HumaStar 100/200/300SR LIS Interface Manual*, version 16. The
+analyser's own manual offers three ways into a LIS and validates two of them;
+SECHLIMS supports both of those. The third, a RESTful Web API on port 8080, the
+manual says outright is **"not validated by HUMAN and not used"** and is the
+laboratory's own responsibility — so leave *Enable RESTful API* at 0 and use one
+of the two below.
+
+Which one depends on the software version. **ASTM over TCP needs software 1.5
+or newer**; the file route works on every version and needs no port opened, so
+it is the one to try first.
+
+### A. Settings both routes need
+
+In the HumaStar software, under the **General** settings:
+
+| Setting | Value | Why |
+|---|---|---|
+| Enable L.I.S. module | **1** | Nothing is exported at all without it. |
+| Activate bidirectional transmission in LIS | **1** | **Easily missed and the usual cause of an empty folder.** With it off, the analyser exports only the results of tests the LIS *asked* for. SECHLIMS sends no work lists — every test is created on the analyser — so with it off nothing is ever exported. |
+| Enable export of QC tests | **1** | Control runs then reach the IQC board with the patient results. |
+| Export only samples that have tests with a result | **1** | Keeps the scheduled-but-never-run rows out of the file. SECHLIMS ignores them either way (see below), but a clean file is easier to read. |
+| Remove TAB spacing from ASTM file formatting | **1** | The ASTM standard does not permit TAB characters. |
+| Use Unit 3 instead of Unit 1 | 0 | Unless the laboratory has deliberately configured a third unit. |
+| Sheet approval behaviour | the laboratory's choice | Results reach the Output Worklist **only when a worksheet is approved**. *Automatically approve LIS worksheet at creation* removes that step; *Prompt behavior* keeps it. |
+
+A note worth repeating from the manual: **the assay name in the file is the
+method name in the HumaStar software.** SECHLIMS ships the names HUMAN's own
+documentation uses, and anything this machine spells differently is named once
+under **Parameter Mappings → Analyser → SECHLIMS**, which lists every code the
+analyser has actually sent.
+
+### B. The watched folder — every software version
+
+The HI software writes its ASTM files under:
+
+```
+%ProgramData%\HI\Human\LIS\ASTM\
+    Input Worklist     (host → analyser; SECHLIMS does not use it)
+    Process Worklist   (in progress)
+    Output Worklist    (approved results — this is the one)
+```
+
+On Windows XP the same three live under
+`\Documents and Settings\All Users\Application data\HI\Human\LIS\ASTM`. The
+*Output Worklist* folder appears the first time results are approved.
+
+1. On the analyser's computer, share the **Output Worklist** folder so the
+   SECHLIMS computer can read it. Read access is enough.
+2. In SECHLIMS add a link: *The analyser writes files to a watched folder*,
+   the model set to the HumaStar, and the folder set to that share.
+3. Leave **move read files to** and **delete after reading** both empty. The
+   manual is explicit that no other folder may be created inside the HI folder
+   structure, and SECHLIMS does not need either: it recognises a file it has
+   already read and will not record the same results twice.
+
+### C. ASTM over TCP — software 1.5 and newer
+
+In the HumaStar software, under **ASTM over TCP/IP**:
+
+| Setting | Value |
+|---|---|
+| Enable TCP-IP List Interface | **1** |
+| LIS with CRLF terminator | **1** (the default; leave it on) |
+
+The HI software then **listens** on port 6557, so it is SECHLIMS that dials:
+add a link with *SECHLIMS connects out to the analyser*, the analyser's own
+address, and port 6557. Open that port on the analyser computer's firewall.
+
+The handshake is ordinary ASTM — `<ENQ>`, `<ACK>`, then
+`<STX>` frame `<ETX>` checksum `<CR><LF>` — which SECHLIMS already speaks.
+
+### D. What SECHLIMS does with what arrives
+
+* **The sample identifier comes from the patient record.** This analyser leaves
+  the order records' specimen field empty and puts the identifier in the
+  patient record instead, which its manual sanctions ("the default unique
+  sample ID, for the order records"). SECHLIMS reads it from there.
+* **One sample, one record.** A HumaStar writes one patient record and then an
+  order and a result record for each test on that tube. All of them are filed
+  as one transmission, not one per test.
+* **A control names itself.** On the 300SR a QC request carries `Control` in
+  the patient record's sample-type field, and SECHLIMS files the run as a
+  control on the strength of it, without a pattern being configured.
+* **A test that was scheduled and never run is not a result.** The analyser
+  writes `-99000000000` with a completion date of `00010101000000` for those.
+  SECHLIMS records the parameter with no value rather than filing a number that
+  would read as critically low on every range check.
+* **A reading is never taken from the wrong column.** The manual's field table
+  and its own worked examples disagree about which field carries the result, so
+  SECHLIMS does not choose between them: it takes the standard field when that
+  field holds a reading, and otherwise accepts a number from the fields that
+  should not hold one *only when exactly one of them could be it*. Where two
+  could be, the parameter is recorded with no value and the whole message is
+  kept under Messages for somebody to look at. A missing result is a visible
+  problem; a result in the wrong row is not.
+
 ## Troubleshooting
 
 **“Could not listen on port :5000 — Address already in use: JVM_Bind”** (the
