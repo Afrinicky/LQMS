@@ -173,6 +173,36 @@ nobody has signed for.
 `Degraded` (a delivery failed, the interface still works), `Disconnected`
 (stood down) and `Failed`.
 
+### Parameter mappings — what a result is called at each step
+
+A result changes name twice between the analyser and the record it ends up in,
+and both translations live under **Parameter Mappings**, one sub-tab each.
+
+**Analyser → SECHLIMS.** What the machine's own mnemonic means. Most analysers
+need nothing: choosing the model under Connection Setup brings its whole
+vocabulary with it, and the tab shows what that model already understands. The
+tab is for the machine that disagrees with the book, and for the parameter
+nobody has named yet — which it finds by itself. *Codes this analyser has
+actually sent* reads the transmissions on the record, lists every mnemonic with
+how often it has arrived and what it currently becomes, and puts the ones
+nothing names at the top. A laboratory never has to guess what its machine
+calls a parameter, or notice unaided that one has been arriving unnamed for a
+fortnight.
+
+**SECHLIMS → LIS.** What the receiving system calls it. Two vocabularies: the
+names a result-entry form uses, which the Result Filler types on the
+laboratory's behalf; and the numeric measure ids LHIMS files a result under,
+per link. A parameter with no measure id is **withheld and named**, never filed
+under a guess — the same rule as a destination's own code map, which stays
+under Routing & Mappings because it belongs to a destination rather than to a
+parameter.
+
+**Saving a mapping never costs a connection.** A name is not a socket: the
+running link takes the new settings in place, so an analyser mid-transmission
+notices nothing, and a machine that has to be reconnected by hand is not made
+to be. The check proves it — a rename, then the very next message read under
+the new name, with the link never leaving the state it was in.
+
 ---
 
 ## 6. Diagnostics, permissions and audit

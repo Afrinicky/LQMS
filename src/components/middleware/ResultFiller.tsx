@@ -23,7 +23,10 @@ import { Facts, Field, Note, Panel, Pick, Switch, when, type SectionProps } from
  * result, and nothing here can make the extension do so.
  */
 
-const TABS = ['Install', 'Browsers', 'Forms', 'Parameter names', 'Field mappings', 'Activity'] as const;
+// Parameter names moved to Parameter Mappings, where the names a form uses sit
+// beside the names an analyser sends. The register and the behaviour are
+// unchanged; only where it is edited moved.
+const TABS = ['Install', 'Browsers', 'Forms', 'Field mappings', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 type Adapter = {
@@ -129,7 +132,6 @@ export default function ResultFiller({ onError, onNotice }: SectionProps) {
       {tab === 'Install' && <Install overview={overview} adapters={adapters} devices={devices} {...shared} />}
       {tab === 'Browsers' && <Browsers devices={devices} {...shared} />}
       {tab === 'Forms' && <Forms adapters={adapters} {...shared} />}
-      {tab === 'Parameter names' && <ParameterNames adapters={adapters} {...shared} />}
       {tab === 'Field mappings' && <Mappings adapters={adapters} {...shared} />}
       {tab === 'Activity' && <Activity adapters={adapters} {...shared} />}
     </>
@@ -483,136 +485,6 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
           </div>
         </Panel>
       )}
-    </>
-  );
-}
-
-/* ============================================================================
-   Parameter names
-   ----------------------------------------------------------------------------
-   The filler matches what an analyser sends to what a form asks for through a
-   dictionary of the names both of them use. Most of it is built in. The rest is
-   local, and belongs to the laboratory rather than to a release.
-   ========================================================================= */
-type AliasRow = {
-  id: number; canonical: string; alias: string; adapter_id: number | null;
-  adapter_name: string | null; note: string | null; created_by_name: string | null; created_at: string;
-};
-type DictionaryEntry = { canonical: string; discipline: string; aliases: string[] };
-
-function ParameterNames({ adapters, mayEdit, busy, setBusy, onError, onNotice }: SharedProps & { adapters: Adapter[] }) {
-  const [rows, setRows] = useState<AliasRow[]>([]);
-  const [dictionary, setDictionary] = useState<DictionaryEntry[]>([]);
-  const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ canonical: '', alias: '', adapterId: '', note: '' });
-
-  const load = useCallback(async () => {
-    try {
-      const data = await apiRead<{ rows: AliasRow[]; dictionary: DictionaryEntry[] }>('/result-filler/aliases', { rows: [], dictionary: [] });
-      setRows(data.rows);
-      setDictionary(data.dictionary);
-    } catch (e) { onError(errorText(e)); }
-  }, [onError]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  async function add() {
-    if (!form.canonical.trim() || !form.alias.trim()) { onError('Give the parameter and the other name for it.'); return; }
-    setBusy('alias'); onError(null);
-    try {
-      await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify(form) });
-      onNotice(`“${form.alias}” now means ${form.canonical}.`);
-      setForm({ canonical: '', alias: '', adapterId: '', note: '' });
-      await load();
-    } catch (e) { onError(errorText(e)); }
-    finally { setBusy(null); }
-  }
-
-  async function remove(row: AliasRow) {
-    setBusy(`x${row.id}`); onError(null);
-    try { await api(`/result-filler/aliases/${row.id}`, { method: 'DELETE' }); await load(); }
-    catch (e) { onError(errorText(e)); }
-    finally { setBusy(null); }
-  }
-
-  const needle = search.trim().toUpperCase();
-  const shown = needle
-    ? dictionary.filter(entry => entry.canonical.toUpperCase().includes(needle)
-      || entry.aliases.some(alias => alias.toUpperCase().includes(needle)))
-    : dictionary;
-
-  return (
-    <>
-      <Panel
-        title="Names this laboratory has taught it"
-        subtitle="Added here, understood everywhere — no reinstall on any bench."
-        actions={<span className="mw-chip t-info">{rows.length} added</span>}
-      >
-        {mayEdit && (
-          <div className="mw-inset mw-grid">
-            <Pick label="Parameter" value={form.canonical} onValue={v => setForm(f => ({ ...f, canonical: v }))}
-              options={dictionary.map(entry => ({ key: entry.canonical, label: `${entry.canonical} (${entry.discipline})` }))}
-              blank="Choose the parameter" />
-            <Field label="Is also called" value={form.alias} onValue={v => setForm(f => ({ ...f, alias: v }))} placeholder="HB CONC" />
-            <Pick label="On which form" value={form.adapterId} onValue={v => setForm(f => ({ ...f, adapterId: v }))}
-              options={adapters.map(a => ({ key: String(a.id), label: a.name }))} blank="Every form" />
-            <Field label="Note" value={form.note} onValue={v => setForm(f => ({ ...f, note: v }))} />
-            <div className="mw-actions">
-              <button className="btn" onClick={() => void add()} disabled={busy === 'alias'}>
-                {busy === 'alias' ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} Teach this name
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!rows.length ? <Note>Nothing has needed teaching yet.</Note> : (
-          <table className="data-table mw-table">
-            <thead><tr><th>Parameter</th><th>Also called</th><th>On</th><th>Added by</th><th /></tr></thead>
-            <tbody>
-              {rows.map(row => (
-                <tr key={row.id}>
-                  <td><strong>{row.canonical}</strong></td>
-                  <td>{row.alias}{row.note && <span className="mw-sub">{row.note}</span>}</td>
-                  <td>{row.adapter_name ?? 'Every form'}</td>
-                  <td>{row.created_by_name ?? '—'}<span className="mw-sub">{when(row.created_at)}</span></td>
-                  <td className="mw-row-actions">
-                    {mayEdit && <button className="btn ghost" onClick={() => void remove(row)} disabled={busy === `x${row.id}`}><Trash2 size={12} /></button>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Panel>
-
-      <Panel
-        title="Names it already knows"
-        subtitle="What an analyser may send, and what a form may ask for, for each parameter."
-        actions={<Field label="Find" value={search} onValue={setSearch} placeholder="sodium, SGPT, HGB" />}
-      >
-        {!shown.length ? <Note>No parameter matches.</Note> : (
-          <table className="data-table mw-table">
-            <thead><tr><th>Parameter</th><th>Also understood as</th><th>Discipline</th></tr></thead>
-            <tbody>
-              {shown.map(entry => (
-                <tr key={entry.canonical}>
-                  <td><strong>{entry.canonical}</strong></td>
-                  <td>
-                    <ul className="mw-chips">
-                      {entry.aliases.map(alias => <li key={alias}><span className="mw-chip">{alias}</span></li>)}
-                      {rows.filter(row => row.canonical === entry.canonical).map(row => (
-                        <li key={row.id}><span className="mw-chip t-info">{row.alias}</span></li>
-                      ))}
-                      {!entry.aliases.length && !rows.some(row => row.canonical === entry.canonical) && <li className="mw-sub">its own name only</li>}
-                    </ul>
-                  </td>
-                  <td>{entry.discipline}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Panel>
     </>
   );
 }

@@ -324,6 +324,37 @@ class Link {
     } catch { /* a state note must never take the link down */ }
   }
 
+  /**
+   * Take a changed setting without re-opening anything.
+   *
+   * What a parameter is CALLED is not a socket. Restarting a link to pick up a
+   * renamed analyte would close the listener, drop whatever the analyser had
+   * open, and on a machine that does not re-dial by itself would cost the
+   * laboratory a walk across the room — for a change that affects nothing but
+   * how an arriving code is read. Only the settings that are safe to change
+   * mid-connection are taken this way; anything touching the address, the
+   * port, the protocol or the mode still goes through a restart.
+   */
+  applySettings(row: LinkRow): void {
+    this.row = {
+      ...this.row,
+      name: row.name,
+      profile_key: row.profile_key,
+      analyte_map: row.analyte_map,
+      control_patterns: row.control_patterns,
+      measure_map: row.measure_map,
+      lhims_map_key: row.lhims_map_key,
+      lhims_url: row.lhims_url,
+      lhims_username: row.lhims_username,
+      lhims_password: row.lhims_password,
+      forward_enabled: row.forward_enabled,
+      forward_host: row.forward_host,
+      forward_port: row.forward_port,
+      forward_target: row.forward_target,
+      close_after_message: row.close_after_message,
+    };
+  }
+
   /** What this link is set to, for the screen that shows it beside the log. */
   snapshot(): Record<string, unknown> {
     return {
@@ -1580,6 +1611,22 @@ export class InstrumentBridge {
   }
 
   /** Restart one link after its settings changed. */
+  /**
+   * A settings change that cannot affect the connection, applied to the
+   * running link. Falls back to a restart only for a link that is not running,
+   * where there is nothing to disturb.
+   */
+  refreshSettings(linkId: number): void {
+    let row: LinkRow | undefined;
+    try { row = this.getDb().prepare('SELECT * FROM instrument_links WHERE id = ?').get(linkId) as LinkRow; }
+    catch { return; }
+    if (!row) return;
+    const link = this.links.get(linkId);
+    if (!link) return;
+    link.applySettings(row);
+    this.record(linkId, 'info', 'Parameter names reloaded. The connection was not disturbed.');
+  }
+
   restart(linkId: number): void {
     let row: LinkRow | undefined;
     try { row = this.getDb().prepare('SELECT * FROM instrument_links WHERE id = ?').get(linkId) as LinkRow; }
