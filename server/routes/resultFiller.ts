@@ -742,6 +742,38 @@ export function resultFillerRoutes() {
     }
   });
 
+  /**
+   * Change the characters of a name this laboratory added.
+   *
+   * Editing a BUILT-IN name is a different act and is not done here: that one
+   * is withdrawn and the new spelling added, so the register says plainly that
+   * the laboratory stopped using one word and started using another.
+   */
+  router.put('/aliases/:id', numericOnly, requirePermission(F, 'edit'), (req, res) => {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM rf_aliases WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That name is not on the register.' });
+
+    const alias = text(req.body?.alias, 80);
+    if (!alias) return res.status(400).json({ error: 'A name cannot be empty.' });
+    if (analyteKey(alias) === analyteKey(row.canonical)) {
+      return res.status(400).json({ error: 'That is the parameter\u2019s own name.' });
+    }
+    if (analyteKey(alias) !== analyteKey(row.alias)) {
+      const known = canonicalAnalyte(alias) ?? aliasIndex(db, null).get(analyteKey(alias)) ?? null;
+      if (known && known !== row.canonical) {
+        return res.status(409).json({ error: `\u201c${alias}\u201d already means ${known}. Two parameters cannot share a name.` });
+      }
+    }
+    try {
+      db.prepare('UPDATE rf_aliases SET alias = ? WHERE id = ?').run(alias, row.id);
+      audit(req, { action: 'edit', entity: 'rf_aliases', entityId: row.id, oldValue: { alias: row.alias }, newValue: { alias } });
+      res.json({ id: row.id, canonical: row.canonical, alias });
+    } catch (error) {
+      res.status(400).json({ error: `That name could not be changed: ${(error as Error).message}` });
+    }
+  });
+
   router.delete('/aliases/:id', numericOnly, requirePermission(F, 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM rf_aliases WHERE id = ?').get(req.params.id) as any;
