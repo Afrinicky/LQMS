@@ -8152,3 +8152,63 @@ button.mw-chip:disabled { cursor: default; opacity: 0.65; }
 .rf-age > div { display: flex; gap: 6px; }
 .rf-age input { flex: 1; min-width: 0; }
 .rf-age select { flex: 0 0 90px; }
+
+/* ==========================================================================
+   Parameter mappings — the names a parameter goes by, edited where they sit
+   --------------------------------------------------------------------------
+   A name is a small thing and editing one should be a small act: press the
+   name, change the characters, press the tick. No dialog, no page change, and
+   the row never moves under the hand that is working on it.
+   ========================================================================== */
+.pm-names { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+.pm-name {
+  display: inline-flex; align-items: stretch; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--neutral-bg);
+}
+.pm-name > .pm-text {
+  border: 0; background: transparent; cursor: pointer; padding: 3px 10px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; color: var(--muted); white-space: nowrap;
+}
+.pm-name > .pm-text:hover:not(:disabled) { color: var(--text); }
+.pm-name > .pm-text:disabled { cursor: default; }
+.pm-name.is-added { background: var(--info-bg); border-color: var(--info-line); }
+.pm-name.is-added > .pm-text { color: var(--info); }
+.pm-name.is-out { background: var(--overlay-2); border-style: dashed; }
+.pm-name.is-out > .pm-text { color: var(--faint); text-decoration: line-through; cursor: default; }
+.pm-name > .pm-undo {
+  border: 0; border-left: 1px solid var(--border); background: transparent; cursor: pointer;
+  padding: 0 8px; font-size: 10px; font-weight: 700; color: var(--muted);
+}
+.pm-name > .pm-undo:hover { color: var(--text); background: var(--overlay-2); }
+
+/* The dashed pill that opens the box for new names. */
+.pm-add {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px;
+  border: 1px dashed var(--border-strong); background: transparent; cursor: pointer;
+  font-size: 10.5px; font-weight: 700; color: var(--muted);
+}
+.pm-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.pm-add:disabled { opacity: 0.5; cursor: default; }
+
+/* The small box itself: one line of input, one line of help, one button. */
+.pm-editor {
+  display: inline-flex; flex-direction: column; gap: 6px; padding: 8px 10px; min-width: 260px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+}
+.pm-editor input {
+  width: 100%; padding: 5px 8px; font-size: 12px; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text);
+}
+.pm-editor input:focus { outline: none; border-color: var(--accent); }
+.pm-editor .pm-editor-note { font-size: 10.5px; color: var(--faint); line-height: 1.35; }
+.pm-editor .pm-editor-row { display: flex; gap: 6px; align-items: center; }
+.pm-editor .pm-editor-row .btn { padding: 4px 10px; font-size: 11.5px; }
+.pm-editor .pm-danger { margin-left: auto; color: var(--danger); }
+
+/* The parameter a row is for, and where it came from. */
+.pm-param { display: flex; flex-direction: column; gap: 2px; }
+.pm-param strong { font-size: 12px; }
+.pm-param small { font-size: 10px; color: var(--faint); }

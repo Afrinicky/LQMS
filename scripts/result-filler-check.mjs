@@ -542,6 +542,41 @@ check('and the names it added are still listed apart from it',
   (aliasRegister.json?.rows ?? []).every(r => r.alias !== 'FBS'),
   JSON.stringify((aliasRegister.json?.rows ?? []).map(r => r.alias).slice(0, 8)));
 
+/* ---- changing the characters of a name --------------------------------- */
+const renameMe = `HOUSE SUGAR ${stamp}`;
+const renameRow = await j('/result-filler/aliases', {
+  method: 'POST', token: ADMIN, body: { canonical: 'GLUCOSE', alias: renameMe },
+});
+check('a name can be added to be renamed', renameRow.status === 201, `${renameRow.status}`);
+
+const renamed = await j(`/result-filler/aliases/${renameRow.json?.id}`, {
+  method: 'PUT', token: ADMIN, body: { alias: `${renameMe}S` },
+});
+check('and its characters changed', renamed.status === 200 && renamed.json?.alias === `${renameMe}S`,
+  `${renamed.status} ${JSON.stringify(renamed.json)}`);
+
+const clash = await j(`/result-filler/aliases/${renameRow.json?.id}`, {
+  method: 'PUT', token: ADMIN, body: { alias: 'HGB' },
+});
+check('but not into a name that already means something else', clash.status === 409, `${clash.status}`);
+
+const emptied = await j(`/result-filler/aliases/${renameRow.json?.id}`, {
+  method: 'PUT', token: ADMIN, body: { alias: '  ' },
+});
+check('nor emptied', emptied.status === 400, `${emptied.status}`);
+
+const renamedWorks = await j('/result-filler/populate', {
+  method: 'POST', token: ADMIN, device: DEVICE2,
+  body: {
+    adapterCode: scanAdapter,
+    detectedIdentifiers: [{ kind: 'sample', label: 'Sample Barcode', value: CHEM_SAMPLE, source: 'header', confidence: 100 }],
+    detectedFields: [field(0, `${renameMe}S*`)],
+  },
+});
+check('and the filler reads the new spelling', renamedWorks.json?.assignments?.[0]?.value === '5.4',
+  JSON.stringify(renamedWorks.json?.assignments ?? renamedWorks.json));
+await j(`/result-filler/aliases/${renameRow.json?.id}`, { method: 'DELETE', token: ADMIN });
+
 const nothingToWithdraw = await j('/result-filler/aliases', {
   method: 'POST', token: ADMIN, body: { alias: `NOSUCHNAME${stamp}`, withdraw: true },
 });

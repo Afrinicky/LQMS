@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowRight, Check, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { api, apiRead, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { Field, Note, Panel, Pick, Switch, when, type Destination, type SectionProps } from './shared';
@@ -71,6 +71,117 @@ export default function MiddlewareParameterMappings({ destinations, canConfigure
   );
 }
 
+
+/* ============================================================================
+   The names a parameter goes by, edited where they sit
+   ----------------------------------------------------------------------------
+   One component for both directions, so a name an analyser sends and a name a
+   form asks for are worked on the same way. Press a name to change its
+   characters, press the bin inside the editor to take it out of use, press
+   "Add names" to put several in at once separated by commas.
+
+   Nothing opens a dialog. A parameter's names are a small thing and editing
+   one should be a small act, done where the name already is, with the row
+   never moving under the hand that is working on it.
+   ========================================================================= */
+type NameTone = 'builtin' | 'added' | 'out';
+export type EditableName = { key: string; text: string; tone: NameTone; note?: string };
+
+function NameList({ names, canEdit, busy, onEdit, onRemove, onRestore, onAdd, addLabel, addHint, addPlaceholder }: {
+  names: EditableName[];
+  canEdit: boolean;
+  busy: boolean;
+  onEdit: (name: EditableName, next: string) => Promise<void>;
+  onRemove: (name: EditableName) => Promise<void>;
+  onRestore: (name: EditableName) => Promise<void>;
+  onAdd: (values: string[]) => Promise<void>;
+  addLabel?: string;
+  addHint?: string;
+  addPlaceholder?: string;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [fresh, setFresh] = useState('');
+
+  const open = (name: EditableName) => { setAdding(false); setEditing(name.key); setDraft(name.text); };
+  const close = () => { setEditing(null); setDraft(''); };
+
+  /** One name per comma, trimmed, with the blanks and the repeats dropped. */
+  const split = (raw: string) => [...new Set(raw.split(',').map(v => v.trim()).filter(Boolean))];
+
+  return (
+    <ul className="pm-names">
+      {names.map(name => {
+        if (editing === name.key) {
+          return (
+            <li key={name.key}>
+              <div className="pm-editor">
+                <input autoFocus value={draft} onChange={e => setDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && draft.trim()) { void onEdit(name, draft.trim()).then(close); }
+                    if (e.key === 'Escape') close();
+                  }} />
+                <div className="pm-editor-row">
+                  <button className="btn" disabled={busy || !draft.trim() || draft.trim() === name.text}
+                    onClick={() => void onEdit(name, draft.trim()).then(close)}>
+                    {busy ? <Loader2 size={12} className="spin" /> : <Check size={12} />} Save
+                  </button>
+                  <button className="btn ghost" disabled={busy} onClick={close}>Cancel</button>
+                  <button className="btn ghost pm-danger" disabled={busy} title="Take this name out of use"
+                    onClick={() => void onRemove(name).then(close)}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+            </li>
+          );
+        }
+        return (
+          <li key={name.key}>
+            <span className={`pm-name${name.tone === 'added' ? ' is-added' : ''}${name.tone === 'out' ? ' is-out' : ''}`}>
+              <button className="pm-text" disabled={!canEdit || name.tone === 'out'} title={name.note ?? 'Press to change or remove'}
+                onClick={() => open(name)}>
+                {name.text}
+              </button>
+              {name.tone === 'out' && canEdit && (
+                <button className="pm-undo" disabled={busy} onClick={() => void onRestore(name)}>put back</button>
+              )}
+            </span>
+          </li>
+        );
+      })}
+
+      {canEdit && (
+        <li>
+          {adding ? (
+            <div className="pm-editor">
+              <input autoFocus value={fresh} onChange={e => setFresh(e.target.value)}
+                placeholder={addPlaceholder ?? 'WBC, W.B.C, WHITE COUNT'}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && split(fresh).length) { void onAdd(split(fresh)).then(() => { setFresh(''); setAdding(false); }); }
+                  if (e.key === 'Escape') { setFresh(''); setAdding(false); }
+                }} />
+              <span className="pm-editor-note">{addHint ?? 'Separate several with commas. Each becomes another name for this parameter.'}</span>
+              <div className="pm-editor-row">
+                <button className="btn" disabled={busy || !split(fresh).length}
+                  onClick={() => void onAdd(split(fresh)).then(() => { setFresh(''); setAdding(false); })}>
+                  {busy ? <Loader2 size={12} className="spin" /> : <Check size={12} />} Save
+                </button>
+                <button className="btn ghost" disabled={busy} onClick={() => { setFresh(''); setAdding(false); }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button className="pm-add" disabled={busy} onClick={() => { setEditing(null); setAdding(true); }}>
+              <Plus size={11} /> {addLabel ?? 'Add names'}
+            </button>
+          )}
+        </li>
+      )}
+    </ul>
+  );
+}
+
 type PartProps = {
   links: MappingLink[];
   canConfigure: boolean;
@@ -107,18 +218,16 @@ function ChooseLink({ links, value, onValue, empty }: {
    ========================================================================= */
 function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, onNotice, reload }: PartProps & { profiles: Profile[] }) {
   const [linkId, setLinkId] = useState('');
-  const [rows, setRows] = useState<Array<{ code: string; name: string }>>([]);
-  const [draft, setDraft] = useState({ code: '', name: '' });
   const [codes, setCodes] = useState<SeenCode[]>([]);
   const [search, setSearch] = useState('');
+  const [newParameter, setNewParameter] = useState('');
 
   const link = links.find(l => String(l.id) === linkId) ?? null;
   const profile = profiles.find(p => p.key === link?.profileKey) ?? null;
 
   useEffect(() => {
-    setRows(Object.entries(link?.analyteMap ?? {}).map(([code, name]) => ({ code, name })));
-    setDraft({ code: '', name: '' });
     setCodes([]);
+    setSearch('');
     if (!link) return;
     void (async () => {
       try {
@@ -128,29 +237,104 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
     })();
   }, [link, onError]);
 
-  async function save(next: Array<{ code: string; name: string }>) {
+  /**
+   * What this analyser's codes mean, gathered the way a person thinks of them.
+   *
+   * Not a list of codes with a name beside each, which is how the database
+   * holds it, but one row per PARAMETER with every code that reaches it. A
+   * machine that sends HGB and another that sends HB are the same question
+   * asked twice, and the answer belongs in one place.
+   *
+   * A code the link maps to its own spelling is one the laboratory has taken
+   * out of use: the model would otherwise have claimed it, and this is how
+   * that claim is refused without editing the release.
+   */
+  const parameters = useMemo(() => {
+    const overrides = link?.analyteMap ?? {};
+    const byParameter = new Map<string, EditableName[]>();
+    const place = (parameter: string, name: EditableName) => {
+      const list = byParameter.get(parameter) ?? [];
+      list.push(name);
+      byParameter.set(parameter, list);
+    };
+    const overriddenKey = (code: string) =>
+      Object.keys(overrides).find(key => key.toUpperCase() === code.toUpperCase()) ?? null;
+
+    for (const [code, parameter] of Object.entries(profile?.analytes ?? {})) {
+      const own = overriddenKey(code);
+      if (own && overrides[own].toUpperCase() === code.toUpperCase()) {
+        place(parameter, { key: `out:${code}`, text: code, tone: 'out', note: parameter });
+      } else if (!own) {
+        place(parameter, { key: `builtin:${code}`, text: code, tone: 'builtin', note: parameter });
+      }
+    }
+    for (const [code, parameter] of Object.entries(overrides)) {
+      if (parameter.toUpperCase() === code.toUpperCase()) continue;   // taken out of use, above
+      place(parameter, { key: `added:${code}`, text: code, tone: 'added', note: parameter });
+    }
+    return [...byParameter.entries()]
+      .map(([parameter, names]) => ({ parameter, names }))
+      .sort((a, b) => a.parameter.localeCompare(b.parameter));
+  }, [link, profile]);
+
+  /** Write a changed map, leaving the connection exactly where it was. */
+  async function write(next: Record<string, string>, note: string) {
     if (!link) return;
     setBusy('analyte'); onError(null);
     try {
-      const analyteMap: Record<string, string> = {};
-      for (const row of next) if (row.code.trim() && row.name.trim()) analyteMap[row.code.trim()] = row.name.trim();
-      await api(`/middleware/parameter-mappings/${link.id}`, { method: 'PUT', body: JSON.stringify({ analyteMap }) });
-      onNotice('Saved. The analyser was not disconnected.');
+      await api(`/middleware/parameter-mappings/${link.id}`, { method: 'PUT', body: JSON.stringify({ analyteMap: next }) });
+      onNotice(`${note} The analyser was not disconnected.`);
       await reload();
     } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
   }
 
+  const current = () => ({ ...(link?.analyteMap ?? {}) });
+  const dropKey = (map: Record<string, string>, code: string) => {
+    for (const key of Object.keys(map)) if (key.toUpperCase() === code.toUpperCase()) delete map[key];
+  };
+
+  async function editCode(name: EditableName, next: string) {
+    const map = current();
+    dropKey(map, name.text);
+    // The model still claims the old spelling, so it is taken out of use
+    // rather than simply forgotten.
+    if (name.key.startsWith('builtin:')) map[name.text] = name.text;
+    map[next] = name.note ?? '';
+    await write(map, `${name.text} is read as ${next}.`);
+  }
+
+  async function removeCode(name: EditableName) {
+    const map = current();
+    dropKey(map, name.text);
+    if (name.key.startsWith('builtin:')) map[name.text] = name.text;
+    await write(map, `${name.text} no longer means ${name.note}.`);
+  }
+
+  async function restoreCode(name: EditableName) {
+    const map = current();
+    dropKey(map, name.text);
+    await write(map, `${name.text} means ${name.note} again.`);
+  }
+
+  async function addCodes(parameter: string, values: string[]) {
+    const map = current();
+    for (const code of values) { dropKey(map, code); map[code] = parameter; }
+    await write(map, `${values.length} code(s) now mean ${parameter}.`);
+  }
+
   const unnamed = codes.filter(c => c.namedBy === 'none');
-  const known = profile ? Object.entries(profile.analytes) : [];
   const needle = search.trim().toUpperCase();
-  const shownKnown = needle ? known.filter(([code, name]) => `${code} ${name}`.toUpperCase().includes(needle)) : known;
+  const shown = needle
+    ? parameters.filter(row => `${row.parameter} ${row.names.map(n => n.text).join(' ')}`.toUpperCase().includes(needle))
+    : parameters;
 
   return (
     <>
       <Panel
         title="What this analyser calls each parameter"
-        subtitle="Read when a message arrives, before anything is matched to a control or a form."
+        subtitle="Read when a message arrives, before anything is matched to a control or a form. Press a code to change or remove it."
+        actions={link ? <Field label="Find" value={search} onValue={setSearch} placeholder="HGB, Neutrophils" /> : undefined}
       >
         <div className="mw-inset mw-grid">
           <ChooseLink links={links} value={linkId} onValue={setLinkId}
@@ -160,30 +344,38 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
         {!link ? <Note>Choose an analyser to see what its codes mean.</Note> : (
           <>
             {profile
-              ? <Note tone="ok">{profile.label} — {known.length} parameter(s) already understood without anything being added here.</Note>
-              : <Note tone="warn">No model is chosen for this link, so nothing is understood by default. Every code it sends has to be named below, or a model chosen under Connection Setup.</Note>}
+              ? <Note tone="ok">{profile.label} — {Object.keys(profile.analytes).length} codes understood before anything is added here.</Note>
+              : <Note tone="warn">No model is chosen for this link, so nothing is understood by default. Every code it sends has to be named here, or a model chosen under Connection Setup.</Note>}
 
-            {!rows.length ? <Note>Nothing has needed renaming on this analyser.</Note> : (
+            {!shown.length ? (
+              <Note>{needle ? 'No parameter matches.' : 'Nothing is mapped on this analyser yet. Add a parameter below.'}</Note>
+            ) : (
               <table className="data-table mw-table">
-                <thead><tr><th>The analyser sends</th><th /><th>SECHLIMS reads it as</th><th /></tr></thead>
+                <thead><tr><th style={{ width: '22%' }}>Parameter</th><th>The analyser sends</th></tr></thead>
                 <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={`${row.code}-${index}`}>
-                      <td><strong>{row.code}</strong></td>
-                      <td className="mw-sub"><ArrowRight size={12} /></td>
+                  {shown.map(row => (
+                    <tr key={row.parameter}>
                       <td>
-                        {canConfigure
-                          ? <Field label="" value={row.name}
-                              onValue={v => setRows(r => r.map((x, i) => (i === index ? { ...x, name: v } : x)))} />
-                          : row.name}
+                        <span className="pm-param">
+                          <strong>{row.parameter}</strong>
+                          <small>{(() => {
+                            const live = row.names.filter(n => n.tone !== 'out').length;
+                            return live === 1 ? '1 code' : `${live} codes`;
+                          })()}</small>
+                        </span>
                       </td>
-                      <td className="mw-row-actions">
-                        {canConfigure && (
-                          <button className="btn ghost" title="Remove this name"
-                            onClick={() => { const next = rows.filter((_, i) => i !== index); setRows(next); void save(next); }}>
-                            <Trash2 size={12} />
-                          </button>
-                        )}
+                      <td>
+                        <NameList
+                          canEdit={canConfigure}
+                          busy={busy === 'analyte'}
+                          names={row.names}
+                          onEdit={editCode}
+                          onRemove={removeCode}
+                          onRestore={restoreCode}
+                          onAdd={values => addCodes(row.parameter, values)}
+                          addLabel="Add codes"
+                          addHint="Separate several with commas. Each code the analyser sends will be read as this parameter."
+                        />
                       </td>
                     </tr>
                   ))}
@@ -193,15 +385,17 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
 
             {canConfigure && (
               <div className="mw-inset mw-grid">
-                <Field label="The analyser sends" value={draft.code} onValue={v => setDraft(d => ({ ...d, code: v }))} placeholder="WBC-C" />
-                <Field label="SECHLIMS reads it as" value={draft.name} onValue={v => setDraft(d => ({ ...d, name: v }))} placeholder="White cell count" />
+                <Field label="A parameter this analyser sends that is not listed" value={newParameter}
+                  onValue={setNewParameter} placeholder="Reticulocyte haemoglobin" wide />
                 <div className="mw-actions">
-                  <button className="btn ghost" disabled={busy === 'analyte' || !draft.code.trim() || !draft.name.trim()}
-                    onClick={() => { const next = [...rows, draft]; setRows(next); setDraft({ code: '', name: '' }); void save(next); }}>
-                    <Plus size={13} /> Add
-                  </button>
-                  <button className="btn" disabled={busy === 'analyte'} onClick={() => void save(rows)}>
-                    {busy === 'analyte' ? <Loader2 size={13} className="spin" /> : <Save size={13} />} Save the names
+                  <button className="btn ghost" disabled={!newParameter.trim()}
+                    onClick={() => {
+                      const parameter = newParameter.trim();
+                      setNewParameter('');
+                      setSearch(parameter);
+                      void addCodes(parameter, [parameter]);
+                    }}>
+                    <Plus size={13} /> Add the parameter
                   </button>
                 </div>
               </div>
@@ -218,7 +412,7 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
         >
           {!codes.length ? <Note>Nothing has arrived on this link yet.</Note> : (
             <table className="data-table mw-table">
-              <thead><tr><th>Code</th><th>Read as</th><th>Unit</th><th>Seen</th><th>Named by</th><th /></tr></thead>
+              <thead><tr><th>Code</th><th>Read as</th><th>Unit</th><th>Seen</th><th>Named by</th></tr></thead>
               <tbody>
                 {codes.map(entry => (
                   <tr key={entry.code}>
@@ -231,43 +425,16 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
                       {entry.namedBy === 'profile' && <span className="mw-chip t-ok">the model</span>}
                       {entry.namedBy === 'none' && <span className="mw-chip t-warn">nothing — its own spelling</span>}
                     </td>
-                    <td className="mw-row-actions">
-                      {canConfigure && entry.namedBy !== 'link' && (
-                        <button className="btn ghost" onClick={() => setDraft({ code: entry.code, name: entry.analyte })}>
-                          Name it
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Panel>
-      )}
-
-      {link && profile && (
-        <Panel
-          title="What this model already understands"
-          subtitle="Built in, and used wherever this link does not say otherwise."
-          actions={<Field label="Find" value={search} onValue={setSearch} placeholder="HGB, NEUT" />}
-        >
-          {!shownKnown.length ? <Note>No code matches.</Note> : (
-            <table className="data-table mw-table">
-              <thead><tr><th>The analyser sends</th><th>Read as</th><th>Overridden here</th></tr></thead>
-              <tbody>
-                {shownKnown.map(([code, name]) => {
-                  const override = rows.find(r => r.code.toUpperCase() === code.toUpperCase());
-                  return (
-                    <tr key={code}>
-                      <td><strong>{code}</strong></td>
-                      <td>{name}</td>
-                      <td>{override ? <span className="mw-chip t-info">{override.name}</span> : <span className="mw-sub">—</span>}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {unnamed.length > 0 && (
+            <Note tone="warn">
+              Find the parameter each of these belongs to in the table above and add the code to it, or add the
+              parameter if this analyser measures something the model does not list.
+            </Note>
           )}
         </Panel>
       )}
@@ -359,15 +526,72 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
     finally { setBusy(null); }
   }
 
-  /** Take a built-in name out of use, or put it back. */
-  async function withdraw(canonical: string, alias: string) {
-    setBusy(`w${alias}`); onError(null);
+  /**
+   * Change the characters of a name.
+   *
+   * A name this laboratory added is simply renamed. A BUILT-IN name cannot be
+   * rewritten in place — it lives in the release, not in this database — so it
+   * is withdrawn and the new spelling added, which is also the honest record
+   * of what happened: one word stopped being used and another started.
+   */
+  async function editName(name: EditableName, next: string) {
+    const [kind, id] = name.key.split(':');
+    setBusy(`n${name.key}`); onError(null);
     try {
-      await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify({ canonical, alias, withdraw: true }) });
-      onNotice(`“${alias}” is no longer read as ${canonical}.`);
+      if (kind === 'added') {
+        await api(`/result-filler/aliases/${id}`, { method: 'PUT', body: JSON.stringify({ alias: next }) });
+      } else {
+        await api('/result-filler/aliases', {
+          method: 'POST', body: JSON.stringify({ canonical: name.note, alias: name.text, withdraw: true }),
+        });
+        await api('/result-filler/aliases', {
+          method: 'POST', body: JSON.stringify({ canonical: name.note, alias: next }),
+        });
+      }
+      onNotice(`Now read as ${next}.`);
       await load();
     } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
+  }
+
+  /** Take a name out of use: delete one this laboratory added, withdraw a built-in. */
+  async function removeName(name: EditableName) {
+    const [kind, id] = name.key.split(':');
+    setBusy(`n${name.key}`); onError(null);
+    try {
+      if (kind === 'added') await api(`/result-filler/aliases/${id}`, { method: 'DELETE' });
+      else {
+        await api('/result-filler/aliases', {
+          method: 'POST', body: JSON.stringify({ canonical: name.note, alias: name.text, withdraw: true }),
+        });
+      }
+      onNotice(`\u201c${name.text}\u201d is no longer read as ${name.note}.`);
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  /**
+   * Several names at once, which is how a laboratory actually thinks of them.
+   *
+   * Each is offered on its own so one that is already spoken for does not take
+   * the others down with it, and the summary says exactly which went in.
+   */
+  async function addNames(canonical: string, values: string[]) {
+    setBusy(`n${canonical}`); onError(null);
+    const added: string[] = [];
+    const refused: string[] = [];
+    for (const alias of values) {
+      try {
+        await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify({ canonical, alias }) });
+        added.push(alias);
+      } catch { refused.push(alias); }
+    }
+    await load();
+    setBusy(null);
+    if (added.length && !refused.length) onNotice(`${added.length} name(s) added to ${canonical}.`);
+    else if (added.length) onNotice(`${added.join(', ')} added. ${refused.join(', ')} already mean something else.`);
+    else onError(`${refused.join(', ')} already mean something else, so nothing was added.`);
   }
 
   async function restore(row: AliasRow) {
@@ -461,44 +685,24 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
                 <tr key={entry.canonical}>
                   <td><strong>{entry.canonical}</strong></td>
                   <td>
-                    <ul className="mw-chips">
-                      {entry.aliases.map(alias => {
-                        const out = withdrawn.find(w => w.alias.toUpperCase() === alias.toUpperCase());
-                        if (out) {
-                          return (
-                            <li key={alias}>
-                              <span className="mw-chip t-warn"><s>{alias}</s></span>
-                              {mayEdit && (
-                                <button className="pq-link" disabled={busy === `w${out.id}`} onClick={() => void restore(out)}>
-                                  put back
-                                </button>
-                              )}
-                            </li>
-                          );
-                        }
-                        return (
-                          <li key={alias}>
-                            <span className="mw-chip">{alias}</span>
-                            {mayEdit && (
-                              <button className="pq-link" title={`Stop reading ${alias} as ${entry.canonical}`}
-                                disabled={busy === `w${alias}`} onClick={() => void withdraw(entry.canonical, alias)}>
-                                ×
-                              </button>
-                            )}
-                          </li>
-                        );
-                      })}
-                      {rows.filter(row => row.canonical === entry.canonical).map(row => (
-                        <li key={row.id}>
-                          <span className="mw-chip t-info">{row.alias}</span>
-                          {mayEdit && (
-                            <button className="pq-link" title="Remove this name" disabled={busy === `x${row.id}`}
-                              onClick={() => void remove(row)}>×</button>
-                          )}
-                        </li>
-                      ))}
-                      {!entry.aliases.length && !rows.some(row => row.canonical === entry.canonical) && <li className="mw-sub">its own name only</li>}
-                    </ul>
+                    <NameList
+                      canEdit={mayEdit}
+                      busy={Boolean(busy && busy.startsWith('n'))}
+                      names={[
+                        ...entry.aliases.map(alias => {
+                          const out = withdrawn.find(w => w.alias.toUpperCase() === alias.toUpperCase());
+                          return out
+                            ? { key: `out:${out.id}`, text: alias, tone: 'out' as const, note: entry.canonical }
+                            : { key: `builtin:${alias}`, text: alias, tone: 'builtin' as const, note: entry.canonical };
+                        }),
+                        ...rows.filter(row => row.canonical === entry.canonical)
+                          .map(row => ({ key: `added:${row.id}`, text: row.alias, tone: 'added' as const, note: entry.canonical })),
+                      ]}
+                      onEdit={editName}
+                      onRemove={removeName}
+                      onRestore={name => restore(withdrawn.find(w => `out:${w.id}` === name.key)!)}
+                      onAdd={values => addNames(entry.canonical, values)}
+                    />
                   </td>
                   <td>{entry.discipline}</td>
                 </tr>
