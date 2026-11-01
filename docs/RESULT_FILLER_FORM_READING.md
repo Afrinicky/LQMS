@@ -152,6 +152,30 @@ and one of them belongs to somebody else. A folder number against a laboratory
 number is two different kinds of number, which is a warning on the panel and
 nothing more.
 
+### A control run is filed against the control, not a sample
+
+A control run entry form is the same tool answering a different question, so it
+is an option on a form rather than a second extension: an adapter declares what
+it **fills from** — patient results, control runs, or either — and neither
+reaches the other.
+
+What identifies a control run is the lot the laboratory registered, which is why
+the lookup compares the transmission's lot number as well as its sample
+identifier, and only ever for a form that fills from control runs. An analyser
+transmits a control under its own name for the vial (`XbarM2`, `QC1`) with the
+lot in a field of its own; matching on the sample identifier alone finds
+nothing, and matching on the lot from a *patient* form would let a reagent lot
+printed on a result page reach a patient's results.
+
+SECHLIMS's own control run forms — the Quality Control module's and the bench's,
+which ship as `SECHLIMS-IQC` and `SECHLIMS-IQC-BENCH` — say what they are rather
+than being read: `data-rf-form="iqc-run"` marks the form,
+`data-rf-identifier="control"` holds the lot, and each result box carries
+`data-rf-analyte` with the parameter it belongs to. Reading a page by its
+captions is for the systems this extension does not own; where it does own one,
+being told beats guessing. Pages without those attributes are read exactly as
+before.
+
 ---
 
 ## 6. What is proved, and where

@@ -27,10 +27,11 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable } from './routeHelpers.js';
 
 import { bestLabel, mapRows } from '../services/iqcAnalyteMatching.js';
+import { mapFeedMessage, mapFeedMessages, messageIds } from '../services/iqcFeedMapping.js';
+import { IQC_MAX_BATCH_RUNS } from '../../shared/constants/iqc.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
 import { linksForControl } from '../services/controlAnalyser.js';
-import { feedMessageValues, messageFacts } from '../services/feedMessageValues.js';
 import { listTransmissions } from '../services/transmissionList.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
@@ -339,31 +340,23 @@ export function iqcAnalyserRoutes() {
     if (!material) return res.status(404).json({ error: 'IQC material not found' });
     const message = db.prepare('SELECT * FROM iqc_feed_messages WHERE id = ?').get(req.params.messageId) as any;
     if (!message) return res.status(404).json({ error: 'That message is no longer waiting.' });
+    res.json(mapFeedMessage(db, message, Number(material.id)));
+  });
 
-    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
-      .all(material.id) as any[];
-    // Read from the transmission itself, so a run already on the bench gets the
-    // benefit of every later improvement to the parser. See `feedMessageValues`.
-    const values = feedMessageValues(db, message);
-    const source = message.feed_id
-      ? db.prepare('SELECT analyte_map FROM iqc_instrument_feeds WHERE id = ?').get(message.feed_id) as any
-      : message.link_id
-        ? db.prepare('SELECT analyte_map FROM instrument_links WHERE id = ?').get(message.link_id) as any
-        : null;
-    const map = safeJson(source?.analyte_map) ?? {};
-
-    // Both the mapped name and the analyser's own mnemonic are offered to the
-    // matcher: a control whose parameter is called "HGB" and one whose
-    // parameter is called "Haemoglobin" are the same control to a bench, and
-    // only one of the two labels will match either of them.
-    const grid = values.map(v => [
-      bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], analytes), v.value,
-    ]);
-    res.json({
-      message: { ...message, parsed_values: values, ...messageFacts(db, message) },
-      materialId: material.id,
-      ...mapRows(grid, analytes),
-    });
+  /**
+   * Several transmissions, lined up against this control, in one answer.
+   *
+   * What recording a set of runs needs. The alternative is a request per
+   * transmission, which for a week of stored control runs is fifty round trips
+   * before the first box is filled.
+   */
+  router.get('/materials/:id/analyser/messages/map', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT id FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'IQC material not found' });
+    const ids = messageIds(req.query.ids, IQC_MAX_BATCH_RUNS);
+    if (!ids.length) return res.status(400).json({ error: 'Say which transmissions to read.' });
+    res.json({ mappings: mapFeedMessages(db, ids, Number(material.id)) });
   });
 
   /**

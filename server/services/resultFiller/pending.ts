@@ -52,6 +52,15 @@ export interface Transmission {
   readings: Reading[];
   /** How this transmission's identifier compares with the one on the form. */
   agreement: IdentifierAgreement;
+  /**
+   * WHICH of its identifiers agreed: the sample's, or the control lot's.
+   *
+   * A control run is filed against the control material, and an analyser
+   * transmits it under its own name for the vial — "XbarM2", "QC1" — with the
+   * lot in a field of its own. Both are on the record, so the answer has to say
+   * which one the form was recognised by.
+   */
+  matchedField: 'sample' | 'lot';
   /** The middleware's view of the same message, where it has one. */
   mwMessageId: number | null;
   mwStatus: string | null;
@@ -114,7 +123,7 @@ const SELECT = `SELECT m.id, m.link_id, m.received_at, m.sample_id, m.lot_number
     LEFT JOIN equipment_items e ON e.id = l.equipment_id
     LEFT JOIN mw_messages x ON x.instrument_message_id = m.id`;
 
-function hydrate(row: any, agreement: IdentifierAgreement): Transmission {
+function hydrate(row: any, agreement: IdentifierAgreement, matchedField: 'sample' | 'lot' = 'sample'): Transmission {
   return {
     id: Number(row.id),
     linkId: row.link_id == null ? null : Number(row.link_id),
@@ -130,6 +139,7 @@ function hydrate(row: any, agreement: IdentifierAgreement): Transmission {
     resultCount: Number(row.result_count ?? 0),
     readings: readingsOf(row),
     agreement,
+    matchedField,
     mwMessageId: row.mw_id == null ? null : Number(row.mw_id),
     mwStatus: row.mw_status ?? null,
     deliveries: Number(row.deliveries ?? 0),
@@ -148,6 +158,14 @@ export interface LookupOptions {
   /** 'patient', 'control' or 'any'. */
   messageKind: string;
   linkId?: number | null;
+  /**
+   * Also compare the transmission's CONTROL LOT, not only its sample identifier.
+   *
+   * Set for a control form, where what identifies the run is the lot the
+   * laboratory registered. Off for a patient form, so a reagent lot printed on
+   * a result page can never reach a patient's results.
+   */
+  matchLotNumber?: boolean;
 }
 
 /**
@@ -162,8 +180,13 @@ export function findTransmissions(db: DB, options: LookupOptions): Transmission[
   const wanted = String(options.identifier ?? '').trim();
   if (!wanted) return [];
 
-  const where: string[] = ['m.received_at >= ?', "COALESCE(m.sample_id, '') != ''"];
+  const where: string[] = ['m.received_at >= ?'];
   const args: any[] = [since(options.lookbackHours)];
+  // A control transmission may carry its lot and nothing else, so requiring a
+  // sample identifier would hide exactly the runs a control form is about.
+  where.push(options.matchLotNumber
+    ? "(COALESCE(m.sample_id, '') != '' OR COALESCE(m.lot_number, '') != '')"
+    : "COALESCE(m.sample_id, '') != ''");
   if (options.messageKind === 'patient' || options.messageKind === 'control') {
     where.push('m.kind = ?');
     args.push(options.messageKind);
@@ -175,22 +198,29 @@ export function findTransmissions(db: DB, options: LookupOptions): Transmission[
 
   const found: Transmission[] = [];
   for (const row of rows) {
-    const agreement = compareIdentifiers(wanted, row.sample_id, options.normaliser);
-    if (agreement === 'different') continue;
-    found.push(hydrate(row, agreement));
+    const bySample = compareIdentifiers(wanted, row.sample_id, options.normaliser);
+    if (bySample !== 'different') { found.push(hydrate(row, bySample, 'sample')); continue; }
+    if (!options.matchLotNumber) continue;
+    const byLot = compareIdentifiers(wanted, row.lot_number, options.normaliser);
+    if (byLot === 'different') continue;
+    found.push(hydrate(row, byLot, 'lot'));
   }
   return found;
 }
 
 /** Has this identifier ever been seen, window aside? Separates "unknown" from "stale". */
-export function seenOutsideWindow(db: DB, identifier: string, normaliser: IdentifierNormaliser): { at: string; sampleId: string } | null {
+export function seenOutsideWindow(db: DB, identifier: string, normaliser: IdentifierNormaliser, matchLotNumber = false): { at: string; sampleId: string } | null {
   const wanted = normaliseIdentifier(identifier, normaliser);
   if (!wanted) return null;
-  const rows = db.prepare(`SELECT sample_id, received_at FROM instrument_messages
-      WHERE COALESCE(sample_id, '') != '' ORDER BY received_at DESC, id DESC LIMIT ?`).all(SCAN_LIMIT) as any[];
+  const rows = db.prepare(`SELECT sample_id, lot_number, received_at FROM instrument_messages
+      WHERE COALESCE(sample_id, '') != '' OR COALESCE(lot_number, '') != ''
+      ORDER BY received_at DESC, id DESC LIMIT ?`).all(SCAN_LIMIT) as any[];
   for (const row of rows) {
     if (normaliseIdentifier(row.sample_id, normaliser) === wanted) {
       return { at: String(row.received_at), sampleId: String(row.sample_id) };
+    }
+    if (matchLotNumber && normaliseIdentifier(row.lot_number, normaliser) === wanted) {
+      return { at: String(row.received_at), sampleId: String(row.lot_number) };
     }
   }
   return null;
@@ -212,6 +242,17 @@ export function sameIdentifierShape(a: string, b: string): boolean {
   const shapeB = shape(b);
   if (!shapeA || !shapeB) return false;
   return shapeA === shapeB;
+}
+
+/**
+ * The identifier a transmission was recognised BY.
+ *
+ * For a patient sample that is the sample number. For a control run matched on
+ * its lot it is the lot — saying "XbarM2 verified" to somebody looking at a
+ * form that reads HC-2026-04 answers a question nobody asked.
+ */
+function identifierOf(transmission: Transmission): string {
+  return String((transmission.matchedField === 'lot' ? transmission.lotNumber : transmission.sampleId) ?? '');
 }
 
 export interface Verdict {
@@ -251,7 +292,7 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
 
   const matches = findTransmissions(db, options);
   if (!matches.length) {
-    const stale = seenOutsideWindow(db, formIdentifier, options.normaliser);
+    const stale = seenOutsideWindow(db, formIdentifier, options.normaliser, options.matchLotNumber === true);
     if (stale) {
       return {
         ...base, status: 'no_results',
@@ -268,7 +309,7 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
   // A partial match is a near miss, and more than one of them is a trap: two
   // different samples whose identifiers both end the same way.
   if (!agreed.length) {
-    const distinct = new Set(near.map(m => normaliseIdentifier(m.sampleId, options.normaliser)));
+    const distinct = new Set(near.map(m => normaliseIdentifier(identifierOf(m), options.normaliser)));
     if (distinct.size > 1) {
       return {
         ...base, status: 'ambiguous', transmissions: near.slice(0, 8),
@@ -278,15 +319,15 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
     const first = near[0];
     return {
       ...base, status: 'near_match', transmissions: near, agreement: 'partial',
-      recordIdentifier: first.sampleId,
-      summary: `The form says ${formIdentifier}; the analyser sent ${first.sampleId}. These are not identical — confirm they are the same sample before anything is filled.`,
+      recordIdentifier: identifierOf(first),
+      summary: `The form says ${formIdentifier}; the analyser sent ${identifierOf(first)}. These are not identical — confirm they are the same sample before anything is filled.`,
       warnings,
     };
   }
 
   const chosen = agreed[0];
   if (chosen.agreement === 'normalised') {
-    warnings.push(`Matched as the same identifier after ignoring spacing and punctuation: form ${formIdentifier}, analyser ${chosen.sampleId}.`);
+    warnings.push(`Matched as the same identifier after ignoring spacing and punctuation: form ${formIdentifier}, analyser ${identifierOf(chosen)}.`);
   }
 
   /*
@@ -310,7 +351,7 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
     if (agreement === 'different') {
       if (sameIdentifierShape(formPatient, sentPatient)) {
         return {
-          ...base, status: 'blocked', transmissions: [chosen], agreement: chosen.agreement, recordIdentifier: chosen.sampleId,
+          ...base, status: 'blocked', transmissions: [chosen], agreement: chosen.agreement, recordIdentifier: identifierOf(chosen),
           summary: `The sample matches, but the patient identifiers do not: this form says ${formPatient} and the transmission carries ${sentPatient}. They are numbers of the same kind, so one of them is a different patient. Nothing will be filled.`,
         };
       }
@@ -325,8 +366,8 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
   }
   if (!chosen.readings.length) {
     return {
-      ...base, status: 'no_results', transmissions: agreed, agreement: chosen.agreement, recordIdentifier: chosen.sampleId,
-      summary: `${chosen.sampleId} was received but no parameter could be read out of it, so there is nothing to fill.`,
+      ...base, status: 'no_results', transmissions: agreed, agreement: chosen.agreement, recordIdentifier: identifierOf(chosen),
+      summary: `${identifierOf(chosen)} was received but no parameter could be read out of it, so there is nothing to fill.`,
     };
   }
   if (chosen.mwStatus === 'invalid') {
@@ -335,16 +376,16 @@ export function verifyIdentifier(db: DB, options: LookupOptions & {
 
   if (chosen.priorFills > 0) {
     return {
-      ...base, status: 'already_entered', transmissions: agreed, agreement: chosen.agreement, recordIdentifier: chosen.sampleId,
+      ...base, status: 'already_entered', transmissions: agreed, agreement: chosen.agreement, recordIdentifier: identifierOf(chosen),
       warnings,
       summary: `These results were already filled into a form${chosen.lastFilledBy ? ` by ${chosen.lastFilledBy}` : ''}${chosen.lastFilledAt ? ` on ${String(chosen.lastFilledAt).slice(0, 16).replace('T', ' ')}` : ''}. Filling again is allowed, but confirm this is not a duplicate entry.`,
     };
   }
 
   return {
-    ...base, status: 'verified', transmissions: agreed, agreement: chosen.agreement, recordIdentifier: chosen.sampleId,
+    ...base, status: 'verified', transmissions: agreed, agreement: chosen.agreement, recordIdentifier: identifierOf(chosen),
     warnings,
-    summary: `${chosen.sampleId} verified against the transmission received ${String(chosen.receivedAt).slice(0, 16).replace('T', ' ')}${chosen.linkName ? ` from ${chosen.linkName}` : ''}. ${chosen.readings.length} parameter(s) available.`,
+    summary: `${identifierOf(chosen)} verified against the transmission received ${String(chosen.receivedAt).slice(0, 16).replace('T', ' ')}${chosen.linkName ? ` from ${chosen.linkName}` : ''}. ${chosen.readings.length} parameter(s) available.`,
   };
 }
 

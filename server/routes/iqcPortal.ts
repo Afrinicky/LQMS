@@ -45,8 +45,9 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
 import { linksForControl } from '../services/controlAnalyser.js';
-import { feedMessageValues, messageFacts } from '../services/feedMessageValues.js';
 import { listTransmissions } from '../services/transmissionList.js';
+import { parkControlRun, recordTransmission } from '../services/instrumentBridge/intake.js';
+import { mapFeedMessage, mapFeedMessages, messageIds } from '../services/iqcFeedMapping.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { mayActOnUnit, leadsAnyUnit } from '../services/unitLeadership.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
@@ -56,7 +57,7 @@ import {
   type IqcEntryMethod,
 } from '../../shared/constants/routineWork.js';
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
-import { IQC_RECORDING_BASES, lotExpired } from '../../shared/constants/iqc.js';
+import { IQC_RECORDING_BASES, lotExpired, IQC_MAX_BATCH_RUNS } from '../../shared/constants/iqc.js';
 import { effectiveTarget, withEffectiveTarget } from '../services/iqcTargets.js';
 import { chartStatistics } from '../services/iqcEvaluation.js';
 import {
@@ -1068,6 +1069,12 @@ export function iqcPortalRoutes() {
    * that speaks their transport, and that is the right place for RS-232 timing
    * and ASTM framing to live. What the LIMS owes is a stable place to put the
    * parsed result and a bench screen that acts on it.
+   *
+   * It is recorded the way every other transmission is: verbatim in
+   * `instrument_messages` first, then parked on the IQC bench and tied back to
+   * it. One intake for every road in, so a result posted here is visible to the
+   * Result Filler, the Message Explorer and every module that takes readings
+   * off an analyser — and not to Quality Control alone. See `intake.ts`.
    */
   router.post('/portal/feeds/:id/messages', numericOnly, (req, res) => {
     const db = getDb();
@@ -1077,31 +1084,23 @@ export function iqcPortalRoutes() {
     const sampleId = String(req.body?.sampleId ?? '').trim() || null;
     const values = Array.isArray(req.body?.values) ? req.body.values : [];
     const lot = req.body?.lotNumber ? String(req.body.lotNumber) : null;
+    const raw = String(req.body?.raw ?? '');
+    const runAt = req.body?.runAt ?? null;
 
-    // Which control is this? The lot number is the strongest signal, then the
-    // sample identifier the analyser used, then the patterns the feed declares.
-    let material: any = null;
-    if (lot) material = db.prepare('SELECT * FROM iqc_materials WHERE lot_number = ? AND is_active = 1').get(lot);
-    if (!material && sampleId) {
-      material = db.prepare('SELECT * FROM iqc_materials WHERE is_active = 1 AND (material_code = ? OR lot_number = ?)').get(sampleId, sampleId);
-    }
-    if (!material && sampleId) {
-      const patterns = safeJson(feed.control_id_patterns) as string[] | null;
-      if (Array.isArray(patterns) && patterns.some(p => sampleId.toLowerCase().includes(String(p).toLowerCase()))) {
-        material = db.prepare('SELECT * FROM iqc_materials WHERE feed_id = ? AND is_active = 1 ORDER BY id LIMIT 1').get(feed.id);
-      }
-    }
-
-    const result = db.prepare(`INSERT INTO iqc_feed_messages
-        (feed_id, raw_message, sample_id, lot_number, instrument_run_at, parsed_values, iqc_material_id, status, status_note)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(feed.id, req.body?.raw ?? null, sampleId, lot, req.body?.runAt ?? null,
-        JSON.stringify(values), material?.id ?? null,
-        material ? 'matched' : 'unmatched',
-        material ? null : 'No active control matched this lot or sample identifier. Match it by hand on the bench, or add the identifier to the feed\'s control patterns.');
+    const messageId = recordTransmission(db, {
+      peer: 'feed', raw, sampleId, lotNumber: lot, runAt, values, kind: 'control',
+    });
+    const parked = parkControlRun(db, {
+      instrumentMessageId: messageId, feedId: feed.id, raw, sampleId, lotNumber: lot, runAt, values,
+      equipmentId: feed.equipment_id ?? null,
+      controlPatterns: (safeJson(feed.control_id_patterns) as string[] | null) ?? null,
+    });
 
     db.prepare('UPDATE iqc_instrument_feeds SET last_message_at = CURRENT_TIMESTAMP, last_error = NULL WHERE id = ?').run(feed.id);
-    res.status(201).json({ id: result.lastInsertRowid, matched: Boolean(material), materialId: material?.id ?? null });
+    res.status(201).json({
+      id: parked.feedMessageId, instrumentMessageId: messageId,
+      matched: Boolean(parked.material), materialId: parked.material?.id ?? null,
+    });
   });
 
   /** Line an arriving message up against a control's analytes, for the bench to accept. */
@@ -1127,35 +1126,29 @@ export function iqcPortalRoutes() {
     }));
   });
 
+  /**
+   * Several transmissions against one control, in one answer.
+   *
+   * What recording a set of runs needs: the bench selects a week of stored
+   * control runs and the whole selection is read in one request rather than
+   * fifty. Declared before the single-message route so `map` is not read as an
+   * id.
+   */
+  router.get('/portal/feed-messages/mapping', (req, res) => {
+    const materialId = parseIntNullable(req.query.materialId);
+    if (!materialId) return res.status(400).json({ error: 'Say which control these runs belong to.' });
+    const ids = messageIds(req.query.ids, IQC_MAX_BATCH_RUNS);
+    if (!ids.length) return res.status(400).json({ error: 'Say which transmissions to read.' });
+    res.json({ mappings: mapFeedMessages(getDb(), ids, materialId) });
+  });
+
   router.get('/portal/feed-messages/:id/mapping', numericOnly, (req, res) => {
     const db = getDb();
     const message = db.prepare('SELECT * FROM iqc_feed_messages WHERE id = ?').get(req.params.id) as any;
     if (!message) return res.status(404).json({ error: 'Message not found' });
     const materialId = parseIntNullable(req.query.materialId) ?? message.iqc_material_id;
     if (!materialId) return res.status(400).json({ error: 'This message is not matched to a control yet. Choose which control it belongs to.' });
-
-    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as any[];
-    // Read from the transmission itself, so a run already on the bench gets the
-    // benefit of every later improvement to the parser. See `feedMessageValues`.
-    const values = feedMessageValues(db, message);
-    // The map that named these parameters. A message from a bridge link has no
-    // feed, and reading the feed table for it returned nothing — so every
-    // analyte came through under the analyser's own mnemonic and matched
-    // nothing on the control.
-    const source = message.feed_id
-      ? db.prepare('SELECT analyte_map FROM iqc_instrument_feeds WHERE id = ?').get(message.feed_id) as any
-      : message.link_id
-        ? db.prepare('SELECT analyte_map FROM instrument_links WHERE id = ?').get(message.link_id) as any
-        : null;
-    const map = (safeJson(source?.analyte_map) as Record<string, string> | null) ?? {};
-
-    // Both the mapped name and the analyser's own mnemonic, because a control
-    // may name its parameter either way and only one of the two will match.
-    const grid = values.map(v => [
-      bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], analytes), v.value,
-    ]);
-    const mapped = mapRows(grid, analytes);
-    res.json({ message: { ...message, parsed_values: values, ...messageFacts(db, message) }, materialId, ...mapped });
+    res.json(mapFeedMessage(db, message, Number(materialId)));
   });
 
   /**

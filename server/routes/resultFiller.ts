@@ -95,7 +95,11 @@ function candidatesFrom(body: any): IdentifierCandidate[] {
     const text = String(value ?? '').trim();
     if (!text) continue;
     if (out.some(candidate => candidate.value === text)) continue;
-    out.push({ kind: kind === 'qc_lot' ? 'sample' : kind, label: IDENTIFIER_KIND_LABELS[kind as keyof typeof IDENTIFIER_KIND_LABELS] ?? kind, value: text, source: 'adapter', confidence: 80 });
+    // `qc_lot` is what an adapter's configuration calls it; `control` is what a
+    // scan of a page calls it. They are the same identifier, and a control run
+    // is filed against it — so it is carried as itself rather than flattened
+    // into a sample number.
+    out.push({ kind: kind === 'qc_lot' ? 'control' : kind, label: IDENTIFIER_KIND_LABELS[kind as keyof typeof IDENTIFIER_KIND_LABELS] ?? kind, value: text, source: 'adapter', confidence: 80 });
   }
   return orderCandidates(out);
 }
@@ -113,12 +117,23 @@ function verifyCandidates(db: any, adapter: AdapterRow, candidates: IdentifierCa
   let fallback: { verdict: ReturnType<typeof verifyIdentifier>; candidate: IdentifierCandidate } | null = null;
   const patient = candidates.find(candidate => candidate.kind === 'patient')?.value ?? null;
 
+  /*
+   * When the control lot counts as an identifier.
+   *
+   * On a control form — an adapter that reads control transmissions — the lot
+   * the laboratory registered is what a run is filed against. On a patient form
+   * it is not: a "Lot No" printed there is the reagent's, and letting it match
+   * would be filling a patient's result from a control run.
+   */
+  const controlForm = adapter.message_kind === 'control' || adapter.message_kind === 'any';
+
   for (const candidate of candidates.slice(0, 8)) {
     const verdict = verifyIdentifier(db, {
       identifier: candidate.value,
       normaliser: adapter.normaliser as IdentifierNormaliser,
       lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
       messageKind: adapter.message_kind,
+      matchLotNumber: controlForm && (candidate.kind === 'control' || candidate.kind === 'sample'),
       // A patient identifier is corroboration, never the thing matched on, so
       // it is not held against itself.
       patientIdentifier: candidate.kind === 'patient' ? null : patient,
@@ -135,7 +150,7 @@ function verifyCandidates(db: any, adapter: AdapterRow, candidates: IdentifierCa
       verdict: verifyIdentifier(db, {
         identifier: '', normaliser: adapter.normaliser as IdentifierNormaliser,
         lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
-        messageKind: adapter.message_kind,
+        messageKind: adapter.message_kind, matchLotNumber: controlForm,
       }),
       candidate: null as IdentifierCandidate | null,
       tried,
@@ -145,7 +160,7 @@ function verifyCandidates(db: any, adapter: AdapterRow, candidates: IdentifierCa
     verdict: verifyIdentifier(db, {
       identifier: first.value, normaliser: adapter.normaliser as IdentifierNormaliser,
       lookbackHours: Number(adapter.lookback_hours) || DEFAULT_LOOKBACK_HOURS,
-      messageKind: adapter.message_kind,
+      messageKind: adapter.message_kind, matchLotNumber: controlForm,
     }),
     candidate: first,
     tried,

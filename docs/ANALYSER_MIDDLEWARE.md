@@ -55,6 +55,18 @@ Three design decisions shape everything else.
 arrived. `mw_messages` points at it. A message routed to four destinations,
 failed at two and replayed twice still has exactly one original.
 
+**One intake, whichever road it came in by.** A socket the bridge opened, a log
+it follows, a folder it sweeps, and a middleware or driver that posts parsed
+results to `POST /iqc/portal/feeds/:id/messages` all record the transmission the
+same way: verbatim in `instrument_messages` first, then — where it is a control
+run — parked on the IQC bench with `iqc_feed_messages.instrument_message_id`
+pointing back at it. The recording lives in
+`server/services/instrumentBridge/intake.ts` and is the only thing that writes
+either table. Before that, a control posted to a feed existed on the IQC bench
+and nowhere else, so the Result Filler could not see it, the Message Explorer
+did not list it, and no module but Quality Control could use it. Transmission
+*out* of SECHLIMS, to the LIS, is unchanged by any of this.
+
 **A delivery is the unit of reliability, not a message.** One row per
 (message, destination) with its own attempts, acknowledgement and outcome. That
 is what makes "the hospital system has it, the research database does not"

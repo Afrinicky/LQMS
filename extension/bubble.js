@@ -319,6 +319,32 @@
     }
   }
 
+  /**
+   * A page that says what it is, rather than being read.
+   *
+   * SECHLIMS's own forms carry `data-rf-identifier="sample|control|patient"` on
+   * the element holding the identifier, and `data-rf-analyte` on each result
+   * box. Reading a page is for the systems this extension does not own; where it
+   * does own one, guessing at captions is a worse answer than being told.
+   *
+   * Nothing else changes: a page without these attributes is read exactly as
+   * before, and a declared identifier is verified by SECHLIMS the same way as
+   * one that was read off a caption.
+   */
+  function identifiersFromDeclarations(found) {
+    for (const element of document.querySelectorAll('[data-rf-identifier]')) {
+      if (elements.host && elements.host.contains(element)) continue;
+      const declared = squash(element.getAttribute('data-rf-identifier')).toLowerCase();
+      const kind = ['sample', 'control', 'patient', 'request'].includes(declared) ? declared : 'other';
+      const value = squash(element.getAttribute('data-rf-value')) || textOf(element) || squash(element.textContent);
+      if (!value) continue;
+      addIdentifier(found, {
+        kind, value, source: 'declared', confidence: 100,
+        label: squash(element.getAttribute('data-rf-label')) || labelTextOf(element.previousElementSibling) || '',
+      });
+    }
+  }
+
   /** A box somebody types the sample number into, where the form has one. */
   function identifiersFromInputs(found) {
     for (const input of document.querySelectorAll('input, select')) {
@@ -365,12 +391,17 @@
 
   function detectIdentifiers() {
     const found = new Map();
-    // Labelled first, guessed last, so a guess never displaces a label.
+    // Declared first, then labelled, then guessed, so a guess never displaces a
+    // label and a label never displaces what the page states outright.
+    identifiersFromDeclarations(found);
     identifiersFromTables(found);
     identifiersFromCaptions(found);
     identifiersFromInputs(found);
     identifiersFromShape(found);
-    const rank = { sample: 0, request: 1, patient: 2, other: 3 };
+    // A control lot below the sample rules and above the patient's: on a control
+    // form it is the only identifier there is, and on a patient form a bare
+    // "Lot No" is the reagent's.
+    const rank = { sample: 0, request: 1, control: 2, patient: 3, other: 4 };
     return Array.from(found.values())
       .sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9) || b.confidence - a.confidence)
       .slice(0, 24);
@@ -445,7 +476,13 @@
     const controls = Array.from(document.querySelectorAll(FILLABLE)).filter(isFillable);
 
     for (const control of controls) {
-      const { label, row, cells } = labelForControl(control);
+      const read = labelForControl(control);
+      // What the page calls the parameter, where it says so. A result grid laid
+      // out in cards gives its boxes no cell to read a name out of, and the
+      // name is the one thing a fill cannot get wrong.
+      const declared = squash(control.getAttribute('data-rf-analyte'));
+      const { row, cells } = read;
+      const label = declared || read.label;
       if (!label) continue;
       // A box whose label names an identifier is not a result box.
       if (identifierKindOf(label)) continue;
@@ -1012,6 +1049,7 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
   function primaryIdentifier() {
     return state.scan.identifiers.find(i => i.kind === 'sample')
       ?? state.scan.identifiers.find(i => i.kind === 'request')
+      ?? state.scan.identifiers.find(i => i.kind === 'control')
       ?? state.scan.identifiers.find(i => i.kind === 'patient')
       ?? null;
   }
@@ -1321,7 +1359,7 @@ select.pick { width: 100%; font: inherit; font-size: 11.5px; padding: 5px 7px; b
           ? `No form is configured for this address, though the page offers ${state.scan.fields.length} result field(s)`
             + `${identifier ? ` and an identifier that reads ${identifier.value}` : ''}`
             + '. Add a form for it under Result Filler in SECHLIMS, or use Teach this form.'
-          : 'Open a patient\u2019s result form and the filler will read it.',
+          : 'Open a result or control entry form and the filler will read it.',
       };
       armRetry(false);
     }
