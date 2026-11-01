@@ -25,6 +25,7 @@
     "audit:dashboard": "node scripts/dashboard-perf-check.mjs",
     "check:accounts": "node scripts/account-check.mjs",
     "check:iqc": "node scripts/iqc-check.mjs",
+    "check:iqc-bulk": "node scripts/iqc-bulk-check.mjs",
     "check:iqc-targets": "node scripts/iqc-targets-check.mjs",
     "check:iqc-retained": "node scripts/iqc-retained-check.mjs",
     "check:iqc-analyser": "node scripts/iqc-analyser-check.mjs",

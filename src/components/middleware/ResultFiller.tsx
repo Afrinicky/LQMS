@@ -29,6 +29,20 @@ import { Facts, Field, Note, Panel, Pick, Switch, when, type SectionProps } from
 const TABS = ['Install', 'Browsers', 'Forms', 'Field mappings', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
+/**
+ * Which transmissions a form may be filled from.
+ *
+ * Patient results and control runs are both on the record and are never
+ * interchangeable: a form configured for one is never offered the other, which
+ * is what lets the same extension fill a patient's result page and a control
+ * run entry form without either reaching the wrong one.
+ */
+const MESSAGE_KIND_LABELS: Record<string, string> = {
+  patient: 'Patient results',
+  control: 'Control runs',
+  any: 'Either',
+};
+
 type Adapter = {
   id: number; adapterCode: string; name: string; platform: string; description: string | null;
   urlPattern: string; urlMatchMode: string; formSelector: string | null;
@@ -401,7 +415,7 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
         {!adapters.length ? <Note>No form has been configured yet.</Note> : (
           <table className="data-table mw-table">
             <thead>
-              <tr><th>Form</th><th>Pages</th><th>Read by</th><th>Overwrite</th><th className="num">Fields</th><th>State</th><th /></tr>
+              <tr><th>Form</th><th>Pages</th><th>Read by</th><th>Fills from</th><th>Overwrite</th><th className="num">Fields</th><th>State</th><th /></tr>
             </thead>
             <tbody>
               {adapters.map(adapter => (
@@ -417,6 +431,11 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
                       : adapter.identifiers?.[0]?.selector || <span className="t-warn">no identifier set</span>}
                     <span className="mw-sub">{adapter.normaliser} · {adapter.lookbackHours}h window</span>
                   </td>
+                  {/* Which transmissions a form may be filled from. A control
+                      run entry form fills from control runs and a patient
+                      result form from patient results; neither reaches the
+                      other, and the register says which is which. */}
+                  <td><span className={`mw-chip t-${adapter.messageKind === 'control' ? 'info' : 'idle'}`}>{MESSAGE_KIND_LABELS[adapter.messageKind] ?? adapter.messageKind}</span></td>
                   <td>{reference?.overwritePolicies.find(p => p.key === adapter.overwritePolicy)?.label.split('—')[0] ?? adapter.overwritePolicy}</td>
                   <td className="num">{adapter.autoDetect ? `${adapter.fieldCount ?? 0} + detected` : adapter.fieldCount ?? 0}</td>
                   <td><span className={`mw-chip t-${adapter.isActive ? 'ok' : 'idle'}`}>{adapter.isActive ? 'Active' : 'Off'}</span></td>
@@ -459,8 +478,9 @@ function Forms({ adapters, reference, mayEdit, mayRemove, busy, setBusy, onError
             )}
 
             <Pick label="Identifiers match when" value={editing.normaliser} onValue={v => set({ normaliser: v })} options={reference?.normalisers ?? []} />
-            <Pick label="Transmissions" value={editing.messageKind} onValue={v => set({ messageKind: v })}
-              options={[{ key: 'patient', label: 'Patient results' }, { key: 'control', label: 'Control runs' }, { key: 'any', label: 'Either' }]} />
+            <Pick label="Fills from" value={editing.messageKind} onValue={v => set({ messageKind: v })}
+              options={Object.entries(MESSAGE_KIND_LABELS).map(([key, label]) => ({ key, label }))}
+              hint="A control run entry form fills from control runs, matched on the control lot. A patient result form fills from patient results only." />
             <Field label="Look back (hours)" type="number" value={String(editing.lookbackHours)} onValue={v => set({ lookbackHours: Number(v) || 72 })}
               hint="An identifier reused after this long is a different sample." />
             <Pick label="A box that already has a value" value={editing.overwritePolicy} onValue={v => set({ overwritePolicy: v })}

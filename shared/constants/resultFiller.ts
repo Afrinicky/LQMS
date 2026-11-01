@@ -388,7 +388,8 @@ export interface BuiltInAdapter {
 }
 
 /**
- * SECHLIMS's own control-run entry, and the LHIMS patient result page.
+ * SECHLIMS's own control-run entry — in the module and on the bench — and the
+ * LHIMS patient result page.
  *
  * The SECHLIMS adapter needs no field list: its entry grid labels every row
  * with the analyte, so the row strategy finds each box by the name the
@@ -429,19 +430,41 @@ export const BUILTIN_ADAPTERS: BuiltInAdapter[] = [
     adapterCode: 'SECHLIMS-IQC',
     name: 'SECHLIMS — control run entry',
     platform: 'sechlims',
-    description: 'The Internal Quality Control run form. Every analyte row is filled from the control transmission that matches the sample identifier.',
+    description:
+      'The Quality Control module\u2019s run form. The control is identified by the lot the laboratory '
+      + 'registered, which the form states outright, and every parameter row is filled from the control '
+      + 'transmission that carries it.',
     urlPattern: '*/iqc*',
     urlMatchMode: 'glob',
-    formSelector: 'table.iqc-entry',
-    identifiers: [{ kind: 'sample', selectorKind: 'css', selector: 'input[data-rf-sample], input[name="sampleId"]', primary: true }],
+    formSelector: '[data-rf-form="iqc-run"]',
+    identifiers: [{ kind: 'qc_lot', selectorKind: 'css', selector: '[data-rf-identifier="control"]', primary: true }],
     normaliser: 'alnum',
     overwritePolicy: 'confirm',
-    lookbackHours: 72,
+    lookbackHours: 24 * 14,
     messageKind: 'control',
     autoDetect: true,
     fields: [],
     isActive: true,
-    notes: 'Rows are matched on the analyte name in the first column, so a control that gains a parameter needs no change here.',
+    notes: 'Rows carry the parameter they belong to, so a control that gains a parameter needs no change here.',
+  },
+  {
+    adapterCode: 'SECHLIMS-IQC-BENCH',
+    name: 'SECHLIMS — control run entry, on the bench',
+    platform: 'sechlims',
+    description:
+      'The same control run form as the bench reaches it, from the unit\u2019s quality control board in the '
+      + 'staff portal. Separate from the module\u2019s only because it is at a different address.',
+    urlPattern: '*my-portal*',
+    urlMatchMode: 'glob',
+    formSelector: '[data-rf-form="iqc-run"]',
+    identifiers: [{ kind: 'qc_lot', selectorKind: 'css', selector: '[data-rf-identifier="control"]', primary: true }],
+    normaliser: 'alnum',
+    overwritePolicy: 'confirm',
+    lookbackHours: 24 * 14,
+    messageKind: 'control',
+    autoDetect: true,
+    fields: [],
+    isActive: true,
   },
   {
     adapterCode: 'SECHLIMS-EQA',

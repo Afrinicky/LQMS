@@ -25,8 +25,10 @@ import {
   CONTINUITY_TOLERANCE_KINDS, CONTINUITY_TOLERANCE_KIND_LABELS, DEFAULT_CONTINUITY_TOLERANCE,
   IQC_RUN_KINDS, IQC_RUN_KIND_LABELS, RETAINED_SOURCE_LABELS,
   IQC_RECORDING_BASES, IQC_RECORDING_BASIS_LABELS, IQC_RECORDING_BASIS_CHIPS, lotExpired, runStampFrom,
+  IQC_ENTRY_SCOPES, IQC_ENTRY_SCOPE_LABELS, IQC_ENTRY_SCOPE_HINTS, IQC_MAX_BATCH_RUNS,
   effectiveTolerance, formatTolerance,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome, type IqcRunKind,
+  type IqcEntryScope,
 } from '../../shared/constants/iqc';
 import { LINK_STATE_LABELS } from '../../shared/constants/instruments';
 import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
@@ -38,6 +40,10 @@ import LiveTransmission from '../components/instruments/LiveTransmission';
 import TransmissionsDialog from '../components/instruments/TransmissionsDialog';
 import TransmissionPreview from '../components/instruments/TransmissionPreview';
 import DefineControlForm from '../components/iqc/DefineControlForm';
+import BulkRunQueue, {
+  BulkRunOutcome, blankQueuedRun, filledCount, queuedFromMapping,
+  type BulkOutcome, type QueueMapping, type QueuedRun,
+} from '../components/iqc/BulkRunQueue';
 
 /* ============================================================================
    IQC — internal quality control.
@@ -907,6 +913,8 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
 }) {
   const { can } = usePermissions();
   const [runKind, setRunKind] = useState<IqcRunKind>('control');
+  /** One run, or a set of them. */
+  const [scope, setScope] = useState<IqcEntryScope>('single');
   const [unitId, setUnitId] = useState<string>(mySectionId != null ? String(mySectionId) : '');
   const [materialId, setMaterialId] = useState('');
   const [analytes, setAnalytes] = useState<Analyte[]>([]);
@@ -914,6 +922,12 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   const [meta, setMeta] = useState({ runDate: new Date().toISOString().slice(0, 10), runTime: '', shift: '', equipmentId: '', reagentLot: '', operatorStaffId: '', comment: '', observedOrganism: '' });
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
+
+  /* A set of runs: what is queued, where it is being selected from, and what
+     the set came to once recorded. */
+  const [queue, setQueue] = useState<QueuedRun[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
 
   // What the analyser is offering for this control, and what the last thing
   // brought in from it lined up against.
@@ -936,6 +950,14 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   const material = materials.find(m => String(m.id) === materialId);
   const sample = samples.find(s => String(s.id) === sampleId);
   const retained = runKind === 'retained_sample';
+  /**
+   * A set of runs rather than one.
+   *
+   * Only of the control material: a re-read is judged against what one
+   * particular sample gave the first time, so a set of them is a set of
+   * different comparisons and not a batch of anything.
+   */
+  const batch = scope === 'batch' && !retained;
   const isCs = material?.control_type === 'culture_sensitivity';
   const categorical = material?.control_type === 'qualitative' || isCs;
   // The instruments offered narrow to the unit, so a haematology bench is not
@@ -952,6 +974,9 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   useEffect(() => {
     setOutcome(null); setValues({}); setSampleId(''); setEnrolling(false); setSamples([]);
     setAnalyser(null); setMapping(null); setLinkId('');
+    // A queue belongs to the control it was selected for. Carrying it onto
+    // another control would file one control's runs against another.
+    setQueue([]); setBulkOutcome(null);
     if (!materialId) { setAnalytes([]); return; }
     api<Analyte[]>(`/iqc/materials/${materialId}/analytes`)
       .then(rows => setAnalytes(rows.filter(a => a.is_active)))
@@ -982,9 +1007,85 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   /** What the chosen sample originally gave for one analyte. */
   const originalFor = (analyteId: number) => sample?.values.find(v => v.iqc_analyte_id === analyteId);
 
+  /** One run's boxes, as the host takes readings. */
+  const readingsFrom = useCallback((entered: Record<number, string>) => analytes
+    .map(a => {
+      const raw = entered[a.id];
+      if (raw === undefined || String(raw).trim() === '') return null;
+      if (isCs) return { analyteId: a.id, interpretation: raw };
+      return material?.control_type === 'qualitative'
+        ? { analyteId: a.id, qualitativeResult: raw }
+        : { analyteId: a.id, value: Number(raw) };
+    })
+    .filter(Boolean), [analytes, isCs, material]);
+
+  /**
+   * The transmissions the bench selected, each queued as a run of its own.
+   *
+   * Read in one request rather than one per transmission: a week of stored
+   * control runs is fifty round trips otherwise, before a single box is filled.
+   */
+  const queueTransmissions = useCallback(async (ids: number[]) => {
+    if (!materialId || ids.length === 0) return;
+    setBusy(true);
+    try {
+      const answer = await api<{ mappings: QueueMapping[] }>(
+        `/iqc/materials/${materialId}/analyser/messages/map?ids=${ids.join(',')}`);
+      const today = new Date().toISOString().slice(0, 10);
+      setQueue(held => {
+        const seen = new Set(held.map(run => run.feedMessageId).filter(Boolean));
+        const added = (answer.mappings ?? [])
+          .map(mapping => queuedFromMapping(mapping, today))
+          // The same transmission twice is the same run twice, and a repeated
+          // point on a Levey-Jennings chart is a reading that never happened.
+          .filter(run => !run.feedMessageId || !seen.has(run.feedMessageId));
+        return [...held, ...added].slice(0, IQC_MAX_BATCH_RUNS);
+      });
+    } catch (err) { onError(errorText(err)); }
+    finally { setBusy(false); }
+  }, [materialId, onError]);
+
+  /** Record every queued run, each judged on its own date and readings. */
+  async function recordQueue() {
+    if (!material) return onError('Choose which control you are running.');
+    const runs = queue
+      .map(run => ({
+        runDate: run.runDate,
+        runTime: run.runTime || undefined,
+        feedMessageId: run.feedMessageId ?? undefined,
+        readings: readingsFrom(run.values),
+      }))
+      .filter(run => run.readings.length > 0);
+    if (runs.length === 0) return onError('None of the queued runs carries a reading.');
+
+    setBusy(true);
+    try {
+      const r = await api<BulkOutcome>('/iqc/runs/batch', {
+        method: 'POST',
+        body: JSON.stringify({
+          iqcMaterialId: Number(materialId),
+          sectionId: unitId || undefined,
+          equipmentId: meta.equipmentId || undefined,
+          operatorStaffId: meta.operatorStaffId || undefined,
+          shift: meta.shift || undefined,
+          reagentLot: meta.reagentLot || undefined,
+          comment: meta.comment || undefined,
+          runs,
+        }),
+      });
+      setBulkOutcome(r);
+      setQueue([]);
+      await onRecorded(r.rejected > 0
+        ? `${r.recorded} run(s) recorded — ${r.rejected} REJECTED. Patient results are withheld for those until they are investigated.`
+        : `${r.recorded} run(s) recorded${r.warned > 0 ? ` — ${r.warned} with a warning` : ''}.`);
+    } catch (err) { onError(errorText(err)); }
+    finally { setBusy(false); }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!material) return onError('Choose which control you are running.');
+    if (batch) return recordQueue();
     if (retained && !sample) return onError('Choose the previously run sample you are re-reading.');
 
     const readings = analytes
@@ -1034,6 +1135,7 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   }
 
   const ready = Boolean(material) && (retained ? Boolean(sample) : (analytes.length > 0 || isCs));
+  const queued = queue.filter(run => filledCount(run, analytes) > 0).length;
 
   return (
     <>
@@ -1073,7 +1175,7 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
         <div className="iqc-choice">
           {IQC_RUN_KINDS.map(k => (
             <button key={k} type="button" className={runKind === k ? 'active' : ''}
-              onClick={() => { setRunKind(k); setOutcome(null); }}>
+              onClick={() => { setRunKind(k); setOutcome(null); if (k === 'retained_sample') setScope('single'); }}>
               <strong>{IQC_RUN_KIND_LABELS[k]}</strong>
               <span>
                 {k === 'control'
@@ -1083,6 +1185,22 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
             </button>
           ))}
         </div>
+
+        {/* One run, or a set of them. A re-read is judged against what one
+            particular sample gave the first time, so the choice belongs to the
+            control material and is not offered beside it. */}
+        {!retained && (
+          <div className="iqc-scope">
+            {IQC_ENTRY_SCOPES.map(s => (
+              <button key={s} type="button" className={scope === s ? 'is-on' : ''}
+                onClick={() => { setScope(s); setOutcome(null); setBulkOutcome(null); }}
+                title={IQC_ENTRY_SCOPE_HINTS[s]}>
+                {IQC_ENTRY_SCOPE_LABELS[s]}
+              </button>
+            ))}
+            <span className="muted">{IQC_ENTRY_SCOPE_HINTS[scope]}</span>
+          </div>
+        )}
       </fieldset>
 
       {/* 2 — which control, and whose bench */}
@@ -1140,10 +1258,17 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
       {/* 3 — when, where and who */}
       {ready && (
         <fieldset className="iqc-step">
-          <legend><span className="step-n">3</span> When, and on what?</legend>
+          <legend><span className="step-n">3</span> {batch ? 'On what, and who by?' : 'When, and on what?'}</legend>
           <div className="form-grid">
-            <label>Run date<input type="date" value={meta.runDate} max={new Date().toISOString().slice(0, 10)} onChange={e => setMeta(m => ({ ...m, runDate: e.target.value }))} required /></label>
-            <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
+            {/* In a set, every run carries its own date and time — they are
+                what the runs differ by, and one date over the set would put a
+                fortnight of readings on one point of the chart. */}
+            {!batch && (
+              <label>Run date<input type="date" value={meta.runDate} max={new Date().toISOString().slice(0, 10)} onChange={e => setMeta(m => ({ ...m, runDate: e.target.value }))} required /></label>
+            )}
+            {!batch && (
+              <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
+            )}
             <label>Shift<select value={meta.shift} onChange={e => setMeta(m => ({ ...m, shift: e.target.value }))}><option value="">—</option><option>Morning</option><option>Afternoon</option><option>Night</option></select></label>
             <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">— None (manual method) —</option>{instruments.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
             <label>Reagent lot<TextField value={meta.reagentLot} onValue={nextValue => setMeta(m => ({ ...m, reagentLot: nextValue }))} /></label>
@@ -1152,8 +1277,31 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
         </fieldset>
       )}
 
+      {/* 4b — a set of runs, each on its own date */}
+      {ready && batch && material && (
+        <fieldset className="iqc-step">
+          <legend><span className="step-n">4</span> The runs</legend>
+          <div className="iqc-queue-acts">
+            <button type="button" disabled={busy || queue.length >= IQC_MAX_BATCH_RUNS}
+              onClick={() => setPicking(true)}>
+              <Radio size={13} /> Select transmissions
+            </button>
+            <button type="button" className="secondary" disabled={busy || queue.length >= IQC_MAX_BATCH_RUNS}
+              onClick={() => setQueue(held => [...held, blankQueuedRun(meta.runDate, meta.runTime)])}>
+              <Plus size={13} /> Add a run
+            </button>
+          </div>
+          <BulkRunQueue
+            analytes={analytes} controlType={material.control_type} controlName={material.material_name}
+            runs={queue} onChange={setQueue} max={IQC_MAX_BATCH_RUNS} busy={busy} />
+          <label className="stack">Comment, on every run in this set
+            <TextField as="textarea" value={meta.comment} onValue={nextValue => setMeta(m => ({ ...m, comment: nextValue }))} rows={2} />
+          </label>
+        </fieldset>
+      )}
+
       {/* 4 — the readings */}
-      {ready && (
+      {ready && !batch && (
         <fieldset className="iqc-step">
           <legend><span className="step-n">4</span> {retained ? 'What did it give this time?' : 'The readings'}</legend>
 
@@ -1194,8 +1342,21 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
               onError={onError} />
           )}
 
+          {/* What the Result Filler reads this form by.
+              The extension fills a form from a transmission SECHLIMS has
+              already recorded, and it refuses to fill anything it cannot
+              identify first. A control run is identified by the lot — so the
+              lot is stated here, once, rather than left for a scan of the page
+              to guess at. Nothing here sends, saves or accepts anything. */}
+          {material && !retained && (
+            <p className="iqc-rf-id">
+              <span>Control lot</span>
+              <strong data-rf-identifier="control" data-rf-label="Control lot">{material.lot_number}</strong>
+            </p>
+          )}
+
           {material && analytes.length > 0 && (
-            <table className="data-table compact iqc-entry">
+            <table className="data-table compact iqc-entry" data-rf-form="iqc-run">
               <thead><tr>
                 <th>{isCs ? 'Agent' : 'Analyte'}</th>
                 {retained
@@ -1235,7 +1396,7 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
                                   .map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
                               </select>
                             ) : (
-                              <input type="number" step="any" value={values[a.id] ?? ''}
+                              <input type="number" step="any" value={values[a.id] ?? ''} data-rf-analyte={a.analyte}
                                 onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} />
                             )}
                           </td>
@@ -1264,7 +1425,7 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
                         <>
                           <td className="muted">{a.target_mean ?? '—'}{a.target_sd ? ` ± ${a.target_sd}` : ''}</td>
                           <td className="muted">{a.acceptable_low ?? '—'} – {a.acceptable_high ?? '—'}</td>
-                          <td><input type="number" step="any" value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} /></td>
+                          <td><input type="number" step="any" value={values[a.id] ?? ''} data-rf-analyte={a.analyte} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} style={{ width: 120 }} /></td>
                         </>
                       )}
                     </tr>
@@ -1283,10 +1444,36 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
       )}
 
       <div className="form-actions">
-        <button type="submit" disabled={busy || !ready}>{busy ? 'Evaluating…' : retained ? 'Record re-read' : 'Record run'}</button>
+        <button type="submit" disabled={busy || !ready || (batch && queued === 0)}>
+          {busy ? 'Evaluating…'
+            : batch ? `Record ${queued || ''} run${queued === 1 ? '' : 's'}`
+            : retained ? 'Record re-read' : 'Record run'}
+        </button>
       </div>
 
       {outcome && <RunOutcomePanel outcome={outcome} retained={retained} />}
+      {bulkOutcome && <BulkRunOutcome outcome={bulkOutcome} rules={RULE_LABELS} />}
+
+      {/* Every transmission this analyser has sent, selectable: a week of
+          stored control runs is chosen once rather than opened one at a time. */}
+      {picking && material && (
+        <TransmissionsDialog
+          endpoint="/iqc/analyser/transmissions"
+          /* Deliberately not narrowed to this control: an analyser that puts no
+             lot number in its transmission leaves every run of it matched to
+             nothing, and hiding those would hide most of what the bench came
+             here for. Which control a run is recorded against is the one chosen
+             on the form, and the queue names any read as another. */
+          mapUrl={row => `/iqc/materials/${material.id}/analyser/messages/${row.id}/map`}
+          title={`Transmissions for ${material.material_name}`}
+          lead="Each transmission selected is recorded as a run of its own, on the date the analyser ran it."
+          selectLimit={IQC_MAX_BATCH_RUNS - queue.length}
+          onClose={() => setPicking(false)}
+          onUseMany={async rows => {
+            setPicking(false);
+            await queueTransmissions(rows.map(row => row.id));
+          }} />
+      )}
     </form>}
     </>
   );

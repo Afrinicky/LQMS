@@ -379,7 +379,7 @@ export function matchAnalyte(analyserCode: unknown, analyserName: unknown, field
    anything at all.
    ========================================================================= */
 export interface IdentifierLabelRule {
-  kind: 'sample' | 'patient' | 'request' | 'other';
+  kind: 'sample' | 'patient' | 'request' | 'control' | 'other';
   /** Matched against a cleaned, uppercased label. */
   patterns: RegExp[];
   /** Higher wins when a page offers several. */
@@ -395,6 +395,21 @@ export const IDENTIFIER_LABEL_RULES: IdentifierLabelRule[] = [
   // The patient. Corroboration only — never what a result is filed against.
   { kind: 'patient', weight: 60, patterns: [/^PATIENT\s*(ID|NO|NUMBER|CODE)$/, /^FOLDER\s*(NO|NUMBER|ID)?$/, /^MRN$/, /^HOSPITAL\s*(NO|NUMBER|ID)$/, /^MR\s*(NO|NUMBER)$/, /^OPD\s*(NO|NUMBER)$/] },
   { kind: 'patient', weight: 45, patterns: [/^NHI[AS]?\s*(NO|NUMBER)?$/, /^(HEALTH\s*)?INSURANCE\s*(NO|NUMBER)$/, /^MOH\s*(NO|NUMBER)$/, /^NATIONAL\s*ID$/] },
+  /*
+   * The control a run belongs to.
+   *
+   * A control run is filed against the control material, not against a patient:
+   * what identifies it is the lot the laboratory registered, or the name the
+   * analyser transmits it under. Named plainly — "Control lot", "QC lot" — it is
+   * unambiguous and weighted accordingly.
+   *
+   * A bare "Lot No" is not. On a patient's result form it is as likely to be
+   * the REAGENT lot, which identifies nothing about the sample, so it sits well
+   * below every sample rule and is only ever reached where nothing better was
+   * found. Trying it costs a lookup that comes back empty.
+   */
+  { kind: 'control', weight: 94, patterns: [/^CONTROL\s*(LOT|ID|NO|NUMBER|CODE|MATERIAL|NAME|LEVEL)?$/, /^QC\s*(LOT|ID|NO|NUMBER|CODE)?$/] },
+  { kind: 'control', weight: 40, patterns: [/^LOT\s*(NO|NUMBER|ID)?$/, /^MATERIAL\s*(LOT|CODE)$/] },
 ];
 
 /** What kind of identifier a label names, if any. */
@@ -442,7 +457,7 @@ export function looksLikeIdentifier(value: unknown): { kind: 'sample' | 'patient
    What the scanner hands back
    ========================================================================= */
 export interface DetectedIdentifier {
-  kind: 'sample' | 'patient' | 'request' | 'other';
+  kind: 'sample' | 'patient' | 'request' | 'control' | 'other';
   /** The words on the page that named it, or how it was recognised without one. */
   label: string;
   value: string;
