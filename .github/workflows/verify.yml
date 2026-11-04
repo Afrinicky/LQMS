@@ -167,6 +167,7 @@ jobs:
       # never merged. Reported every run so the gap cannot be forgotten; not a
       # gate, because no change to this branch can close it.
       - name: Operational qualification
+        id: oq
         continue-on-error: true
         run: npm run validate:oq
 
@@ -175,12 +176,54 @@ jobs:
       # pollution and ReDoS, with no fixed release). It is surfaced, not used to
       # block every unrelated change until a replacement is chosen.
       - name: Dependency audit (shipped code)
+        id: shipped_audit
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=critical
 
       - name: Dependency audit (full tree)
         if: always()
         run: npm audit || true
+
+      # Put the answer where somebody will see it.
+      #
+      # continue-on-error rewrites a failing step's CONCLUSION to success, so
+      # on the run's own page this job looked clean while the qualification was
+      # failing three cases underneath it. A job called "known outstanding"
+      # that reports nothing outstanding unless you open the logs is worse than
+      # no job at all, because it reads as an all-clear. `outcome` is the result
+      # BEFORE continue-on-error touched it, which is the thing worth printing.
+      - name: Say what is outstanding
+        if: always()
+        run: |
+          {
+            echo "## Known outstanding"
+            echo
+            echo "Neither of these blocks a push, and neither is a regression:"
+            echo "both are recorded as open items in \`docs/validation\`."
+            echo
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Operational qualification (against NSD-SRS-001) | ${{ steps.oq.outcome }} |"
+            echo "| Dependency audit, shipped code only | ${{ steps.shipped_audit.outcome }} |"
+            echo
+            if [ -f docs/validation/evidence/oq-results.json ]; then
+              node -e '
+                const r = require("./docs/validation/evidence/oq-results.json");
+                const t = r.tally || {};
+                console.log("Qualification tally: " +
+                  Object.entries(t).map(([k, v]) => `${v} ${k}`).join(", ") + ".");
+                const failed = (r.results || []).filter(x => x.outcome === "FAIL");
+                if (failed.length) {
+                  console.log("");
+                  console.log("Failing cases:");
+                  for (const f of failed) console.log(`- **${f.id}** ${f.title}`);
+                }
+              '
+            fi
+            echo
+            echo "Full output is in the step logs; the evidence files are attached"
+            echo "to this run as \`qualification-evidence\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain qualification evidence
         if: always()
