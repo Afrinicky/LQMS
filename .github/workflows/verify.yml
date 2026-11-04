@@ -144,6 +144,11 @@ jobs:
     timeout-minutes: 20
     # Never blocks a push. What it reports is real and is on the record in
     # docs/validation; none of it is a regression anybody introduced today.
+    #
+    # The flag is on the job AND on each step, which is not redundant: the job
+    # flag stops a failure here failing the run, but a failing step still ends
+    # the job, which skipped both audits the first time this ran. A job whose
+    # whole purpose is to report has to reach the end of its own list.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -162,6 +167,7 @@ jobs:
       # never merged. Reported every run so the gap cannot be forgotten; not a
       # gate, because no change to this branch can close it.
       - name: Operational qualification
+        continue-on-error: true
         run: npm run validate:oq
 
       # A critical advisory in code that actually ships is a real finding and is
@@ -169,9 +175,11 @@ jobs:
       # pollution and ReDoS, with no fixed release). It is surfaced, not used to
       # block every unrelated change until a replacement is chosen.
       - name: Dependency audit (shipped code)
+        continue-on-error: true
         run: npm audit --omit=dev --audit-level=critical
 
       - name: Dependency audit (full tree)
+        if: always()
         run: npm audit || true
 
       - name: Retain qualification evidence
