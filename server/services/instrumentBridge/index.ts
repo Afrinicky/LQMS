@@ -40,11 +40,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes, splitTransmissions,
-  type Framer, type AnalyserMessage,
+  decodeExport, detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes,
+  splitTransmissions, type Framer, type AnalyserMessage,
 } from './protocols.js';
 import {
-  LINK_CLOSE_AFTER_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
+  LINK_CLOSE_AFTER_MS, LINK_FOLDER_POLL_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
   classifyMessage, linkForwards, linkIsOurs, mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
 import {
@@ -52,6 +52,25 @@ import {
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
 import { alreadyRecorded, parkControlRun, recordTransmission } from './intake.js';
+import { diagnoseWatchPath } from './watchPath.js';
+import { convertValue } from '../../../shared/constants/units.js';
+
+/**
+ * Which unit this laboratory keeps a parameter in, if it has said.
+ *
+ * Looked up by the parameter's own name first and then by the analyser's code,
+ * so a laboratory can set it once for Reticulocytes rather than once for every
+ * mnemonic that reaches it. Nothing configured means nothing is rescaled.
+ */
+function unitWanted(map: Record<string, string>, analyte: string, code: string): string | null {
+  if (!map) return null;
+  for (const key of [analyte, code]) {
+    if (!key) continue;
+    const want = map[key] ?? map[String(key).toUpperCase()] ?? map[String(key).toLowerCase()];
+    if (want && String(want).trim()) return String(want).trim();
+  }
+  return null;
+}
 
 /* ============================================================================
    Where the client's log actually is
@@ -207,14 +226,14 @@ interface LinkRow {
   listen_host: string | null; listen_port: number | null;
   remote_host: string | null; remote_port: number | null;
   watch_path: string | null;
-  analyte_map: string | null; control_patterns: string | null;
+  analyte_map: string | null; unit_map: string | null; control_patterns: string | null;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
   close_after_message?: number;
   last_peer_mac?: string | null;
   peer_conflict?: string | null;
   forward_target: string | null;
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
-  lhims_map_key: string | null; measure_map: string | null;
+  lhims_map_key: string | null; measure_map: string | null; outbound_unit_map: string | null;
   tap_path: string | null; tap_offset: number | null;
   // Fetching, for the modes that can be asked rather than only pushed to.
   fetch_enabled: number; fetch_interval_seconds: number | null;
@@ -284,6 +303,10 @@ class Link {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private idleTimers = new Map<net.Socket, NodeJS.Timeout>();
   private watcher: fs.FSWatcher | null = null;
+  /** Only set when the folder could not be watched and must be polled instead. */
+  private folderPollTimer: NodeJS.Timeout | null = null;
+  /** Files seen but not yet settled, so a half-written one is never read. */
+  private settling = new Map<string, { size: number; mtimeMs: number; firstSeen: number }>();
   private tapTimer: NodeJS.Timeout | null = null;
   private tapOffset = 0;
   private tapCarry = '';
@@ -342,8 +365,10 @@ class Link {
       name: row.name,
       profile_key: row.profile_key,
       analyte_map: row.analyte_map,
+      unit_map: row.unit_map,
       control_patterns: row.control_patterns,
       measure_map: row.measure_map,
+      outbound_unit_map: row.outbound_unit_map,
       lhims_map_key: row.lhims_map_key,
       lhims_url: row.lhims_url,
       lhims_username: row.lhims_username,
@@ -685,22 +710,52 @@ class Link {
    */
   private startWatcher(): void {
     const dir = this.row.watch_path?.trim();
-    if (!dir || !fs.existsSync(dir)) {
-      this.setState('error', `The watched folder ${dir ?? '(not set)'} does not exist.`, 'Folder not found');
+    // Why it cannot be read matters more than that it cannot. A path typed off
+    // the analyser's own screen is the usual answer, and it is the one answer
+    // the old message ("does not exist") hid completely.
+    const verdict = diagnoseWatchPath(dir);
+    if (!verdict.ok) {
+      this.setState('error', verdict.fix ? `${verdict.note} ${verdict.fix}` : verdict.note, verdict.note);
       return;
     }
+
+    /*
+     * Watching is an optimisation; sweeping is the feature.
+     *
+     * A folder on another computer is reached over SMB, and SMB cannot always
+     * be watched — fs.watch throws or simply never fires, depending on the
+     * server. The old order treated that as fatal: the throw skipped the sweep
+     * entirely, so a link whose folder was perfectly readable reported an error
+     * and read nothing, for the whole life of the link. The sweep runs first
+     * now, and a folder that cannot be watched is polled rather than failed.
+     */
+    let watching = false;
     try {
-      this.watcher = fs.watch(dir, (_event, filename) => {
+      this.watcher = fs.watch(dir!, (_event, filename) => {
         if (!filename) return;
         // Give the analyser a moment to finish writing before reading it. The
         // sweep decides what is actually new, so a burst of events for one file
         // costs a directory listing rather than a duplicated result.
         setTimeout(() => { try { this.sweepFolder(); } catch { /* reported by the sweep */ } }, 750);
       });
+      watching = true;
+    } catch { /* polled instead, and said so below */ }
+
+    // Polling is not the scheduled fetch: that is a setting somebody has to
+    // have switched on, and a folder nobody can watch must not depend on it.
+    if (!watching) {
+      if (this.folderPollTimer) clearInterval(this.folderPollTimer);
+      this.folderPollTimer = setInterval(() => {
+        try { this.sweepFolder(); } catch { /* reported by the sweep */ }
+      }, LINK_FOLDER_POLL_MS);
+    }
+
+    try {
       const found = this.sweepFolder();
-      this.setState('listening', found
+      const how = watching ? '' : ` It cannot be watched for changes, so it is looked at every ${LINK_FOLDER_POLL_MS / 1000} seconds instead.`;
+      this.setState('listening', (found
         ? `Watching ${dir}. ${found} file(s) read on starting.`
-        : `Watching ${dir}`);
+        : `Watching ${dir}`) + how);
     } catch (error) {
       this.setState('error', (error as Error).message, (error as Error).message);
     }
@@ -756,9 +811,32 @@ class Link {
       } catch { continue; }
 
       // A file still being written to has its size change under us, and half a
-      // transmission parses as a shorter one rather than as an error. Anything
-      // touched in the last two seconds waits for the next sweep.
-      if (Date.now() - stat.mtimeMs < 2_000) continue;
+      // transmission parses as a shorter one rather than as an error, so a file
+      // has to be seen to have stopped changing before it is read.
+      //
+      // "Modified less than two seconds ago" was how that was judged, and it
+      // does not survive the folder being on another computer: the modification
+      // time comes from the ANALYSER's clock and the comparison from this
+      // host's. A few minutes of drift either way and every file reads as
+      // written in the future — age permanently negative, permanently "still
+      // being written", permanently skipped. A folder of results, a running
+      // link, no error, and nothing read.
+      //
+      // So a file is settled when WE have seen it twice, two seconds apart,
+      // unchanged. Both halves of that come from this host's own clock, and the
+      // analyser's can say what it likes.
+      const age = Date.now() - stat.mtimeMs;
+      if (age < 0 || age < 2_000) {
+        const before = this.settling.get(name);
+        if (before && before.size === stat.size && before.mtimeMs === stat.mtimeMs) {
+          if (Date.now() - before.firstSeen < 2_000) continue;
+          // Settled: it has not changed in the two seconds we watched it.
+        } else {
+          this.settling.set(name, { size: stat.size, mtimeMs: stat.mtimeMs, firstSeen: Date.now() });
+          continue;
+        }
+      }
+      this.settling.delete(name);
 
       const modified = new Date(stat.mtimeMs).toISOString();
       try {
@@ -775,7 +853,7 @@ class Link {
       // so a transmission matching one already stored is a re-read.
       this.rereading = true;
       try {
-        const text = fs.readFileSync(full, 'latin1');
+        const text = decodeExport(fs.readFileSync(full));
         if (text.trim()) {
           // One file may hold several transmissions, exactly as the tap's log
           // does, so it is split the same way rather than parsed as one.
@@ -1188,6 +1266,7 @@ class Link {
     }
 
     const linkMap = json<Record<string, string>>(this.row.analyte_map, {});
+    const unitMap = json<Record<string, string>>(this.row.unit_map, {});
     const patterns = json<string[]>(this.row.control_patterns, []);
     // Every control material this laboratory has registered, so a run named
     // only by its own lot is recognised without anybody configuring a pattern.
@@ -1201,13 +1280,41 @@ class Link {
     } as AnalyserMessage];
 
     for (const message of toStore) {
-      const values = message.results.map(result => ({
-        analyte: mapAnalyte(result.code, linkMap, this.row.profile_key),
-        code: result.code,
-        value: result.value,
-        unit: result.unit,
-        flag: result.flag,
-      }));
+      const values = message.results.map(result => {
+        const analyte = mapAnalyte(result.code, linkMap, this.row.profile_key);
+        /*
+         * The scale this laboratory keeps this parameter in.
+         *
+         * An analyser's transmitted unit need not be its displayed one, and a
+         * Sysmex proves it: RET# on the screen is 267.3 x10^9/L and on the
+         * wire is 0.2673 x10^6/uL. Recorded as it arrived, the bench reads a
+         * number that contradicts the analyser in front of them and quality
+         * control charts it against a target a thousandfold away.
+         *
+         * Where the laboratory has said which unit it keeps, and the arithmetic
+         * is certain, the reading is rescaled and both the original and the
+         * factor are kept beside it — a conversion nobody can audit is not
+         * better than no conversion. Where the arithmetic is NOT certain, the
+         * reading is left exactly as it came and carries the reason, because a
+         * plausible wrong number is the one outcome worth avoiding entirely.
+         */
+        const want = unitWanted(unitMap, analyte, result.code);
+        const outcome = want ? convertValue(result.value, result.unit, want) : null;
+        if (outcome?.ok && outcome.changed) {
+          return {
+            analyte, code: result.code,
+            value: String(outcome.value), unit: want, flag: result.flag,
+            originalValue: result.value, originalUnit: result.unit, unitFactor: outcome.factor,
+          };
+        }
+        return {
+          analyte, code: result.code,
+          value: result.value, unit: result.unit, flag: result.flag,
+          ...(outcome && !outcome.ok && result.unit
+            ? { unitNote: `Kept in ${result.unit}: ${outcome.note}` }
+            : {}),
+        };
+      });
 
       const verdict = classifyMessage({
         sampleId: message.sampleId,
@@ -1389,6 +1496,8 @@ class Link {
     this.idleTimers.clear();
     if (this.socket) { this.socket.destroy(); this.socket = null; }
     if (this.watcher) { this.watcher.close(); this.watcher = null; }
+    if (this.folderPollTimer) { clearInterval(this.folderPollTimer); this.folderPollTimer = null; }
+    this.settling.clear();
     if (this.server) { this.server.close(); this.server = null; }
     this.setState('stopped', 'Stopped');
   }
@@ -1651,7 +1760,7 @@ export class InstrumentBridge {
     try {
       pending = this.getDb().prepare(`SELECT m.*, l.forward_host, l.forward_port, l.forward_target,
             l.lhims_url, l.lhims_username, l.lhims_password, l.lhims_map_key, l.measure_map,
-            l.name AS link_name, l.role
+            l.outbound_unit_map, l.name AS link_name, l.role
           FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
           WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND l.role = 'shared_forward'
             AND m.forward_attempts < ?
@@ -1721,6 +1830,19 @@ export class InstrumentBridge {
     if (!values.length) return { status: 'not_required', note: 'Nothing in this message to deliver.' };
 
     const overrides = json<Record<string, number>>(message.measure_map, {});
+    /*
+     * The unit the RECEIVER keeps each parameter in.
+     *
+     * The scale SECHLIMS holds a result in need not be the scale LHIMS files
+     * it under, and delivering a number into a field that means something else
+     * by it is the same error as recording it wrongly — only now it is in
+     * somebody's patient record. Where the laboratory has said what the
+     * receiver expects and the arithmetic is certain, the number is rescaled
+     * for delivery. Where it is not certain, the result is NOT delivered: it
+     * is refused and named, exactly as an unmapped parameter is, because a
+     * silent delivery in the wrong scale is the one thing worse than a gap.
+     */
+    const outboundUnits = json<Record<string, string>>(message.outbound_unit_map, {});
     const credentials = { username: String(message.lhims_username), password: String(message.lhims_password ?? '') };
 
     let delivered = 0;
@@ -1731,8 +1853,18 @@ export class InstrumentBridge {
       const measureId = lhimsMeasureId(String(value.code ?? value.analyte ?? ''), overrides, message.lhims_map_key);
       if (!measureId) { unmapped.push(String(value.code ?? value.analyte ?? '?')); continue; }
 
-      const raw = String(value.value ?? '').trim();
+      let raw = String(value.value ?? '').trim();
       if (!raw) continue;
+
+      const wanted = unitWanted(outboundUnits, String(value.analyte ?? ''), String(value.code ?? ''));
+      if (wanted && String(value.unit ?? '').trim()) {
+        const outcome = convertValue(raw, value.unit, wanted);
+        if (!outcome.ok) {
+          refused.push(`${value.code ?? value.analyte}: ${outcome.note}`);
+          continue;
+        }
+        if (outcome.changed) raw = String(outcome.value);
+      }
       // How many decimal places the analyser reported, so LHIMS stores the
       // number as it was measured rather than rounded.
       const decimals = raw.includes('.') ? Math.min(4, raw.split('.')[1].length) : 0;

@@ -6979,6 +6979,23 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       ['lhims_password', 'lhims_password TEXT'],
       ['lhims_map_key', 'lhims_map_key TEXT'],
       ['measure_map', 'measure_map TEXT'],
+      // JSON: parameter name -> the unit SECHLIMS holds that parameter in.
+      //
+      // An analyser's transmitted unit is not always its displayed one. A
+      // Sysmex XN shows RET# as 267.3 x10^9/L and sends 0.2673 x10^6/uL: the
+      // same concentration, two scales. Recording whatever arrived left the
+      // bench reading a number that did not match the analyser in front of
+      // them, and left a control reading in one scale being charted against a
+      // target in another. This says which scale this laboratory keeps, per
+      // parameter, and the bridge rescales to it on the way in.
+      ['unit_map', 'unit_map TEXT'],
+      // JSON: parameter name -> the unit the RECEIVER keeps it in. The scale
+      // SECHLIMS holds a result in need not be the scale LHIMS files it under,
+      // and a number delivered into a field that means something else by it is
+      // a wrong result in somebody's record. Where this says what the receiver
+      // expects, the delivery is rescaled; where the arithmetic is not certain
+      // the result is withheld and named rather than sent on a guess.
+      ['outbound_unit_map', 'outbound_unit_map TEXT'],
       ['tap_path', 'tap_path TEXT'],
       ['tap_offset', 'tap_offset INTEGER NOT NULL DEFAULT 0'],
     ];

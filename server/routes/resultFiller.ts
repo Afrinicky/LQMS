@@ -732,7 +732,16 @@ export function resultFillerRoutes() {
 
     if (!canonical || !alias) return res.status(400).json({ error: 'Give both the parameter and the other name for it.' });
     if (analyteKey(canonical) === analyteKey(alias)) {
-      return res.status(400).json({ error: 'That is the same name written twice.' });
+      /*
+       * Somebody mapping RET# to RET# is not making a mistake — they are
+       * checking that the analyser's code reaches the right parameter, and the
+       * honest answer is that it already does. "The same name written twice"
+       * is true and tells them nothing, so it says what they wanted to know.
+       */
+      return res.status(400).json({
+        error: `“${alias}” is already the parameter’s own name, so it is understood with nothing added here. `
+          + 'A name is only needed when the analyser calls it something different.',
+      });
     }
     // Already spoken for — either by the dictionary, or by a name this
     // laboratory taught earlier. SQLite's UNIQUE would not catch the second:

@@ -33,6 +33,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { getBridge, resolveTapTarget } from '../services/instrumentBridge/index.js';
+import { diagnoseWatchPath } from '../services/instrumentBridge/watchPath.js';
 import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
@@ -73,12 +74,6 @@ function addressKind(address: string, interfaceName: string): string {
   if (/^(tailscale|ts\d|zt|wg|tun|utun|ppp)/i.test(interfaceName)) return 'remote';
   if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address)) return 'lan';
   return 'other';
-}
-
-/** Can this host see the path at all? A share that has gone is the usual answer. */
-function fs_exists(target?: string | null): boolean {
-  if (!target) return false;
-  try { fs.accessSync(target, fs.constants.R_OK); return true; } catch { return false; }
 }
 
 export function instrumentLinkRoutes() {
@@ -153,6 +148,8 @@ export function instrumentLinkRoutes() {
     return {
       ...rest,
       analyte_map: json<Record<string, string>>(row.analyte_map, {}),
+      unit_map: json<Record<string, string>>(row.unit_map, {}),
+      outbound_unit_map: json<Record<string, string>>(row.outbound_unit_map, {}),
       control_patterns: json<string[]>(row.control_patterns, []),
       measure_map: json<Record<string, number>>(row.measure_map, {}),
       lhims_password_set: Boolean(lhims_password),
@@ -177,6 +174,9 @@ export function instrumentLinkRoutes() {
       remotePort: b.remotePort !== undefined ? parseIntNullable(b.remotePort) : (existing.remote_port ?? null),
       watchPath: pick(b.watchPath, existing.watch_path) ?? null,
       analyteMap: b.analyteMap !== undefined ? JSON.stringify(b.analyteMap ?? {}) : (existing.analyte_map ?? null),
+      unitMap: b.unitMap !== undefined ? JSON.stringify(b.unitMap ?? {}) : (existing.unit_map ?? null),
+      outboundUnitMap: b.outboundUnitMap !== undefined
+        ? JSON.stringify(b.outboundUnitMap ?? {}) : (existing.outbound_unit_map ?? null),
       controlPatterns: b.controlPatterns !== undefined ? JSON.stringify(b.controlPatterns ?? []) : (existing.control_patterns ?? null),
       /*
        * The role is what says where results go.
@@ -315,14 +315,15 @@ export function instrumentLinkRoutes() {
 
     const result = db.prepare(`INSERT INTO instrument_links
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
-         listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, control_patterns,
+         listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, unit_map, outbound_unit_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
          lhims_password, lhims_map_key, measure_map, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
          close_after_message, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
@@ -344,13 +345,14 @@ export function instrumentLinkRoutes() {
 
     db.prepare(`UPDATE instrument_links SET name = ?, equipment_id = ?, section_id = ?, profile_key = ?,
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
-        watch_path = ?, analyte_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
+        watch_path = ?, analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
         fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
         close_after_message = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
@@ -556,11 +558,13 @@ export function instrumentLinkRoutes() {
         link.remote_host ? `It dials ${link.remote_host}:${link.remote_port ?? '—'}.` : 'No analyser address is set.',
         link.remote_host ? undefined : 'Give the link the analyser\'s address and port.');
     } else if (link.mode === 'file_drop') {
-      add('address', 'The folder exists', link.watch_path ? (fs_exists(link.watch_path) ? 'ok' : 'todo') : 'todo',
-        link.watch_path
-          ? (fs_exists(link.watch_path) ? `Watching ${link.watch_path}.` : `${link.watch_path} cannot be reached from this host.`)
-          : 'No folder is set.',
-        link.watch_path && fs_exists(link.watch_path) ? undefined : 'Point the link at the folder the analyser exports into.');
+      // Which of the half-dozen reasons it is decides what somebody does next,
+      // and the one most often true — a path read off the analyser's own
+      // screen, on the analyser's own disk — looks identical to a typing
+      // mistake unless it is said outright.
+      const folder = diagnoseWatchPath(link.watch_path);
+      add('address', 'The folder exists', folder.ok ? 'ok' : 'todo',
+        folder.ok ? `Watching ${link.watch_path}.` : folder.note, folder.fix);
     } else {
       // A folder is the answer most people give to "where is the client", so a
       // folder is resolved to the log inside it rather than reported as fine
@@ -722,11 +726,11 @@ export function instrumentLinkRoutes() {
     }
 
     if (link.mode === 'file_drop') {
-      const target = link.watch_path;
-      if (!target) return res.json({ ok: false, note: 'No path is set on this link yet.' });
-      return res.json(fs_exists(target)
-        ? { ok: true, note: `${target} is readable from this host.` }
-        : { ok: false, note: `${target} cannot be reached from this host. Check the share, the spelling and this machine's permissions on it.` });
+      const folder = diagnoseWatchPath(link.watch_path);
+      return res.json({
+        ok: folder.ok,
+        note: folder.ok || !folder.fix ? folder.note : `${folder.note} ${folder.fix}`,
+      });
     }
 
     const host = link.mode === 'client' ? link.remote_host : (link.listen_host || '127.0.0.1');

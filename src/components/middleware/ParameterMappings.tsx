@@ -30,18 +30,23 @@ type MappingLink = {
   id: number; name: string; profileKey: string | null; profileLabel: string | null;
   role: string; mode: string; equipmentName: string | null; sectionName: string | null;
   messages: number; analyteMap: Record<string, string>;
+  /** Parameter -> the unit SECHLIMS keeps it in, rescaling on the way in. */
+  unitMap: Record<string, string>;
+  /** Parameter -> the unit the receiving system keeps it in. */
+  outboundUnitMap: Record<string, string>;
   lhimsMapKey: string | null; measureMap: Record<string, number>; carriesOnward: boolean;
 };
+type KnownUnit = { canonical: string; dimension: string };
 type Profile = { key: string; label: string; vendor: string; discipline: string; analytes: Record<string, string> };
 type LhimsMap = { key: string; label: string; vendor: string; measures: Array<{ code: string; measureId: number; label: string | null }> };
-type Payload = { links: MappingLink[]; profiles: Profile[]; lhimsMaps: LhimsMap[] };
+type Payload = { links: MappingLink[]; profiles: Profile[]; lhimsMaps: LhimsMap[]; units: KnownUnit[] };
 
 type SeenCode = {
   code: string; analyte: string; count: number; lastSeen: string;
   unit: string | null; namedBy: 'link' | 'profile' | 'none';
 };
 
-const EMPTY: Payload = { links: [], profiles: [], lhimsMaps: [] };
+const EMPTY: Payload = { links: [], profiles: [], lhimsMaps: [], units: [] };
 
 export default function MiddlewareParameterMappings({ destinations, canConfigure, onError, onNotice }: SectionProps) {
   const [tab, setTab] = useState<Tab>('Analyser → SECHLIMS');
@@ -65,8 +70,8 @@ export default function MiddlewareParameterMappings({ destinations, canConfigure
         ))}
       </div>
 
-      {tab === 'Analyser → SECHLIMS' && <FromAnalyser profiles={data.profiles} {...shared} />}
-      {tab === 'SECHLIMS → LIS' && <ToLis lhimsMaps={data.lhimsMaps} destinations={destinations} {...shared} />}
+      {tab === 'Analyser → SECHLIMS' && <FromAnalyser profiles={data.profiles} units={data.units} {...shared} />}
+      {tab === 'SECHLIMS → LIS' && <ToLis lhimsMaps={data.lhimsMaps} units={data.units} destinations={destinations} {...shared} />}
     </>
   );
 }
@@ -216,7 +221,7 @@ function ChooseLink({ links, value, onValue, empty }: {
    model's profile already names what it sends. This is for the machine that
    disagrees with the book, and for the parameter nobody has named yet.
    ========================================================================= */
-function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, onNotice, reload }: PartProps & { profiles: Profile[] }) {
+function FromAnalyser({ links, profiles, units, canConfigure, busy, setBusy, onError, onNotice, reload }: PartProps & { profiles: Profile[]; units: KnownUnit[] }) {
   const [linkId, setLinkId] = useState('');
   const [codes, setCodes] = useState<SeenCode[]>([]);
   const [search, setSearch] = useState('');
@@ -284,6 +289,17 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
     try {
       await api(`/middleware/parameter-mappings/${link.id}`, { method: 'PUT', body: JSON.stringify({ analyteMap: next }) });
       onNotice(`${note} The analyser was not disconnected.`);
+      await reload();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function saveUnits(next: Record<string, string>) {
+    if (!link) return;
+    setBusy('units'); onError(null);
+    try {
+      await api(`/middleware/parameter-mappings/${link.id}`, { method: 'PUT', body: JSON.stringify({ unitMap: next }) });
+      onNotice('Saved. Readings arriving from now on are rescaled; the analyser was not disconnected.');
       await reload();
     } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
@@ -405,6 +421,20 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
       </Panel>
 
       {link && (
+        <UnitMapPanel
+          title="The scale SECHLIMS keeps each parameter in"
+          blurb={'An analyser\u2019s transmitted unit is not always the one on its screen. A Sysmex XN shows RET# as '
+            + '267.3 x10^9/L and sends 0.2673 x10^6/uL \u2014 the same concentration at two scales. Set the scale this '
+            + 'laboratory keeps, and readings are rescaled onto it as they arrive, with the original kept beside them.'}
+          parameters={[...new Set([...parameters.map(p => p.parameter), ...Object.keys(link.unitMap ?? {})])]
+            .sort((a, b) => a.localeCompare(b))}
+          value={link.unitMap ?? {}}
+          observed={Object.fromEntries(codes.map(c => [c.analyte, c.unit]))}
+          units={units} canConfigure={canConfigure} busy={busy} onSave={saveUnits}
+        />
+      )}
+
+      {link && (
         <Panel
           title="Codes this analyser has actually sent"
           subtitle="From the transmissions on the record, so nobody has to guess what the machine uses."
@@ -450,16 +480,194 @@ function FromAnalyser({ links, profiles, canConfigure, busy, setBusy, onError, o
    Result Filler types into a result-entry form, and the measure ids the LHIMS
    middleware files a result under.
    ========================================================================= */
-function ToLis({ links, lhimsMaps, destinations, canConfigure, busy, setBusy, onError, onNotice, reload }:
-PartProps & { lhimsMaps: LhimsMap[]; destinations: Destination[] }) {
+function ToLis({ links, lhimsMaps, units, destinations, canConfigure, busy, setBusy, onError, onNotice, reload }:
+PartProps & { lhimsMaps: LhimsMap[]; units: KnownUnit[]; destinations: Destination[] }) {
   return (
     <>
       <ParameterNames canConfigure={canConfigure} busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} />
       <ToLhims links={links} lhimsMaps={lhimsMaps} canConfigure={canConfigure}
         busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} reload={reload} />
+      <OutboundUnits links={links} units={units} canConfigure={canConfigure}
+        busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} reload={reload} />
       <ToDestination destinations={destinations} canConfigure={canConfigure}
         busy={busy} setBusy={setBusy} onError={onError} onNotice={onNotice} />
     </>
+  );
+}
+
+/**
+ * The scale the RECEIVING system keeps each parameter in.
+ *
+ * The scale SECHLIMS holds a result in need not be the scale LHIMS files it
+ * under, and a number delivered into a field that means something else by it
+ * is a wrong result in somebody's record. Where this says what the receiver
+ * expects, the delivery is rescaled; where the arithmetic is not certain the
+ * result is withheld and named rather than sent on a guess.
+ */
+function OutboundUnits({ links, units, canConfigure, busy, setBusy, onError, onNotice, reload }:
+PartProps & { units: KnownUnit[] }) {
+  const carrying = links.filter(l => l.carriesOnward);
+  const [linkId, setLinkId] = useState('');
+  const link = carrying.find(l => String(l.id) === linkId) ?? carrying[0] ?? null;
+
+  async function save(next: Record<string, string>) {
+    if (!link) return;
+    setBusy('units'); onError(null);
+    try {
+      await api(`/middleware/parameter-mappings/${link.id}`, {
+        method: 'PUT', body: JSON.stringify({ outboundUnitMap: next }),
+      });
+      onNotice('Saved. The analyser was not disconnected.');
+      await reload();
+    } catch (e) { onError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  if (!carrying.length) {
+    return (
+      <section className="pq-card">
+        <h4>The scale the receiving system keeps each parameter in</h4>
+        <p className="muted">
+          No link carries results onward to LHIMS at the moment, so there is nothing to convert for. A link
+          carries onward only when its role is &ldquo;SECHLIMS receives, and passes a copy on to LHIMS&rdquo;.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <>
+      {carrying.length > 1 && (
+        <label className="pm-unit-filter">
+          <span>Which link</span>
+          <select value={String(link?.id ?? '')} onChange={e => setLinkId(e.target.value)}>
+            {carrying.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
+      )}
+      <UnitMapPanel
+        title="The scale the receiving system keeps each parameter in"
+        blurb={'Set this where LHIMS files a parameter at a different scale from the one SECHLIMS holds it in. '
+          + 'A result that cannot be rescaled with certainty is withheld from the delivery and named, rather '
+          + 'than sent in the wrong scale.'}
+        parameters={parametersOf(link)}
+        value={link?.outboundUnitMap ?? {}}
+        units={units} canConfigure={canConfigure} busy={busy} onSave={save}
+      />
+    </>
+  );
+}
+
+/** Every parameter name this link is known to carry, for the unit pickers. */
+function parametersOf(link: MappingLink | null): string[] {
+  if (!link) return [];
+  const names = new Set<string>(Object.values(link.analyteMap ?? {}));
+  for (const key of Object.keys(link.unitMap ?? {})) names.add(key);
+  for (const key of Object.keys(link.outboundUnitMap ?? {})) names.add(key);
+  for (const key of Object.keys(link.measureMap ?? {})) names.add(key);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+
+/* ============================================================================
+   The scale a parameter is kept in
+   ----------------------------------------------------------------------------
+   An analyser's transmitted unit is not always its displayed one. A Sysmex XN
+   shows RET# as 267.3 x10^9/L and sends 0.2673 x10^6/uL — the same
+   concentration, written at two scales. Recorded as it arrived, the bench
+   reads a number that contradicts the analyser in front of them, and a control
+   reading in one scale gets charted against a target in the other.
+
+   So the laboratory says which scale it keeps, per parameter, and the value is
+   rescaled as it passes. Only where the arithmetic is certain: anything
+   needing to know what the analyte is — mg/dL to mmol/L wants a molar mass —
+   is refused rather than guessed, and the reading is left exactly as it came.
+   ========================================================================= */
+function UnitMapPanel({
+  title, blurb, parameters, value, units, canConfigure, busy, onSave, observed,
+}: {
+  title: string;
+  blurb: string;
+  /** Every parameter worth offering, in the order a person reads them. */
+  parameters: string[];
+  value: Record<string, string>;
+  units: KnownUnit[];
+  canConfigure: boolean;
+  busy: string | null;
+  onSave: (next: Record<string, string>) => void | Promise<void>;
+  /** What the analyser has actually been sending, where that is known. */
+  observed?: Record<string, string | null>;
+}) {
+  const [filter, setFilter] = useState('');
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? parameters.filter(p => p.toLowerCase().includes(needle))
+    : parameters.filter(p => value[p] || observed?.[p]);
+
+  const set = (parameter: string, unit: string) => {
+    const next = { ...value };
+    if (unit) next[parameter] = unit;
+    else delete next[parameter];
+    void onSave(next);
+  };
+
+  const grouped = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const u of units) {
+      const list = out.get(u.dimension) ?? [];
+      list.push(u.canonical);
+      out.set(u.dimension, list);
+    }
+    return [...out];
+  }, [units]);
+
+  return (
+    <section className="pq-card pm-units">
+      <h4>{title}</h4>
+      <p className="muted">{blurb}</p>
+      <label className="pm-unit-filter">
+        <span className="sr-only">Find a parameter</span>
+        <input value={filter} onChange={e => setFilter(e.target.value)}
+          placeholder="Find a parameter — or leave empty to show the ones already set" />
+      </label>
+      {!shown.length ? (
+        <p className="muted">
+          {needle ? 'No parameter here matches that.'
+            : 'Nothing is being rescaled. Search for a parameter to set the scale this laboratory keeps it in.'}
+        </p>
+      ) : (
+        <table className="pq-table pm-unit-table">
+          <thead>
+            <tr><th>PARAMETER</th><th>ARRIVES AS</th><th>KEPT AS</th></tr>
+          </thead>
+          <tbody>
+            {shown.slice(0, 60).map(parameter => (
+              <tr key={parameter}>
+                <td>{parameter}</td>
+                <td className="muted">{observed?.[parameter] || '\u2014'}</td>
+                <td>
+                  <select value={value[parameter] ?? ''} disabled={!canConfigure || busy === 'units'}
+                    onChange={e => set(parameter, e.target.value)}>
+                    <option value="">leave as it arrives</option>
+                    {grouped.map(([dimension, list]) => (
+                      <optgroup key={dimension} label={dimension.replace(/_/g, ' ')}>
+                        {list.map(u => <option key={u} value={u}>{u}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="lf-hint">
+        Only a change of scale is done automatically — <code>10^6/uL</code> to <code>10^9/L</code> is arithmetic.
+        A conversion that needs to know what the analyte is, such as <code>mg/dL</code> to <code>mmol/L</code>,
+        is refused and the reading is kept exactly as it came, because a plausible wrong number is worse than
+        an unconverted one.
+      </p>
+    </section>
   );
 }
 
@@ -580,18 +788,30 @@ function ParameterNames({ canConfigure, busy, setBusy, onError, onNotice }: {
   async function addNames(canonical: string, values: string[]) {
     setBusy(`n${canonical}`); onError(null);
     const added: string[] = [];
-    const refused: string[] = [];
+    /*
+     * The REASON each name was refused, not just the fact of it.
+     *
+     * This used to swallow the error and report every refusal as "already
+     * means something else". That sentence is sometimes true and sometimes a
+     * fabrication: adding RET# to the parameter RET# is refused because it is
+     * the parameter's own name, and the server says exactly that. Being told
+     * instead that it clashes with another parameter sends somebody looking
+     * for a conflict that does not exist. The server knows why; it only had to
+     * be allowed to say so.
+     */
+    const refused: Array<{ alias: string; why: string }> = [];
     for (const alias of values) {
       try {
         await api('/result-filler/aliases', { method: 'POST', body: JSON.stringify({ canonical, alias }) });
         added.push(alias);
-      } catch { refused.push(alias); }
+      } catch (e) { refused.push({ alias, why: errorText(e) }); }
     }
     await load();
     setBusy(null);
+    const why = refused.map(r => `“${r.alias}” — ${r.why}`).join(' ');
     if (added.length && !refused.length) onNotice(`${added.length} name(s) added to ${canonical}.`);
-    else if (added.length) onNotice(`${added.join(', ')} added. ${refused.join(', ')} already mean something else.`);
-    else onError(`${refused.join(', ')} already mean something else, so nothing was added.`);
+    else if (added.length) onNotice(`${added.join(', ')} added. ${why}`);
+    else onError(why || 'Nothing was added.');
   }
 
   async function restore(row: AliasRow) {

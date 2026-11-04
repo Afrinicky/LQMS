@@ -120,6 +120,23 @@ const EMPTY = {
 const CAN_FETCH = (mode: string) => mode === 'file_drop' || mode === 'lhims_tap';
 
 /**
+ * A path that can only ever mean the disk in the machine reading it.
+ *
+ * `\\COMPUTER\Share` reaches another computer; `C:\…` never can, whoever typed
+ * it and wherever they read it.
+ */
+function localDrivePath(value: string): boolean {
+  const path = String(value ?? '').trim();
+  return /^[A-Za-z]:[\\/]/.test(path);
+}
+
+/** The network path that local one was probably meant to be. */
+function suggestShare(value: string): string {
+  const leaf = String(value ?? '').trim().replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop();
+  return `\\\\ANALYSER-PC\\${leaf || 'Shared Folder'}`;
+}
+
+/**
  * `standalone` renders the page's own heading and the overview strip. The
  * component is the same one on both routes on purpose: Settings and the IQC tab
  * showing subtly different versions of an analyser's state is exactly how two
@@ -965,13 +982,30 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
           {form.mode === 'file_drop' && (
             <>
               <label className="lf-full"><span>Folder to watch</span>
-                <TextField value={form.watchPath} onValue={v => set('watchPath', v)} placeholder="C:\\Analyser\\Export" /></label>
+                <TextField value={form.watchPath} onValue={v => set('watchPath', v)}
+                  placeholder="\\\\ANALYSER-PC\\Output Worklist" /></label>
+              {/*
+                * Said here, while it is still being typed, because afterwards it
+                * is invisible: the folder genuinely does not exist on this host,
+                * so every message downstream is "not found" and the laboratory
+                * checks a spelling that was right all along. The path is read
+                * off the analyser's own Explorer window, and a drive letter
+                * there means the analyser's disk, not this one.
+                */}
+              {localDrivePath(form.watchPath) && (
+                <p className="lf-hint warn">
+                  <AlertTriangle size={13} /> A drive letter means the disk in <strong>this</strong> computer — the
+                  one SECHLIMS runs on. If the analyser&rsquo;s software is on another computer, share that folder
+                  and enter it as <code>{suggestShare(form.watchPath)}</code> instead: the computer&rsquo;s name,
+                  then the share name.
+                </p>
+              )}
               <div className="lf-grid">
                 <label><span>Which files (optional)</span>
-                  <TextField value={form.filePattern} onValue={v => set('filePattern', v)} placeholder="*.txt, *.csv" /></label>
+                  <TextField value={form.filePattern} onValue={v => set('filePattern', v)} placeholder="*.astm, *.txt" /></label>
                 <label><span>Move read files to (optional)</span>
                   <TextField value={form.archivePath} onValue={v => set('archivePath', v)}
-                    placeholder="C:\\Analyser\\Export\\Done" /></label>
+                    placeholder="leave empty" /></label>
               </div>
               <Why summary="About the folder">
                 <p>

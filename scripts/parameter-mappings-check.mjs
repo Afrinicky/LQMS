@@ -144,5 +144,48 @@ const nonsense = await j(`/middleware/parameter-mappings/${link.json.id}`, { tok
 check('a map this system does not know is refused', nonsense.status === 400, `${nonsense.status}`);
 
 await j(`/instrument-links/${link.json.id}/stop`, { token: A, method: 'POST' });
+
+console.log('\nThe scale a parameter is kept in');
+console.log('--------------------------------');
+{
+  // The fault this exists for: a Sysmex sends RET# at a different scale from
+  // the one its own screen shows, and nothing could be configured about it.
+  const unitSaved = await j(`/middleware/parameter-mappings/${link.json.id}`, {
+    method: 'PUT', token: A,
+    body: { unitMap: { 'RET#': '10^9/L' }, outboundUnitMap: { 'RET#': '10^6/uL' } },
+  });
+  check('a unit map can be saved for a link', unitSaved.status === 200, JSON.stringify(unitSaved.json));
+  check('and it comes back as it was set',
+    unitSaved.json?.unitMap?.['RET#'] === '10^9/L', JSON.stringify(unitSaved.json?.unitMap));
+  check('the outbound scale is kept separately',
+    unitSaved.json?.outboundUnitMap?.['RET#'] === '10^6/uL', JSON.stringify(unitSaved.json?.outboundUnitMap));
+
+  const listed = await j('/middleware/parameter-mappings', { token: A });
+  const mineUnits = (listed.json?.links ?? []).find(l => l.id === link.json.id);
+  check('the screen is given the unit map it has to show', mineUnits?.unitMap?.['RET#'] === '10^9/L');
+  check('and the vocabulary of units it may offer',
+    Array.isArray(listed.json?.units) && listed.json.units.some(u => u.canonical === '10^9/L'),
+    JSON.stringify((listed.json?.units ?? []).slice(0, 3)));
+
+  // A unit nothing can do arithmetic with would sit there looking like an
+  // instruction and convert nothing, so it is refused where somebody can see.
+  const nonsense = await j(`/middleware/parameter-mappings/${link.json.id}`, {
+    method: 'PUT', token: A, body: { unitMap: { 'RET#': 'squiggles/fortnight' } },
+  });
+  check('a unit this system cannot reason about is refused', nonsense.status === 400, JSON.stringify(nonsense.json));
+  check('and the refusal names it', /squiggles/.test(String(nonsense.json?.error ?? '')), nonsense.json?.error);
+
+  const afterUnits = await j('/middleware/parameter-mappings', { token: A });
+  const unchanged = (afterUnits.json?.links ?? []).find(l => l.id === link.json.id);
+  check('and nothing was saved, so the good setting still stands',
+    unchanged?.unitMap?.['RET#'] === '10^9/L', JSON.stringify(unchanged?.unitMap));
+
+  // Clearing one is allowed: it means "stop rescaling this parameter".
+  const cleared = await j(`/middleware/parameter-mappings/${link.json.id}`, {
+    method: 'PUT', token: A, body: { unitMap: {} },
+  });
+  check('a unit map can be emptied again', cleared.status === 200 && !cleared.json?.unitMap?.['RET#']);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

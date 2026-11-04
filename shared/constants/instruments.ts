@@ -157,6 +157,17 @@ export const LINK_RECONNECT_MS = 15_000;
 /** A frame larger than this is a runaway, not a result. */
 export const LINK_MAX_FRAME_BYTES = 512 * 1024;
 /**
+ * How often a watched folder is looked at when it cannot be watched.
+ *
+ * A folder on another computer is reached over SMB, and SMB change
+ * notifications are not dependable — some servers never send them. Such a
+ * folder is polled instead, on its own, without depending on the scheduled
+ * fetch being switched on: a link that silently reads nothing because a
+ * checkbox was left clear is the failure this exists to prevent. Fifteen
+ * seconds is quick enough for the bench and gentle enough for a share.
+ */
+export const LINK_FOLDER_POLL_MS = 15_000;
+/**
  * How long a stream with no end-of-transmission marker is given to go quiet
  * before what it has sent is taken as a whole message.
  */
@@ -486,6 +497,9 @@ const CHEMISTRY_HUMASTAR: Record<string, string> = {
   GLU: 'Glucose', GLUC: 'Glucose', GLUCOSE: 'Glucose',
   UREA: 'Urea', BUN: 'Urea', 'UREA-UV': 'Urea',
   CREA: 'Creatinine', CREAA: 'Creatinine', 'CREA-A': 'Creatinine', CREAJ: 'Creatinine',
+  // The reagent-position suffixes a laboratory ends up with when the same
+  // method is set up more than once. Seen on a 300SR in the field.
+  'CREA-1': 'Creatinine', 'CREA-2': 'Creatinine',
   UA: 'Uric acid', URIC: 'Uric acid',
   TP: 'Total protein', ALB: 'Albumin', ALBU: 'Albumin',
   BILT: 'Total bilirubin', BILTA: 'Total bilirubin', TBIL: 'Total bilirubin',
@@ -496,6 +510,20 @@ const CHEMISTRY_HUMASTAR: Record<string, string> = {
   AMY: 'Amylase', LIP: 'Lipase', LDH: 'LDH',
   CK: 'CK', 'CK-NAC': 'CK', CKMB: 'CK-MB', 'CK-MB': 'CK-MB',
   CHOL: 'Total cholesterol', HDL: 'HDL cholesterol', LDL: 'LDL cholesterol',
+  'HDL-C': 'HDL cholesterol', 'LDL-C': 'LDL cholesterol', LDLC: 'LDL cholesterol', HDLC: 'HDL cholesterol',
+  VLDL: 'VLDL cholesterol', 'VLDL-C': 'VLDL cholesterol',
+  /*
+   * `CR` is deliberately absent.
+   *
+   * On the 300SR this laboratory runs, CR is the cholesterol/HDL ratio — its
+   * own file proves it: 7.69 ÷ 1.21 = 6.36, the value transmitted. On plenty of
+   * other analysers CR is creatinine, and the assay name is whatever the
+   * laboratory typed into the method, so neither reading can be assumed. A
+   * ratio filed as a creatinine is a renal result invented out of a lipid
+   * panel, which is precisely the kind of silent mis-filing that is worse than
+   * a blank. It is left for the link's own map, under Parameter Mappings, where
+   * somebody who can see the analyser decides what it means.
+   */
   TRIG: 'Triglycerides', TG: 'Triglycerides',
   CA: 'Calcium', MG: 'Magnesium', PHOS: 'Phosphate', IP: 'Phosphate',
   FE: 'Iron', UIBC: 'UIBC', TIBC: 'TIBC', TRF: 'Transferrin', FERR: 'Ferritin',
