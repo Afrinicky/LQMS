@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# An analyser's own export, kept byte for byte.
+# These are captures of what an instrument actually wrote — CRLF terminators
+# and all, because that is part of what is being tested. Normalising them to LF
+# would make the fixture a copy of something no analyser ever sent.
+tests/fixtures/*.astm -text

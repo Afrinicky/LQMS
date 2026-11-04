@@ -456,11 +456,41 @@ On Windows XP the same three live under
 1. On the analyser's computer, share the **Output Worklist** folder so the
    SECHLIMS computer can read it. Read access is enough.
 2. In SECHLIMS add a link: *The analyser writes files to a watched folder*,
-   the model set to the HumaStar, and the folder set to that share.
+   the model set to the HumaStar, and the folder set to that share **as a
+   network path**.
 3. Leave **move read files to** and **delete after reading** both empty. The
    manual is explicit that no other folder may be created inside the HI folder
    structure, and SECHLIMS does not need either: it recognises a file it has
    already read and will not record the same results twice.
+
+> **The path is the step this goes wrong on, every time.**
+>
+> The path above — `C:\ProgramData\HI\Human\LIS\ASTM\Output Worklist` — is what
+> the analyser's own Explorer window shows, and typing it into SECHLIMS does
+> not work unless SECHLIMS is running on that same computer. A drive letter
+> always means the disk in the machine doing the reading. Entered on a
+> different host it points at that host's own `C:`, where there is no such
+> folder, and the link reports a folder that does not exist while somebody
+> checks a spelling that was right all along.
+>
+> Share the folder on the analyser's computer and give SECHLIMS the share:
+>
+> ```
+> \\ANALYSER-PC\Output Worklist
+> ```
+>
+> — the computer's name, then the **share** name, which is usually not the
+> whole folder tree repeated. SECHLIMS says this in as many words now when a
+> drive letter is entered, and the warning appears while the path is still
+> being typed.
+>
+> Two further things about a folder on another computer, both handled but worth
+> knowing. Windows file shares cannot always be watched for changes, so a
+> folder that refuses to be watched is looked at every fifteen seconds instead
+> — the link says which it is doing. And the file's modification time comes
+> from the analyser's clock while SECHLIMS reads it by its own, so whether a
+> file has finished being written is judged by watching it from this host
+> rather than by trusting the two clocks to agree.
 
 ### C. ASTM over TCP — software 1.5 and newer
 
@@ -502,8 +532,37 @@ The handshake is ordinary ASTM — `<ENQ>`, `<ACK>`, then
   could be, the parameter is recorded with no value and the whole message is
   kept under Messages for somebody to look at. A missing result is a visible
   problem; a result in the wrong row is not.
+* **A calculated parameter keeps its value and loses its date.** LDL, VLDL and
+  the ratios are worked out rather than measured, so the analyser stamps them
+  `00010101000000` — the zero of its calendar, not a date. The value is real
+  and is kept; the date is dropped, because carried through it becomes a result
+  performed in the year 1, which sorts before every real result and escapes
+  every date filter the laboratory applies.
+* **The file is read as UTF-8.** The HI software writes it that way, so
+  `μmol / L` arrives as a micromole rather than as `Î¼mol / L`. Over a socket
+  ASTM is still read byte for byte, because there a checksum depends on it.
+* **The method names are the laboratory's own.** SECHLIMS knows HUMAN's names
+  and the common variants a laboratory ends up with — `HDL-C`, `LDLC`, `VLDL`,
+  `CREA-1` and the rest. One it deliberately does **not** know is `CR`: on the
+  300SR seen here it is the cholesterol/HDL ratio, and on plenty of other
+  analysers the same two letters are creatinine. Guessing would file a lipid
+  ratio as a renal result, so it arrives unmapped and is named once under
+  **Parameter Mappings → Analyser → SECHLIMS** by somebody who can see the
+  analyser.
 
 ## Troubleshooting
+
+**“The watched folder … does not exist”, and the folder plainly does.** Read
+what the link says next to it: SECHLIMS now separates the reasons, because
+they are different jobs.
+
+| What the link says | What to do |
+|---|---|
+| *…is a path on the computer SECHLIMS is running on* (or *there is no C: drive on…*) | The path is on the **analyser's** computer. Share that folder and enter `\\ANALYSER-PC\Share` instead. |
+| *…exists but this host is not allowed to read it* | Grant read access — on the share **and** in the folder's Security tab, which are two separate lists. If SECHLIMS runs as a Windows service, it is the service's account that needs it, not yours. |
+| *The computer in … did not answer* | That computer is off, asleep, off the network, or its firewall is blocking file sharing. |
+| *…could not be reached from this host* (a share) | The computer name or share name is wrong, or the folder is no longer shared. Browsing to it in Explorer **from the SECHLIMS computer** settles all three. |
+| *…is readable, but there is no X inside it* | The share is usually made **on** the export folder, so the path ends at the share name and the folders above it are not repeated. |
 
 **“Could not listen on port :5000 — Address already in use: JVM_Bind”** (the
 error on the LHIMS client screen). Something on *that PC* is already holding

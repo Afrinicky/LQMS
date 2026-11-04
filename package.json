@@ -40,6 +40,7 @@
     "check:fetch": "node scripts/instrument-fetch-check.mjs",
     "check:lhims": "node scripts/lhims-bridge-check.mjs",
     "check:transmission": "node scripts/lhims-transmission-check.mjs",
+    "check:humastar-folder": "npx tsx scripts/humastar-folder-check.mjs",
     "check:middleware": "node scripts/middleware-check.mjs",
     "check:result-filler": "node scripts/result-filler-check.mjs",
     "check:middleware-engine": "npx tsx scripts/middleware-engine-check.mjs",

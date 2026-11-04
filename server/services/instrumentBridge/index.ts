@@ -40,17 +40,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes, splitTransmissions,
-  type Framer, type AnalyserMessage,
+  decodeExport, detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes,
+  splitTransmissions, type Framer, type AnalyserMessage,
 } from './protocols.js';
 import {
-  LINK_CLOSE_AFTER_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
+  LINK_CLOSE_AFTER_MS, LINK_FOLDER_POLL_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
   classifyMessage, linkForwards, linkIsOurs, mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
 import {
   LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_MAX_CATCHUP_BYTES, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
+import { diagnoseWatchPath } from './watchPath.js';
 
 /* ============================================================================
    Where the client's log actually is
@@ -283,6 +284,10 @@ class Link {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private idleTimers = new Map<net.Socket, NodeJS.Timeout>();
   private watcher: fs.FSWatcher | null = null;
+  /** Only set when the folder could not be watched and must be polled instead. */
+  private folderPollTimer: NodeJS.Timeout | null = null;
+  /** Files seen but not yet settled, so a half-written one is never read. */
+  private settling = new Map<string, { size: number; mtimeMs: number; firstSeen: number }>();
   private tapTimer: NodeJS.Timeout | null = null;
   private tapOffset = 0;
   private tapCarry = '';
@@ -684,22 +689,52 @@ class Link {
    */
   private startWatcher(): void {
     const dir = this.row.watch_path?.trim();
-    if (!dir || !fs.existsSync(dir)) {
-      this.setState('error', `The watched folder ${dir ?? '(not set)'} does not exist.`, 'Folder not found');
+    // Why it cannot be read matters more than that it cannot. A path typed off
+    // the analyser's own screen is the usual answer, and it is the one answer
+    // the old message ("does not exist") hid completely.
+    const verdict = diagnoseWatchPath(dir);
+    if (!verdict.ok) {
+      this.setState('error', verdict.fix ? `${verdict.note} ${verdict.fix}` : verdict.note, verdict.note);
       return;
     }
+
+    /*
+     * Watching is an optimisation; sweeping is the feature.
+     *
+     * A folder on another computer is reached over SMB, and SMB cannot always
+     * be watched — fs.watch throws or simply never fires, depending on the
+     * server. The old order treated that as fatal: the throw skipped the sweep
+     * entirely, so a link whose folder was perfectly readable reported an error
+     * and read nothing, for the whole life of the link. The sweep runs first
+     * now, and a folder that cannot be watched is polled rather than failed.
+     */
+    let watching = false;
     try {
-      this.watcher = fs.watch(dir, (_event, filename) => {
+      this.watcher = fs.watch(dir!, (_event, filename) => {
         if (!filename) return;
         // Give the analyser a moment to finish writing before reading it. The
         // sweep decides what is actually new, so a burst of events for one file
         // costs a directory listing rather than a duplicated result.
         setTimeout(() => { try { this.sweepFolder(); } catch { /* reported by the sweep */ } }, 750);
       });
+      watching = true;
+    } catch { /* polled instead, and said so below */ }
+
+    // Polling is not the scheduled fetch: that is a setting somebody has to
+    // have switched on, and a folder nobody can watch must not depend on it.
+    if (!watching) {
+      if (this.folderPollTimer) clearInterval(this.folderPollTimer);
+      this.folderPollTimer = setInterval(() => {
+        try { this.sweepFolder(); } catch { /* reported by the sweep */ }
+      }, LINK_FOLDER_POLL_MS);
+    }
+
+    try {
       const found = this.sweepFolder();
-      this.setState('listening', found
+      const how = watching ? '' : ` It cannot be watched for changes, so it is looked at every ${LINK_FOLDER_POLL_MS / 1000} seconds instead.`;
+      this.setState('listening', (found
         ? `Watching ${dir}. ${found} file(s) read on starting.`
-        : `Watching ${dir}`);
+        : `Watching ${dir}`) + how);
     } catch (error) {
       this.setState('error', (error as Error).message, (error as Error).message);
     }
@@ -755,9 +790,32 @@ class Link {
       } catch { continue; }
 
       // A file still being written to has its size change under us, and half a
-      // transmission parses as a shorter one rather than as an error. Anything
-      // touched in the last two seconds waits for the next sweep.
-      if (Date.now() - stat.mtimeMs < 2_000) continue;
+      // transmission parses as a shorter one rather than as an error, so a file
+      // has to be seen to have stopped changing before it is read.
+      //
+      // "Modified less than two seconds ago" was how that was judged, and it
+      // does not survive the folder being on another computer: the modification
+      // time comes from the ANALYSER's clock and the comparison from this
+      // host's. A few minutes of drift either way and every file reads as
+      // written in the future — age permanently negative, permanently "still
+      // being written", permanently skipped. A folder of results, a running
+      // link, no error, and nothing read.
+      //
+      // So a file is settled when WE have seen it twice, two seconds apart,
+      // unchanged. Both halves of that come from this host's own clock, and the
+      // analyser's can say what it likes.
+      const age = Date.now() - stat.mtimeMs;
+      if (age < 0 || age < 2_000) {
+        const before = this.settling.get(name);
+        if (before && before.size === stat.size && before.mtimeMs === stat.mtimeMs) {
+          if (Date.now() - before.firstSeen < 2_000) continue;
+          // Settled: it has not changed in the two seconds we watched it.
+        } else {
+          this.settling.set(name, { size: stat.size, mtimeMs: stat.mtimeMs, firstSeen: Date.now() });
+          continue;
+        }
+      }
+      this.settling.delete(name);
 
       const modified = new Date(stat.mtimeMs).toISOString();
       try {
@@ -774,7 +832,7 @@ class Link {
       // so a transmission matching one already stored is a re-read.
       this.rereading = true;
       try {
-        const text = fs.readFileSync(full, 'latin1');
+        const text = decodeExport(fs.readFileSync(full));
         if (text.trim()) {
           // One file may hold several transmissions, exactly as the tap's log
           // does, so it is split the same way rather than parsed as one.
@@ -1418,6 +1476,8 @@ class Link {
     this.idleTimers.clear();
     if (this.socket) { this.socket.destroy(); this.socket = null; }
     if (this.watcher) { this.watcher.close(); this.watcher = null; }
+    if (this.folderPollTimer) { clearInterval(this.folderPollTimer); this.folderPollTimer = null; }
+    this.settling.clear();
     if (this.server) { this.server.close(); this.server = null; }
     this.setState('stopped', 'Stopped');
   }

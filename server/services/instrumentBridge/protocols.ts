@@ -450,6 +450,20 @@ export function astmTime(value: string | null | undefined): string | null {
   const raw = String(value ?? '').replace(/\D/g, '');
   if (raw.length < 8) return null;
   const [y, m, d] = [raw.slice(0, 4), raw.slice(4, 6), raw.slice(6, 8)];
+  /*
+   * "No time" written as a date.
+   *
+   * A HumaStar stamps a calculated parameter — LDL, VLDL, a ratio — with
+   * 00010101000000, the zero of the .NET calendar, because the analyser never
+   * measured it: it worked it out from the ones it did. The value is real and
+   * must be kept. The date is not a date, and carried through it becomes a
+   * result performed in the year 1, which sorts before every real result,
+   * escapes every date filter the laboratory applies, and can become the whole
+   * message's run time when a calculated parameter happens to come first.
+   *
+   * An empty field already means "not stated", so this is said the same way.
+   */
+  if (Number(y) < 1900) return null;
   const time = raw.length >= 14 ? `${raw.slice(8, 10)}:${raw.slice(10, 12)}:${raw.slice(12, 14)}`
     : raw.length >= 12 ? `${raw.slice(8, 10)}:${raw.slice(10, 12)}:00`
     : '00:00:00';
@@ -820,6 +834,28 @@ export function buildBareHl7Ack(message: string): Buffer {
 /** Does this text carry an HL7 message, wrapper or no wrapper? */
 export function carriesHl7(text: string): boolean {
   return /(^|[\r\n\x0b])\s*MSH\s*[|^]/.test(String(text ?? ''));
+}
+
+/**
+ * An exported file, read as the analyser wrote it.
+ *
+ * Over a socket, latin1 is right: ASTM is an eight-bit protocol and every byte
+ * has to survive the round trip to its checksum untouched. A file is a
+ * different thing. The HumaStar writes its export in UTF-8, so latin1 turned
+ * every micromole into `Î¼mol / L` on the bench's screen — not a wrong number,
+ * but a unit nobody should have to decipher, carried into reports.
+ *
+ * Guessing between the two is not needed: UTF-8 is self-describing. A file
+ * whose bytes decode cleanly as UTF-8 is UTF-8 — any other eight-bit text
+ * containing a high byte will not, because the continuation bytes will not line
+ * up. Plain ASCII is identical either way, so the common case cannot be harmed.
+ */
+export function decodeExport(raw: Buffer): string {
+  // Nothing above 0x7F: identical under every encoding this could be.
+  if (!raw.some(byte => byte > 0x7f)) return raw.toString('latin1');
+  const utf8 = raw.toString('utf8');
+  // U+FFFD only appears where a byte sequence was not valid UTF-8.
+  return utf8.includes('�') ? raw.toString('latin1') : utf8;
 }
 
 /**
