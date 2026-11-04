@@ -74,6 +74,7 @@ import { sealSecret, secretIsSet } from '../services/middleware/secrets.js';
 import { deliver, renderPayload } from '../services/middleware/transports.js';
 import { detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
 import { mapAnalyte, profileByKey } from '../../shared/constants/instruments.js';
+import { knownUnits, unitInfo } from '../../shared/constants/units.js';
 import { LHIMS_MEASURE_MAPS } from '../../shared/constants/lhims.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 
@@ -1058,6 +1059,7 @@ export function middlewareRoutes() {
   router.get('/parameter-mappings', requirePermission(F.overview, 'view'), (_req, res) => {
     const db = getDb();
     const rows = db.prepare(`SELECT l.id, l.name, l.profile_key, l.role, l.mode, l.analyte_map,
+          l.unit_map, l.outbound_unit_map,
           l.lhims_map_key, l.measure_map, l.forward_enabled, l.messages_received,
           e.name AS equipment_name, s.name AS section_name
         FROM instrument_links l
@@ -1077,6 +1079,8 @@ export function middlewareRoutes() {
         sectionName: row.section_name ?? null,
         messages: Number(row.messages_received ?? 0),
         analyteMap: json<Record<string, string>>(row.analyte_map, {}),
+        unitMap: json<Record<string, string>>(row.unit_map, {}),
+        outboundUnitMap: json<Record<string, string>>(row.outbound_unit_map, {}),
         lhimsMapKey: row.lhims_map_key ?? null,
         measureMap: json<Record<string, number>>(row.measure_map, {}),
         carriesOnward: row.role === 'shared_forward' && Number(row.forward_enabled ?? 0) === 1,
@@ -1087,6 +1091,9 @@ export function middlewareRoutes() {
         key: p.key, label: p.label, vendor: p.vendor, discipline: p.discipline,
         analytes: p.analytes,
       })),
+      // The units this system can do arithmetic with, so the screen offers a
+      // choice rather than a free-text box nobody can validate.
+      units: knownUnits(),
       lhimsMaps: LHIMS_MEASURE_MAPS.map(m => ({
         key: m.key, label: m.label, vendor: m.vendor,
         measures: Object.entries(m.measures).map(([code, measure]) => ({
@@ -1186,8 +1193,41 @@ export function middlewareRoutes() {
       return out;
     };
 
+    /*
+     * A unit map, checked before it is stored.
+     *
+     * A unit this system cannot reason about is worse than no unit: it would
+     * sit in the configuration looking like an instruction and silently do
+     * nothing, because every conversion against it is refused. So an
+     * unrecognised one is rejected here, where somebody is looking at the
+     * screen, rather than discovered later from a reading that never moved.
+     */
+    const unknownUnits: string[] = [];
+    const units = (value: unknown): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [from, to] of Object.entries((value ?? {}) as Record<string, unknown>)) {
+        const parameter = String(from ?? '').trim();
+        const unit = String(to ?? '').trim();
+        if (!parameter) continue;
+        // An empty unit means "stop converting this one", which is allowed.
+        if (!unit) continue;
+        if (unitInfo(unit).dimension === 'unknown') { unknownUnits.push(unit); continue; }
+        out[parameter] = unit;
+      }
+      return out;
+    };
+
     const analyteMap = body.analyteMap !== undefined ? clean(body.analyteMap) : json<Record<string, string>>(existing.analyte_map, {});
     const measureMap = body.measureMap !== undefined ? measures(body.measureMap) : json<Record<string, number>>(existing.measure_map, {});
+    const unitMap = body.unitMap !== undefined ? units(body.unitMap) : json<Record<string, string>>(existing.unit_map, {});
+    const outboundUnitMap = body.outboundUnitMap !== undefined
+      ? units(body.outboundUnitMap) : json<Record<string, string>>(existing.outbound_unit_map, {});
+    if (unknownUnits.length) {
+      return res.status(400).json({
+        error: `${[...new Set(unknownUnits)].join(', ')} ${unknownUnits.length === 1 ? 'is not a unit' : 'are not units'} `
+          + 'this system knows, so nothing was saved. A unit it cannot do arithmetic with would quietly convert nothing.',
+      });
+    }
     const lhimsMapKey = body.lhimsMapKey !== undefined
       ? (String(body.lhimsMapKey ?? '').trim() || null) : (existing.lhims_map_key ?? null);
     if (lhimsMapKey && !LHIMS_MEASURE_MAPS.some(m => m.key === lhimsMapKey)) {
@@ -1195,8 +1235,9 @@ export function middlewareRoutes() {
     }
 
     db.prepare(`UPDATE instrument_links SET analyte_map = ?, measure_map = ?, lhims_map_key = ?,
-        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(JSON.stringify(analyteMap), JSON.stringify(measureMap), lhimsMapKey, req.params.id);
+        unit_map = ?, outbound_unit_map = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(JSON.stringify(analyteMap), JSON.stringify(measureMap), lhimsMapKey,
+        JSON.stringify(unitMap), JSON.stringify(outboundUnitMap), req.params.id);
 
     // In place, not a restart: a name is not a socket.
     try { currentBridge()?.refreshSettings(Number(req.params.id)); } catch { /* the next start reads it anyway */ }
@@ -1204,9 +1245,9 @@ export function middlewareRoutes() {
     audit(req, {
       action: 'middleware_parameter_mappings', entity: 'instrument_links', entityId: req.params.id,
       oldValue: { analyteMap: json<Record<string, string>>(existing.analyte_map, {}) },
-      newValue: { analyteMap, lhimsMapKey },
+      newValue: { analyteMap, lhimsMapKey, unitMap, outboundUnitMap },
     });
-    res.json({ id: Number(req.params.id), analyteMap, measureMap, lhimsMapKey });
+    res.json({ id: Number(req.params.id), analyteMap, measureMap, lhimsMapKey, unitMap, outboundUnitMap });
   });
 
   return router;

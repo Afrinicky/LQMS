@@ -148,6 +148,8 @@ export function instrumentLinkRoutes() {
     return {
       ...rest,
       analyte_map: json<Record<string, string>>(row.analyte_map, {}),
+      unit_map: json<Record<string, string>>(row.unit_map, {}),
+      outbound_unit_map: json<Record<string, string>>(row.outbound_unit_map, {}),
       control_patterns: json<string[]>(row.control_patterns, []),
       measure_map: json<Record<string, number>>(row.measure_map, {}),
       lhims_password_set: Boolean(lhims_password),
@@ -172,6 +174,9 @@ export function instrumentLinkRoutes() {
       remotePort: b.remotePort !== undefined ? parseIntNullable(b.remotePort) : (existing.remote_port ?? null),
       watchPath: pick(b.watchPath, existing.watch_path) ?? null,
       analyteMap: b.analyteMap !== undefined ? JSON.stringify(b.analyteMap ?? {}) : (existing.analyte_map ?? null),
+      unitMap: b.unitMap !== undefined ? JSON.stringify(b.unitMap ?? {}) : (existing.unit_map ?? null),
+      outboundUnitMap: b.outboundUnitMap !== undefined
+        ? JSON.stringify(b.outboundUnitMap ?? {}) : (existing.outbound_unit_map ?? null),
       controlPatterns: b.controlPatterns !== undefined ? JSON.stringify(b.controlPatterns ?? []) : (existing.control_patterns ?? null),
       /*
        * The role is what says where results go.
@@ -310,14 +315,15 @@ export function instrumentLinkRoutes() {
 
     const result = db.prepare(`INSERT INTO instrument_links
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
-         listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, control_patterns,
+         listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, unit_map, outbound_unit_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
          lhims_password, lhims_map_key, measure_map, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
          close_after_message, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
@@ -339,13 +345,14 @@ export function instrumentLinkRoutes() {
 
     db.prepare(`UPDATE instrument_links SET name = ?, equipment_id = ?, section_id = ?, profile_key = ?,
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
-        watch_path = ?, analyte_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
+        watch_path = ?, analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
         fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
         close_after_message = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
         v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,

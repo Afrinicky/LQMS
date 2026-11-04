@@ -55,10 +55,20 @@ export function mapFeedMessage(db: DB, message: any, materialId: number, analyte
   const map = (safeJson(source?.analyte_map) as Record<string, string> | null) ?? {};
 
   const grid = values.map(v => [bestLabel([map[String(v.analyte)] ?? v.analyte, v.code], parameters), v.value]);
+  /*
+   * The unit each reading actually arrived in, carried alongside the grid.
+   *
+   * It used to be dropped here, and `readings[].unit` then reported the
+   * CONTROL's unit beside the analyser's number — so a screen showed 0.2673
+   * labelled 10^9/L when the analyser had sent 10^6/uL, and the run was
+   * charted against a mean a thousand times larger. The reading's own unit is
+   * the only thing that can settle that, so it travels with it.
+   */
+  const units = values.map(v => (v as { unit?: string | null }).unit ?? null);
   return {
     message: { ...message, parsed_values: values, ...messageFacts(db, message) },
     materialId,
-    ...mapRows(grid, parameters),
+    ...mapRows(grid, parameters, units),
   };
 }
 

@@ -52,6 +52,25 @@ import {
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
 import { alreadyRecorded, parkControlRun, recordTransmission } from './intake.js';
+import { diagnoseWatchPath } from './watchPath.js';
+import { convertValue } from '../../../shared/constants/units.js';
+
+/**
+ * Which unit this laboratory keeps a parameter in, if it has said.
+ *
+ * Looked up by the parameter's own name first and then by the analyser's code,
+ * so a laboratory can set it once for Reticulocytes rather than once for every
+ * mnemonic that reaches it. Nothing configured means nothing is rescaled.
+ */
+function unitWanted(map: Record<string, string>, analyte: string, code: string): string | null {
+  if (!map) return null;
+  for (const key of [analyte, code]) {
+    if (!key) continue;
+    const want = map[key] ?? map[String(key).toUpperCase()] ?? map[String(key).toLowerCase()];
+    if (want && String(want).trim()) return String(want).trim();
+  }
+  return null;
+}
 
 /* ============================================================================
    Where the client's log actually is
@@ -207,14 +226,14 @@ interface LinkRow {
   listen_host: string | null; listen_port: number | null;
   remote_host: string | null; remote_port: number | null;
   watch_path: string | null;
-  analyte_map: string | null; control_patterns: string | null;
+  analyte_map: string | null; unit_map: string | null; control_patterns: string | null;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
   close_after_message?: number;
   last_peer_mac?: string | null;
   peer_conflict?: string | null;
   forward_target: string | null;
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
-  lhims_map_key: string | null; measure_map: string | null;
+  lhims_map_key: string | null; measure_map: string | null; outbound_unit_map: string | null;
   tap_path: string | null; tap_offset: number | null;
   // Fetching, for the modes that can be asked rather than only pushed to.
   fetch_enabled: number; fetch_interval_seconds: number | null;
@@ -346,8 +365,10 @@ class Link {
       name: row.name,
       profile_key: row.profile_key,
       analyte_map: row.analyte_map,
+      unit_map: row.unit_map,
       control_patterns: row.control_patterns,
       measure_map: row.measure_map,
+      outbound_unit_map: row.outbound_unit_map,
       lhims_map_key: row.lhims_map_key,
       lhims_url: row.lhims_url,
       lhims_username: row.lhims_username,
@@ -1245,6 +1266,7 @@ class Link {
     }
 
     const linkMap = json<Record<string, string>>(this.row.analyte_map, {});
+    const unitMap = json<Record<string, string>>(this.row.unit_map, {});
     const patterns = json<string[]>(this.row.control_patterns, []);
     // Every control material this laboratory has registered, so a run named
     // only by its own lot is recognised without anybody configuring a pattern.
@@ -1258,13 +1280,41 @@ class Link {
     } as AnalyserMessage];
 
     for (const message of toStore) {
-      const values = message.results.map(result => ({
-        analyte: mapAnalyte(result.code, linkMap, this.row.profile_key),
-        code: result.code,
-        value: result.value,
-        unit: result.unit,
-        flag: result.flag,
-      }));
+      const values = message.results.map(result => {
+        const analyte = mapAnalyte(result.code, linkMap, this.row.profile_key);
+        /*
+         * The scale this laboratory keeps this parameter in.
+         *
+         * An analyser's transmitted unit need not be its displayed one, and a
+         * Sysmex proves it: RET# on the screen is 267.3 x10^9/L and on the
+         * wire is 0.2673 x10^6/uL. Recorded as it arrived, the bench reads a
+         * number that contradicts the analyser in front of them and quality
+         * control charts it against a target a thousandfold away.
+         *
+         * Where the laboratory has said which unit it keeps, and the arithmetic
+         * is certain, the reading is rescaled and both the original and the
+         * factor are kept beside it — a conversion nobody can audit is not
+         * better than no conversion. Where the arithmetic is NOT certain, the
+         * reading is left exactly as it came and carries the reason, because a
+         * plausible wrong number is the one outcome worth avoiding entirely.
+         */
+        const want = unitWanted(unitMap, analyte, result.code);
+        const outcome = want ? convertValue(result.value, result.unit, want) : null;
+        if (outcome?.ok && outcome.changed) {
+          return {
+            analyte, code: result.code,
+            value: String(outcome.value), unit: want, flag: result.flag,
+            originalValue: result.value, originalUnit: result.unit, unitFactor: outcome.factor,
+          };
+        }
+        return {
+          analyte, code: result.code,
+          value: result.value, unit: result.unit, flag: result.flag,
+          ...(outcome && !outcome.ok && result.unit
+            ? { unitNote: `Kept in ${result.unit}: ${outcome.note}` }
+            : {}),
+        };
+      });
 
       const verdict = classifyMessage({
         sampleId: message.sampleId,
@@ -1710,7 +1760,7 @@ export class InstrumentBridge {
     try {
       pending = this.getDb().prepare(`SELECT m.*, l.forward_host, l.forward_port, l.forward_target,
             l.lhims_url, l.lhims_username, l.lhims_password, l.lhims_map_key, l.measure_map,
-            l.name AS link_name, l.role
+            l.outbound_unit_map, l.name AS link_name, l.role
           FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
           WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND l.role = 'shared_forward'
             AND m.forward_attempts < ?
@@ -1780,6 +1830,19 @@ export class InstrumentBridge {
     if (!values.length) return { status: 'not_required', note: 'Nothing in this message to deliver.' };
 
     const overrides = json<Record<string, number>>(message.measure_map, {});
+    /*
+     * The unit the RECEIVER keeps each parameter in.
+     *
+     * The scale SECHLIMS holds a result in need not be the scale LHIMS files
+     * it under, and delivering a number into a field that means something else
+     * by it is the same error as recording it wrongly — only now it is in
+     * somebody's patient record. Where the laboratory has said what the
+     * receiver expects and the arithmetic is certain, the number is rescaled
+     * for delivery. Where it is not certain, the result is NOT delivered: it
+     * is refused and named, exactly as an unmapped parameter is, because a
+     * silent delivery in the wrong scale is the one thing worse than a gap.
+     */
+    const outboundUnits = json<Record<string, string>>(message.outbound_unit_map, {});
     const credentials = { username: String(message.lhims_username), password: String(message.lhims_password ?? '') };
 
     let delivered = 0;
@@ -1790,8 +1853,18 @@ export class InstrumentBridge {
       const measureId = lhimsMeasureId(String(value.code ?? value.analyte ?? ''), overrides, message.lhims_map_key);
       if (!measureId) { unmapped.push(String(value.code ?? value.analyte ?? '?')); continue; }
 
-      const raw = String(value.value ?? '').trim();
+      let raw = String(value.value ?? '').trim();
       if (!raw) continue;
+
+      const wanted = unitWanted(outboundUnits, String(value.analyte ?? ''), String(value.code ?? ''));
+      if (wanted && String(value.unit ?? '').trim()) {
+        const outcome = convertValue(raw, value.unit, wanted);
+        if (!outcome.ok) {
+          refused.push(`${value.code ?? value.analyte}: ${outcome.note}`);
+          continue;
+        }
+        if (outcome.changed) raw = String(outcome.value);
+      }
       // How many decimal places the analyser reported, so LHIMS stores the
       // number as it was measured rather than rounded.
       const decimals = raw.includes('.') ? Math.min(4, raw.split('.')[1].length) : 0;

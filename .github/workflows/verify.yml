@@ -74,6 +74,7 @@ jobs:
           npm run check:backup-scheduler
           npm run check:backup-destinations
           npx tsx scripts/humastar-folder-check.mjs
+          npx tsx scripts/units-check.mjs
 
       # The verification scripts that need a live host.
       #

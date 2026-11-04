@@ -34,6 +34,8 @@ import {
   flattenAnalyte, formOfUnit, identifyAnalyte, analyteSynonymGroup,
 } from '../../shared/constants/analyteIdentity.js';
 
+import { comparable, convertValue } from '../../shared/constants/units.js';
+
 export { formOfUnit, type AnalyteForm, type AnalyteIdentity };
 
 export function normalise(value: unknown): string {
@@ -151,19 +153,49 @@ export interface Mapping {
      * control has to be able to say which line filled which box.
      */
     label: string;
+    /** The unit the ANALYSER sent, where it sent one. Not the control's. */
+    sourceUnit?: string | null;
+    /** The value before it was rescaled, when it was. */
+    originalValue?: number | null;
+    /** Set when the reading was rescaled to the control's unit. */
+    converted?: { from: string; to: string; factor: number } | null;
   }>;
   unmatchedLabels: string[];
   missingAnalytes: Array<{ analyteId: number; analyte: string }>;
+  /**
+   * Readings that matched a parameter by name and were then NOT placed,
+   * because the unit they arrived in cannot be reconciled with the unit the
+   * control's target is expressed in.
+   *
+   * This is a refusal, not a failure. A reading of 0.2673 in 10^6/uL entered
+   * against a mean of 267.3 in 10^9/L is the same concentration written two
+   * ways, and charting it unconverted invents a thousandfold shift that never
+   * happened. Where the arithmetic is certain the reading is converted and
+   * placed; where it is not, nothing is placed and this says why, because a
+   * gap somebody can see beats a number nobody can trust.
+   */
+  unitConflicts: Array<{
+    analyteId: number; analyte: string; label: string;
+    value: number | null; readingUnit: string; targetUnit: string; note: string;
+  }>;
   matched: number;
 }
 
-/** One parameter per row: name in the first column, value in the next usable one. */
-export function mapRows(grid: any[][], analytes: any[]): Mapping {
+/**
+ * One parameter per row: name in the first column, value in the next usable one.
+ *
+ * `sourceUnits`, where given, is the unit the ANALYSER sent for each row, in
+ * the same order as the grid. A pasted spreadsheet supplies none and behaves
+ * exactly as it always has; a transmission supplies them, and then the unit is
+ * reconciled against the control's before any number is placed.
+ */
+export function mapRows(grid: any[][], analytes: any[], sourceUnits?: Array<string | null | undefined>): Mapping {
   const readings: Mapping['readings'] = [];
   const unmatched: string[] = [];
+  const conflicts: Mapping['unitConflicts'] = [];
   const seen = new Set<number>();
 
-  for (const row of grid) {
+  for (const [rowIndex, row] of grid.entries()) {
     if (!Array.isArray(row) || !row.length) continue;
     const label = String(row[0] ?? '').trim();
     if (!label) continue;
@@ -184,17 +216,65 @@ export function mapRows(grid: any[][], analytes: any[]): Mapping {
     }
     const qualitative = value === null ? qualitativeFrom(row.slice(1)) : null;
     if (value === null && !qualitative) continue;
+
+    // The unit the analyser sent, against the unit the target is written in.
+    const sourceUnit = sourceUnits?.[rowIndex] ?? null;
+    const reconciled = reconcile(value, sourceUnit, analyte.unit ?? null);
+    if (!reconciled.ok) {
+      conflicts.push({
+        analyteId: Number(analyte.id), analyte: analyte.analyte, label,
+        value, readingUnit: String(sourceUnit ?? ''), targetUnit: String(analyte.unit ?? ''),
+        note: reconciled.note,
+      });
+      continue;
+    }
+
     seen.add(Number(analyte.id));
     readings.push({
       analyteId: Number(analyte.id), analyte: analyte.analyte, unit: analyte.unit ?? null,
-      value, qualitativeResult: qualitative, raw: raw || qualitative || '', label,
+      value: reconciled.value, qualitativeResult: qualitative, raw: raw || qualitative || '', label,
+      sourceUnit, originalValue: reconciled.converted ? value : null, converted: reconciled.converted,
     });
   }
 
   return {
     readings, unmatchedLabels: [...new Set(unmatched)].slice(0, 20),
     missingAnalytes: analytes.filter(a => !seen.has(Number(a.id))).map(a => ({ analyteId: Number(a.id), analyte: a.analyte })),
+    unitConflicts: conflicts,
     matched: readings.length,
+  };
+}
+
+/**
+ * Put a reading into the unit its target is written in, or refuse.
+ *
+ * Three outcomes, and the third is the point of the whole exercise:
+ *   • the units agree, or one of them is silent — the number stands;
+ *   • they differ by a factor this system can derive — the number is rescaled
+ *     and says so, so a bench can see 0.2673 became 267.3 and why;
+ *   • they differ in a way that needs to know what the analyte is — nothing is
+ *     placed, because a plausible wrong number is the worst outcome available.
+ */
+interface Reconciled {
+  ok: boolean;
+  /** The number to place, in the control's unit. Only when ok. */
+  value?: number | null;
+  /** Set when the number was rescaled to get there. */
+  converted?: { from: string; to: string; factor: number } | null;
+  /** Why nothing may be placed. Only when not ok. */
+  note?: string;
+}
+
+function reconcile(value: number | null, sourceUnit: string | null, targetUnit: string | null): Reconciled {
+  if (value === null) return { ok: true, value, converted: null };
+  const verdict = comparable(sourceUnit, targetUnit);
+  if (!verdict.ok) return { ok: false, note: verdict.note ?? 'The units cannot be reconciled.' };
+  if (!verdict.factor || verdict.factor === 1) return { ok: true, value, converted: null };
+  const outcome = convertValue(value, sourceUnit, targetUnit);
+  if (!outcome.ok) return { ok: false, note: outcome.note };
+  return {
+    ok: true, value: outcome.value,
+    converted: { from: String(sourceUnit), to: String(targetUnit), factor: outcome.factor },
   };
 }
 
@@ -231,6 +311,7 @@ export function mapColumns(grid: any[][], analytes: any[]): Mapping {
   return {
     readings, unmatchedLabels: [...new Set(unmatched)].slice(0, 20),
     missingAnalytes: analytes.filter(a => !seen.has(Number(a.id))).map(a => ({ analyteId: Number(a.id), analyte: a.analyte })),
+    unitConflicts: [],
     matched: readings.length,
   };
 }
