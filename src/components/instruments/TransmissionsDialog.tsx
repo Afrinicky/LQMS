@@ -46,7 +46,9 @@ const STATES = [
   { key: 'all', label: 'Every state' },
 ];
 
-export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, lead, onUse, onReject, onClose, busyId }: {
+export default function TransmissionsDialog({
+  endpoint, scope, mapUrl, title, lead, onUse, onUseMany, selectLimit = 200, onReject, onClose, busyId,
+}: {
   /** Where the list comes from — the module's, or the bench's own unit-scoped one. */
   endpoint: string;
   /**
@@ -69,6 +71,17 @@ export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, le
   lead?: string;
   /** Taking one into the form underneath. Omitted where that is not on offer. */
   onUse?: (row: Transmission) => void | Promise<void>;
+  /**
+   * Taking SEVERAL into the form underneath, each as a run of its own.
+   *
+   * An analyser that transmits in bulk sends a week of stored control runs at
+   * once, and a laboratory entering its history has a hundred to account for.
+   * Where this is given the list becomes selectable; where it is not, nothing
+   * about the window changes.
+   */
+  onUseMany?: (rows: Transmission[]) => void | Promise<void>;
+  /** How many may be taken at once. */
+  selectLimit?: number;
   /** Setting one aside. Omitted on screens where that is not the bench's job. */
   onReject?: (row: Transmission) => void | Promise<void>;
   onClose: () => void;
@@ -91,6 +104,22 @@ export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, le
   const [state, setState] = useState('waiting');
   /** The transmission being looked at, before anything is taken from it. */
   const [preview, setPreview] = useState<Transmission | null>(null);
+  /**
+   * What has been picked for a set of runs, kept by id across pages and
+   * filters: a fortnight's runs are found by narrowing to one day at a time,
+   * and a selection that emptied itself on every filter would be useless.
+   */
+  const [picked, setPicked] = useState<Map<number, Transmission>>(new Map());
+
+  const selecting = Boolean(onUseMany);
+  /** A transmission still waiting is one a run can be recorded from. */
+  const usable = (row: Transmission) => row.status === 'matched' || row.status === 'unmatched';
+  const toggle = (row: Transmission) => setPicked(held => {
+    const next = new Map(held);
+    if (next.has(row.id)) next.delete(row.id);
+    else if (next.size < selectLimit) next.set(row.id, row);
+    return next;
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,6 +213,22 @@ export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, le
           {loading ? <><Loader2 size={12} className="pd-spin" /> Looking…</>
             : total === 0 ? 'Nothing matches that.'
             : `${total.toLocaleString()} transmission${total === 1 ? '' : 's'}${total > rows.length ? ` · showing ${offset + 1}–${shown}` : ''}`}
+          {selecting && rows.some(usable) && (
+            <>
+              <button type="button" className="pq-link il-tx-all"
+                onClick={() => setPicked(held => {
+                  const next = new Map(held);
+                  for (const row of rows.filter(usable)) {
+                    if (next.size >= selectLimit) break;
+                    next.set(row.id, row);
+                  }
+                  return next;
+                })}>Select these</button>
+              {picked.size > 0 && (
+                <button type="button" className="pq-link" onClick={() => setPicked(new Map())}>Clear selection</button>
+              )}
+            </>
+          )}
         </p>
 
         {rows.length > 0 && (
@@ -214,7 +259,14 @@ export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, le
                 </>
               );
               return (
-              <li key={row.id}>
+              <li key={row.id} className={picked.has(row.id) ? 'is-picked' : ''}>
+                {/* Picked for a set of runs. Only a transmission still waiting
+                    can be: one already accepted is a run on the record. */}
+                {selecting && (
+                  <input type="checkbox" className="il-tx-pick" checked={picked.has(row.id)}
+                    disabled={!usable(row)} onChange={() => toggle(row)}
+                    aria-label={`Select ${row.sample_id || 'this transmission'}`} />
+                )}
                 {/* The row opens the transmission, the same as it does in the
                     newest-few list on the form behind this window. A count of
                     parameters is not enough to decide whether this is the run
@@ -253,6 +305,18 @@ export default function TransmissionsDialog({ endpoint, scope, mapUrl, title, le
             onClick={() => setOffset(Math.max(0, offset - PAGE))}>Newer</button>
           <button type="button" className="secondary" disabled={shown >= total || loading}
             onClick={() => setOffset(offset + PAGE)}>Older</button>
+          {selecting && (
+            <>
+              <span className="il-tx-picked">
+                {picked.size === 0 ? 'None selected'
+                  : `${picked.size} selected${picked.size >= selectLimit ? ` (the most that can be taken at once)` : ''}`}
+              </span>
+              <button type="button" disabled={picked.size === 0}
+                onClick={() => { const rows = [...picked.values()]; setPicked(new Map()); void onUseMany!(rows); }}>
+                Use {picked.size || ''} selected
+              </button>
+            </>
+          )}
           <button type="button" className="secondary" onClick={onClose}>Close</button>
         </div>
       </div>

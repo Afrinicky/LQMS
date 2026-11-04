@@ -28,8 +28,9 @@ import {
   effectiveTarget, withEffectiveTarget, establishTargets, establishForMaterial, refreshEstablishedTargets,
   DEFINITIVE_POINTS, DEFINITIVE_DAYS, INTERIM_POINTS, INTERIM_DAYS,
 } from '../services/iqcTargets.js';
-import { effectiveTolerance, parseTolerance, lotExpired } from '../../shared/constants/iqc.js';
+import { effectiveTolerance, parseTolerance, lotExpired, IQC_MAX_BATCH_RUNS } from '../../shared/constants/iqc.js';
 import type { IqcControlType, IqcRuleProfile } from '../../shared/constants/iqc.js';
+import { IQC_ENTRY_METHODS, type IqcEntryMethod } from '../../shared/constants/routineWork.js';
 
 type MaterialRow = {
   id: number; material_name: string; lot_number: string; test_name: string;
@@ -259,6 +260,139 @@ export function iqcRunRoutes() {
   }
 
   /**
+   * What a control measures, with the limits a run is actually judged against.
+   *
+   * The effective ones: what a human entered where they entered it, and
+   * otherwise what this laboratory has established from its own runs of this
+   * lot. A control whose vendor gave no SD is still judged, on the laboratory's
+   * own imprecision, exactly as ISO 15189 §7.3.7.2 intends — instead of
+   * passing everything by default.
+   */
+  function activeAnalytes(db: any, materialId: number): AnalyteDef[] {
+    return (db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
+      .all(materialId) as any[]).map(withEffectiveTarget) as AnalyteDef[];
+  }
+
+  /**
+   * Prior accepted readings per analyte as z-scores, newest first — the history
+   * the run-length rules need.
+   *
+   * Rejected runs are excluded: they were investigated and repeated, so
+   * counting them would re-flag work already closed out. Read as at the run's
+   * own date, which is what makes a run entered after the fact judged against
+   * the runs that actually came before it.
+   */
+  function historyFor(db: any, analytes: AnalyteDef[], runDate: string): History {
+    const history: History = {};
+    const priorStmt = db.prepare(`SELECT res.result_value FROM iqc_results res
+      JOIN iqc_runs r ON r.id = res.iqc_run_id
+      WHERE res.iqc_analyte_id = ? AND r.status != 'out_of_control' AND r.run_date <= ?
+        -- A re-read of a patient sample is not a reading of the control
+        -- material, so it never enters the control's own run history.
+        AND COALESCE(r.run_kind, 'control') = 'control'
+      ORDER BY r.run_date DESC, r.id DESC LIMIT 12`);
+    for (const a of analytes) {
+      const rows = priorStmt.all(a.id, runDate) as { result_value: number }[];
+      const mean = a.target_mean, sd = a.target_sd;
+      history[a.id] = (mean !== null && sd !== null && sd > 0)
+        ? rows.map(r => (r.result_value - mean) / sd)
+        : [];
+    }
+    return history;
+  }
+
+  /** One control run as a caller states it, whether typed or transmitted. */
+  type RunEntry = {
+    runDate: string;
+    runTime?: string | null;
+    shift?: string | null;
+    equipmentId?: number | null;
+    sectionId?: number | null;
+    operatorStaffId?: number | null;
+    reagentLot?: string | null;
+    comment?: string | null;
+    observedOrganism?: string | null;
+    readings: any[];
+    /** How the readings got in, where the caller knows. */
+    entryMethod?: string | null;
+    /** The transmission this run was read off, where one was. */
+    feedMessageId?: number | null;
+  };
+
+  /**
+   * Evaluate one control run and write it, with its readings.
+   *
+   * THE CALLER OWNS THE TRANSACTION. One run is wrapped by the single-run
+   * endpoint; a batch is wrapped once around the whole batch, so a run entered
+   * earlier in the batch is part of the history the next one is judged against
+   * — which is the only honest way to evaluate a week of runs in one go.
+   */
+  function writeControlRun(req: any, db: any, material: MaterialRow, analytes: AnalyteDef[], entry: RunEntry) {
+    const isCs = material.control_type === 'culture_sensitivity';
+    const observedOrganism = isCs ? (String(entry.observedOrganism ?? '').trim() || null) : null;
+    const expectedOrganism = (material as MaterialRow & { expected_organism?: string | null }).expected_organism ?? null;
+
+    const verdict = evaluateRun(material.control_type, material.rule_profile, analytes, entry.readings,
+      historyFor(db, analytes, entry.runDate),
+      isCs ? { expected: expectedOrganism, observed: observedOrganism } : undefined);
+
+    // The run number lands in a UNIQUE column, so derive it collision-safely.
+    const runNumber = generateRecordNumber(db, 'iqc_runs', 'QCR', new Date().toISOString(), 'run_number');
+    const operatorStaffId = getStaffIdOrCurrent(req, entry.operatorStaffId);
+    const equipmentId = entry.equipmentId ?? null;
+
+    const r = db.prepare(`INSERT INTO iqc_runs (run_number, iqc_material_id, run_date, run_time, shift, equipment_id,
+        section_id, operator_staff_id, reagent_lot, status, rule_summary, patient_results_released, comment,
+        observed_organism, entry_method, feed_message_id, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(runNumber, material.id, entry.runDate, entry.runTime ?? null, entry.shift ?? null,
+        equipmentId, entry.sectionId ?? null, operatorStaffId,
+        entry.reagentLot ?? null, verdict.status, verdict.ruleSummary,
+        verdict.mayReleasePatientResults ? 1 : 0, entry.comment ?? null, observedOrganism,
+        // How the numbers got in, kept on the run itself: an assessor asking
+        // "how did this get here?" should not have to infer it.
+        IQC_ENTRY_METHODS.includes(String(entry.entryMethod) as IqcEntryMethod) ? String(entry.entryMethod) : 'manual',
+        entry.feedMessageId ?? null, req.user!.id);
+    const runId = Number(r.lastInsertRowid);
+
+    const insert = db.prepare(`INSERT INTO iqc_results (iqc_material_id, iqc_run_id, iqc_analyte_id, run_date, run_time,
+        result_value, qualitative_result, expected_result, is_qualitative, interpretation_result, entered_by_staff_id, equipment_id,
+        status, rule_violation, z_score, comment, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const v of verdict.analytes) {
+      // The organism check rides as a synthetic verdict with analyteId 0; it
+      // is recorded on the run itself, not as an analyte reading, so skip it.
+      if (!v.analyteId) continue;
+      const qualitative = !isCs && v.qualitativeResult !== null && v.qualitativeResult !== undefined;
+      insert.run(material.id, runId, v.analyteId, entry.runDate, entry.runTime ?? null,
+        // result_value is NOT NULL in the original schema; a qualitative or
+        // categorical reading stores 0 and carries its meaning elsewhere.
+        v.value ?? 0,
+        isCs ? null : v.qualitativeResult, v.expectedResult, qualitative ? 1 : 0,
+        isCs ? v.qualitativeResult : null,
+        operatorStaffId, equipmentId,
+        v.status, v.rule, v.zScore, null, req.user!.id);
+    }
+
+    // The transmission it was read off is accounted for: accepted, and tied to
+    // the run it produced, so the same run cannot be brought in twice.
+    if (entry.feedMessageId) {
+      try {
+        db.prepare(`UPDATE iqc_feed_messages SET status = 'accepted', iqc_run_id = ?,
+            handled_by_staff_id = ?, handled_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(runId, operatorStaffId, entry.feedMessageId);
+      } catch { /* the run is the record; the message's state is bookkeeping */ }
+    }
+
+    return { runId, runNumber, verdict };
+  }
+
+  /** The readings a caller sent, trimmed to what is worth evaluating. */
+  function readingsOf(raw: unknown): any[] {
+    return Array.isArray(raw) ? raw.filter(r => r && parseIntNullable((r as any).analyteId)) : [];
+  }
+
+  /**
    * Record a control run. The rules that apply come from the material, so the
    * same call works for an eight-parameter FBC control and a single reactive
    * HBsAg control — the caller supplies readings, not judgements.
@@ -291,13 +425,7 @@ export function iqcRunRoutes() {
       return recordRetainedRun(req, res, db, material, runDate);
     }
 
-    // The limits the run is judged against are the effective ones: what a human
-    // entered where they entered it, and otherwise what this laboratory has
-    // established from its own runs of this lot. A control whose vendor gave no
-    // SD is still judged, on the laboratory's own imprecision, exactly as ISO
-    // 15189 §7.3.7.2 intends — instead of passing everything by default.
-    const analytes = (db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as any[])
-      .map(withEffectiveTarget) as AnalyteDef[];
+    const analytes = activeAnalytes(db, materialId);
     // An identification-only C&S control has no antimicrobial panel — it is run
     // on the organism alone, so the "must have analytes" rule is lifted for it.
     if (analytes.length === 0 && !isCs) return res.status(400).json({ error: 'This control has no analytes defined yet. Define what it measures first.' });
@@ -307,65 +435,17 @@ export function iqcRunRoutes() {
       return res.status(400).json({ error: isCs ? 'Record the organism identified and/or at least one susceptibility category.' : 'Enter at least one reading.' });
     }
 
-    // Prior accepted readings per analyte, most recent first — the history the
-    // run-length rules need. Rejected runs are excluded: they were investigated
-    // and repeated, so counting them would re-flag work already closed out.
-    const history: History = {};
-    const priorStmt = db.prepare(`SELECT res.result_value FROM iqc_results res
-      JOIN iqc_runs r ON r.id = res.iqc_run_id
-      WHERE res.iqc_analyte_id = ? AND r.status != 'out_of_control' AND r.run_date <= ?
-        -- A re-read of a patient sample is not a reading of the control
-        -- material, so it never enters the control's own run history.
-        AND COALESCE(r.run_kind, 'control') = 'control'
-      ORDER BY r.run_date DESC, r.id DESC LIMIT 12`);
-    for (const a of analytes) {
-      const rows = priorStmt.all(a.id, runDate) as { result_value: number }[];
-      const mean = a.target_mean, sd = a.target_sd;
-      history[a.id] = (mean !== null && sd !== null && sd > 0)
-        ? rows.map(r => (r.result_value - mean) / sd)
-        : [];
-    }
-
-    const expectedOrganism = (material as MaterialRow & { expected_organism?: string | null }).expected_organism ?? null;
-    const verdict = evaluateRun(material.control_type, material.rule_profile, analytes, readings, history,
-      isCs ? { expected: expectedOrganism, observed: observedOrganism } : undefined);
-
-    const createdAt = new Date().toISOString();
-    // The run number lands in a UNIQUE column, so derive it collision-safely.
-    const runNumber = generateRecordNumber(db, 'iqc_runs', 'QCR', createdAt, 'run_number');
-    const operatorStaffId = getStaffIdOrCurrent(req, req.body?.operatorStaffId);
-
-    let runId = 0;
+    let outcome: { runId: number; runNumber: string; verdict: ReturnType<typeof evaluateRun> } | null = null;
     const tx = db.transaction(() => {
-      const r = db.prepare(`INSERT INTO iqc_runs (run_number, iqc_material_id, run_date, run_time, shift, equipment_id,
-          section_id, operator_staff_id, reagent_lot, status, rule_summary, patient_results_released, comment, observed_organism, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(runNumber, materialId, runDate, req.body?.runTime ?? null, req.body?.shift ?? null,
-          parseIntNullable(req.body?.equipmentId), parseIntNullable(req.body?.sectionId), operatorStaffId,
-          req.body?.reagentLot ?? null, verdict.status, verdict.ruleSummary,
-          verdict.mayReleasePatientResults ? 1 : 0, req.body?.comment ?? null, observedOrganism, req.user!.id);
-      runId = Number(r.lastInsertRowid);
-
-      const insert = db.prepare(`INSERT INTO iqc_results (iqc_material_id, iqc_run_id, iqc_analyte_id, run_date, run_time,
-          result_value, qualitative_result, expected_result, is_qualitative, interpretation_result, entered_by_staff_id, equipment_id,
-          status, rule_violation, z_score, comment, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const v of verdict.analytes) {
-        // The organism check rides as a synthetic verdict with analyteId 0; it
-        // is recorded on the run itself, not as an analyte reading, so skip it.
-        if (!v.analyteId) continue;
-        const qualitative = !isCs && v.qualitativeResult !== null && v.qualitativeResult !== undefined;
-        insert.run(materialId, runId, v.analyteId, runDate, req.body?.runTime ?? null,
-          // result_value is NOT NULL in the original schema; a qualitative or
-          // categorical reading stores 0 and carries its meaning elsewhere.
-          v.value ?? 0,
-          isCs ? null : v.qualitativeResult, v.expectedResult, qualitative ? 1 : 0,
-          isCs ? v.qualitativeResult : null,
-          operatorStaffId, parseIntNullable(req.body?.equipmentId),
-          v.status, v.rule, v.zScore, null, req.user!.id);
-      }
+      outcome = writeControlRun(req, db, material, analytes, {
+        runDate, runTime: req.body?.runTime ?? null, shift: req.body?.shift ?? null,
+        equipmentId: parseIntNullable(req.body?.equipmentId), sectionId: parseIntNullable(req.body?.sectionId),
+        operatorStaffId: req.body?.operatorStaffId, reagentLot: req.body?.reagentLot ?? null,
+        comment: req.body?.comment ?? null, observedOrganism, readings,
+      });
     });
     tx();
+    const { runId, runNumber, verdict } = outcome!;
 
     // This run is one more point in the cumulative set. Recomputing here is
     // what makes the twentieth run the one that turns a control that could not
@@ -375,6 +455,134 @@ export function iqcRunRoutes() {
 
     audit(req, { action: 'create', entity: 'iqc_runs', entityId: runId, newValue: { runNumber, status: verdict.status, rule: verdict.ruleSummary } });
     res.status(201).json({ id: runId, runNumber, ...verdict, targets: currentTargets(db, materialId) });
+  });
+
+  /**
+   * Record several control runs of one control in one entry.
+   *
+   * Why this exists: an analyser that transmits in bulk sends a week of stored
+   * control runs at once, and a laboratory entering its history has a hundred
+   * runs to put on the record. One at a time that is an afternoon of typing,
+   * and the Levey-Jennings chart stays empty until somebody finishes.
+   *
+   * What it is NOT is a bulk accept. Every run here goes through exactly the
+   * same evaluation as a run typed in singly: its own date, its own readings,
+   * its own verdict, and a failure withholds patient results in the same way.
+   * The saving is in the typing, never in the judgement.
+   *
+   * Two things make the order matter, and both are honoured:
+   *
+   *   The runs are evaluated OLDEST FIRST, because the run-length rules read
+   *   what came before — ten rising results are a trend whether they are
+   *   entered on ten mornings or in one sitting.
+   *
+   *   They are written in ONE transaction, so a batch either lands whole or not
+   *   at all. Half a week of control history is worse than none: nobody can
+   *   tell which half.
+   */
+  router.post('/runs/batch', iqcUnitWrite('create',
+    'Recording control runs needs the create right on Quality Control, or the running of the unit the control belongs to.'), (req, res) => {
+    const db = getDb();
+    const materialId = parseIntNullable(req.body?.iqcMaterialId);
+    if (!materialId) return res.status(400).json({ error: 'iqcMaterialId is required' });
+    const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(materialId) as MaterialRow | undefined;
+    if (!material) return res.status(404).json({ error: 'IQC material not found' });
+    if (material.is_active !== 1) return res.status(400).json({ error: 'That control material is no longer active.' });
+
+    const isCs = material.control_type === 'culture_sensitivity';
+    const analytes = activeAnalytes(db, materialId);
+    if (analytes.length === 0 && !isCs) {
+      return res.status(400).json({ error: 'This control has no analytes defined yet. Define what it measures first.' });
+    }
+
+    const submitted = Array.isArray(req.body?.runs) ? req.body.runs : [];
+    if (submitted.length === 0) return res.status(400).json({ error: 'Add at least one run to record.' });
+    if (submitted.length > IQC_MAX_BATCH_RUNS) {
+      return res.status(400).json({ error: `A single entry carries at most ${IQC_MAX_BATCH_RUNS} runs. Record them in smaller batches.` });
+    }
+
+    // Defaults the whole batch shares, each overridable per run.
+    const shared = {
+      shift: req.body?.shift ?? null,
+      equipmentId: parseIntNullable(req.body?.equipmentId),
+      sectionId: parseIntNullable(req.body?.sectionId),
+      operatorStaffId: req.body?.operatorStaffId,
+      reagentLot: req.body?.reagentLot ?? null,
+      comment: req.body?.comment ?? null,
+    };
+
+    /* Each run is checked on its own terms before anything is written, and a
+       run that cannot be recorded is named rather than dropped. */
+    const ready: Array<RunEntry & { index: number }> = [];
+    const refused: Array<{ index: number; runDate: string | null; reason: string }> = [];
+    submitted.forEach((raw: any, index: number) => {
+      const runDate = String(raw?.runDate ?? '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(runDate)) {
+        return refused.push({ index, runDate: runDate || null, reason: 'No run date, so there is no day to record it against.' });
+      }
+      if (runDate > new Date().toISOString().slice(0, 10)) {
+        return refused.push({ index, runDate, reason: 'That date is in the future.' });
+      }
+      if (lotExpired(material.expiry_date, runDate, material.recording_basis)) {
+        return refused.push({ index, runDate, reason: `The lot expired on ${material.expiry_date}.` });
+      }
+      const readings = readingsOf(raw?.readings);
+      const observedOrganism = isCs ? (String(raw?.observedOrganism ?? '').trim() || null) : null;
+      if (readings.length === 0 && !(isCs && observedOrganism)) {
+        return refused.push({ index, runDate, reason: 'No readings on this run.' });
+      }
+      ready.push({
+        index, runDate,
+        runTime: String(raw?.runTime ?? '').trim() || null,
+        shift: raw?.shift ?? shared.shift,
+        equipmentId: parseIntNullable(raw?.equipmentId) ?? shared.equipmentId,
+        sectionId: parseIntNullable(raw?.sectionId) ?? shared.sectionId,
+        operatorStaffId: raw?.operatorStaffId ?? shared.operatorStaffId,
+        reagentLot: raw?.reagentLot ?? shared.reagentLot,
+        comment: raw?.comment ?? shared.comment,
+        observedOrganism, readings,
+        entryMethod: raw?.feedMessageId ? 'instrument' : (raw?.entryMethod ?? null),
+        feedMessageId: parseIntNullable(raw?.feedMessageId),
+      });
+    });
+
+    if (ready.length === 0) {
+      return res.status(400).json({ error: 'None of these runs could be recorded.', refused });
+    }
+
+    // Oldest first: the rules read the runs that came before.
+    ready.sort((a, b) => `${a.runDate} ${a.runTime ?? ''}`.localeCompare(`${b.runDate} ${b.runTime ?? ''}`));
+
+    const recorded: Array<{
+      id: number; runNumber: string; runDate: string; runTime: string | null;
+      status: string; ruleSummary: string | null; mayReleasePatientResults: boolean;
+      readings: number; feedMessageId: number | null;
+    }> = [];
+    const tx = db.transaction(() => {
+      for (const entry of ready) {
+        const { runId, runNumber, verdict } = writeControlRun(req, db, material, analytes, entry);
+        recorded.push({
+          id: runId, runNumber, runDate: entry.runDate, runTime: entry.runTime ?? null,
+          status: verdict.status, ruleSummary: verdict.ruleSummary,
+          mayReleasePatientResults: verdict.mayReleasePatientResults,
+          readings: entry.readings.length, feedMessageId: entry.feedMessageId ?? null,
+        });
+      }
+    });
+    tx();
+
+    refreshEstablishedTargets(db, materialId, req.user!.id);
+
+    const rejected = recorded.filter(r => r.status === 'out_of_control').length;
+    const warned = recorded.filter(r => r.status === 'warning').length;
+    audit(req, {
+      action: 'create', entity: 'iqc_runs', entityId: materialId,
+      newValue: { batch: recorded.length, rejected, warned, runs: recorded.map(r => r.runNumber) },
+    });
+    res.status(201).json({
+      recorded: recorded.length, rejected, warned,
+      runs: recorded, refused, targets: currentTargets(db, materialId),
+    });
   });
 
   /* ------------------------------------------------- establishing the target */

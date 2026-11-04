@@ -15,7 +15,13 @@ import {
 import {
   QUALITATIVE_LABELS, RULE_LABELS, scaleForOutcome,
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, IQC_RECORDING_BASIS_CHIPS, runStampFrom,
+  IQC_ENTRY_SCOPES, IQC_ENTRY_SCOPE_LABELS, IQC_ENTRY_SCOPE_HINTS, IQC_MAX_BATCH_RUNS,
+  type IqcEntryScope,
 } from '../../../shared/constants/iqc';
+import BulkRunQueue, {
+  BulkRunOutcome, blankQueuedRun, filledCount, queuedFromMapping,
+  type BulkOutcome, type QueueMapping, type QueuedRun,
+} from '../../components/iqc/BulkRunQueue';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
 import { useAnalyserListen, armAnalyser } from '../../hooks/useAnalyserListen';
 import LiveTransmission from '../../components/instruments/LiveTransmission';
@@ -517,6 +523,17 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
   const [runKind, setRunKind] = useState<'control' | 'retained_sample'>('control');
   const [samples, setSamples] = useState<any[]>([]);
   const [sampleId, setSampleId] = useState('');
+  /**
+   * One run, or a set of them.
+   *
+   * An analyser that transmits in bulk sends a week of stored control runs at
+   * once, and a bench catching up on a lot's history has a hundred to enter.
+   * Each is recorded as a run of its own, on its own date.
+   */
+  const [scope, setScope] = useState<IqcEntryScope>('single');
+  const [queue, setQueue] = useState<QueuedRun[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -566,6 +583,14 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
    * put every one of them on one day of the Levey-Jennings chart.
    */
   const retrospective = detail?.material?.recording_basis === 'retrospective';
+  /**
+   * A set of runs rather than one.
+   *
+   * Only of the control material: a re-read is judged against what one
+   * particular sample gave the first time, so a set of them is a set of
+   * different comparisons and not a batch of anything.
+   */
+  const batch = scope === 'batch' && !retained;
   const sample = samples.find(x => String(x.id) === sampleId);
   /** What the chosen sample originally gave for one parameter. */
   const originalFor = (analyteId: number) => sample?.values?.find(v => v.iqc_analyte_id === analyteId);
@@ -594,6 +619,8 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
   }, []);
 
   const filled = analytes.filter(a => String(values[a.id] ?? '').trim() !== '').length;
+  /** How many queued runs carry a reading, which is what will be recorded. */
+  const queued = queue.filter(run => filledCount(run, analytes) > 0).length;
 
   /**
    * Fetch, on the run itself rather than behind a tab.
@@ -696,6 +723,81 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
     finally { setBusy(null); }
   }
 
+  /** One queued run's boxes, as the host takes readings. */
+  const readingsFrom = (entered: Record<number, string>) => analytes
+    .filter(a => String(entered[a.id] ?? '').trim() !== '')
+    .map(a => {
+      const raw = String(entered[a.id]).trim();
+      return qualitative || detail?.material.control_type === 'culture_sensitivity'
+        ? { analyteId: a.id, qualitativeResult: raw }
+        : { analyteId: a.id, value: Number(raw) };
+    });
+
+  /**
+   * The transmissions the bench selected, each queued as a run of its own.
+   *
+   * Read in one request rather than one per transmission: a week of stored
+   * control runs is fifty round trips otherwise, before a single box is filled.
+   */
+  const queueTransmissions = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    setBusy('queue'); setProblem(null);
+    try {
+      const answer = await api<{ mappings: QueueMapping[] }>(
+        `/iqc/portal/feed-messages/mapping?materialId=${control.id}&ids=${ids.join(',')}`);
+      const today = new Date().toISOString().slice(0, 10);
+      setQueue(held => {
+        const seen = new Set(held.map(run => run.feedMessageId).filter(Boolean));
+        const added = (answer.mappings ?? [])
+          .map(mapping => queuedFromMapping(mapping, today))
+          // The same transmission twice is the same run twice, and a repeated
+          // point on a Levey-Jennings chart is a reading that never happened.
+          .filter(run => !run.feedMessageId || !seen.has(run.feedMessageId));
+        return [...held, ...added].slice(0, IQC_MAX_BATCH_RUNS);
+      });
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(null); }
+  };
+
+  /** Record every queued run, each judged on its own date and readings. */
+  async function saveQueue() {
+    if (!detail) return;
+    const runs = queue
+      .map(run => ({
+        runDate: run.runDate,
+        runTime: run.runTime || undefined,
+        feedMessageId: run.feedMessageId ?? undefined,
+        readings: readingsFrom(run.values),
+      }))
+      .filter(run => run.readings.length > 0);
+    if (!runs.length) { setProblem('None of the queued runs carries a result.'); return; }
+
+    setBusy('save'); setProblem(null);
+    try {
+      setBulkOutcome(await api<BulkOutcome>('/iqc/runs/batch', {
+        method: 'POST',
+        body: JSON.stringify({
+          iqcMaterialId: control.id,
+          reagentLot: reagentLot || undefined,
+          comment: comment || undefined,
+          equipmentId: control.equipmentId ?? undefined,
+          runs,
+        }),
+      }));
+      setQueue([]);
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  if (bulkOutcome) {
+    return (
+      <Modal onClose={onSaved} title={bulkOutcome.rejected > 0 ? 'Runs recorded, with failures' : 'Runs recorded'}>
+        <BulkRunOutcome outcome={bulkOutcome} rules={RULE_LABELS} />
+        <div className="pr-btns"><button type="button" onClick={onSaved}>Close</button></div>
+      </Modal>
+    );
+  }
+
   if (verdict) {
     return (
       <Modal onClose={onSaved} title={verdict.status === 'out_of_control' ? 'The control failed' : 'Control recorded'}>
@@ -747,10 +849,25 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
             <button type="button" className={!retained ? 'is-on' : ''} onClick={() => setRunKind('control')}>
               Control material
             </button>
-            <button type="button" className={retained ? 'is-on' : ''} onClick={() => setRunKind('retained_sample')}>
+            <button type="button" className={retained ? 'is-on' : ''}
+              onClick={() => { setRunKind('retained_sample'); setScope('single'); }}>
               Previously run sample
             </button>
           </div>
+
+          {/* One run, or a set of them. Offered for the control material only:
+              a re-read is judged against what one sample gave the first time. */}
+          {!retained && (
+            <div className="iqc-scope">
+              {IQC_ENTRY_SCOPES.map(s => (
+                <button key={s} type="button" className={scope === s ? 'is-on' : ''}
+                  onClick={() => setScope(s)} title={IQC_ENTRY_SCOPE_HINTS[s]}>
+                  {IQC_ENTRY_SCOPE_LABELS[s]}
+                </button>
+              ))}
+              <span className="muted">{IQC_ENTRY_SCOPE_HINTS[scope]}</span>
+            </div>
+          )}
 
           {retained && (
             <div className="iqc-kind-pick">
@@ -789,7 +906,7 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
             </div>
           )}
 
-          {methods.length > 1 && !retained && (
+          {methods.length > 1 && !retained && !batch && (
             <div className="iqc-methods">
               {methods.map(m => (
                 <button key={m} type="button" className={method === m ? 'is-active' : ''}
@@ -800,14 +917,14 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
             </div>
           )}
           {/* Only worth saying when there was a choice to make. */}
-          {!retained && methods.length > 1 && <p className="iqc-method-hint">{IQC_ENTRY_METHOD_HINTS[method]}</p>}
+          {!retained && !batch && methods.length > 1 && <p className="iqc-method-hint">{IQC_ENTRY_METHOD_HINTS[method]}</p>}
 
-          {!retained && method === 'paste' && <PastePanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
-          {!retained && method === 'worksheet' && <WorksheetPanel controlId={control.id} analytes={analytes} values={values} setValues={setValues} onProblem={setProblem} />}
-          {!retained && method === 'upload' && <UploadPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
-          {!retained && method === 'scan' && <ScanPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && !batch && method === 'paste' && <PastePanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && !batch && method === 'worksheet' && <WorksheetPanel controlId={control.id} analytes={analytes} values={values} setValues={setValues} onProblem={setProblem} />}
+          {!retained && !batch && method === 'upload' && <UploadPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
+          {!retained && !batch && method === 'scan' && <ScanPanel controlId={control.id} onMapped={applyMapping} onProblem={setProblem} />}
 
-          {mapping && <MappingReport mapping={mapping} />}
+          {mapping && !batch && <MappingReport mapping={mapping} />}
 
           {addingSample && (
             <AddSample
@@ -843,7 +960,44 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
               }} />
           )}
 
-          <div className="iqc-entry">
+          {/* A set of runs: the transmissions selected, each queued as a run
+              of its own, with its own date and readings. */}
+          {batch && (
+            <div className="iqc-entry">
+              <div className="iqc-entry-head">
+                <span>Runs</span>
+                <button type="button" className="iqc-fetch tiny"
+                  disabled={busy !== null || queue.length >= IQC_MAX_BATCH_RUNS}
+                  onClick={() => setPicking(true)}>
+                  <Radio size={11} /> Select transmissions
+                </button>
+                <button type="button" className="pq-link"
+                  disabled={busy !== null || queue.length >= IQC_MAX_BATCH_RUNS}
+                  onClick={() => setQueue(held => [...held, blankQueuedRun(runDate, runTime)])}>
+                  <Plus size={11} /> Add a run
+                </button>
+                <span className="muted">{busy === 'queue' ? 'Reading the transmissions…' : `${queue.length} queued`}</span>
+              </div>
+              <BulkRunQueue
+                analytes={analytes} controlType={detail.material.control_type}
+                controlName={control.materialName}
+                runs={queue} onChange={setQueue} max={IQC_MAX_BATCH_RUNS} busy={busy !== null} />
+            </div>
+          )}
+
+          {/* What the Result Filler reads this form by. The extension fills a
+              form from a transmission SECHLIMS has already recorded and refuses
+              to fill anything it cannot identify first; a control run is
+              identified by its lot, so the lot is stated rather than guessed
+              at. Nothing here sends, saves or accepts anything. */}
+          {!batch && !retained && (
+            <p className="iqc-rf-id">
+              <span>Control lot</span>
+              <strong data-rf-identifier="control" data-rf-label="Control lot">{control.lotNumber}</strong>
+            </p>
+          )}
+
+          {!batch && <div className="iqc-entry" data-rf-form="iqc-run">
             {/* The one place results are entered, and the one place they can be
                 received. Type them, or let the analyser send them — same form,
                 same boxes, one button. */}
@@ -926,7 +1080,7 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
                           ))}
                         </select>
                       ) : (
-                        <TextField inputMode="decimal" value={raw}
+                        <TextField inputMode="decimal" value={raw} data-rf-analyte={a.analyte}
                           onValue={next => setValues(v => ({ ...v, [a.id]: next }))} />
                       )}
                       <span className="iqc-an-range">
@@ -946,24 +1100,30 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
                 );
               })}
             </ul>
-          </div>
+          </div>}
 
           <div className="iqc-run-meta">
-            <label>
-              <span>Date run</span>
-              <input type="date" value={runDate} max={new Date().toISOString().slice(0, 10)}
-                onChange={e => setRunDate(e.target.value)} />
-            </label>
-            <label><span>Time run</span><input type="time" value={runTime} onChange={e => setRunTime(e.target.value)} /></label>
+            {/* In a set, every run carries its own date and time: they are what
+                the runs differ by. */}
+            {!batch && (
+              <label>
+                <span>Date run</span>
+                <input type="date" value={runDate} max={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setRunDate(e.target.value)} />
+              </label>
+            )}
+            {!batch && (
+              <label><span>Time run</span><input type="time" value={runTime} onChange={e => setRunTime(e.target.value)} /></label>
+            )}
             <label><span>Reagent lot</span><TextField value={reagentLot} onValue={setReagentLot} placeholder="optional" /></label>
           </div>
-          {retrospective && runDate === new Date().toISOString().slice(0, 10) && (
+          {!batch && retrospective && runDate === new Date().toISOString().slice(0, 10) && (
             <p className="iqc-backdated">
               <AlertTriangle size={12} /> This is a retrospective record. Set the date and time to when the control
               was actually run — every run entered under today&rsquo;s date lands on one point of the chart.
             </p>
           )}
-          {runDate !== new Date().toISOString().slice(0, 10) && (
+          {!batch && runDate !== new Date().toISOString().slice(0, 10) && (
             <p className="iqc-backdated">
               <AlertTriangle size={12} /> This run will be recorded against {runDate}, not today. The rules are
               evaluated against the runs that came before that date, which is what makes a caught-up entry honest.
@@ -971,19 +1131,42 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
           )}
           <label>
             <span>Comment</span>
-            <TextField value={comment} onValue={setComment} placeholder="Anything worth recording about this run" />
+            <TextField value={comment} onValue={setComment}
+              placeholder={batch ? 'Anything worth recording about these runs' : 'Anything worth recording about this run'} />
           </label>
 
           {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
 
           <div className="pr-btns">
-            <button type="button" disabled={busy === 'save' || filled === 0 || (retained && !sampleId)}
-              onClick={() => void save()}>
+            <button type="button"
+              disabled={busy !== null || (batch ? queued === 0 : filled === 0 || (retained && !sampleId))}
+              onClick={() => void (batch ? saveQueue() : save())}>
               {busy === 'save' ? <Loader2 size={14} className="pd-spin" /> : <Check size={14} />}
-              {retained ? ' Record the re-read' : ' Record the run'}
+              {batch ? ` Record ${queued || ''} run${queued === 1 ? '' : 's'}`
+                : retained ? ' Record the re-read' : ' Record the run'}
             </button>
             <button type="button" className="secondary" onClick={onClose}>Cancel</button>
           </div>
+
+          {/* Every transmission the analysers have sent, selectable: a week of
+              stored control runs is chosen once rather than opened one at a
+              time. Deliberately not narrowed to this control — an analyser that
+              sends no lot number leaves its runs matched to nothing, and hiding
+              those would hide most of what the bench came here for. */}
+          {picking && (
+            <TransmissionsDialog
+              endpoint="/iqc/portal/transmissions"
+              scope={{ sectionId }}
+              mapUrl={row => `/iqc/portal/feed-messages/${row.id}/mapping?materialId=${control.id}`}
+              title={`Transmissions for ${control.materialName}`}
+              lead="Each transmission selected is recorded as a run of its own, on the date the analyser ran it."
+              selectLimit={IQC_MAX_BATCH_RUNS - queue.length}
+              onClose={() => setPicking(false)}
+              onUseMany={async rows => {
+                setPicking(false);
+                await queueTransmissions(rows.map(row => row.id));
+              }} />
+          )}
         </>
       )}
     </Modal>

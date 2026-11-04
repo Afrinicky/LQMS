@@ -394,6 +394,31 @@ export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcCo
 export const IQC_RUN_KINDS = ['control', 'retained_sample'] as const;
 export type IqcRunKind = (typeof IQC_RUN_KINDS)[number];
 
+/* ============================================================================
+   One run, or a set of them
+   ----------------------------------------------------------------------------
+   An analyser that transmits in bulk sends a week of stored control runs at
+   once, and a laboratory putting its history on the record has a hundred runs
+   to enter. Both are the same work as a single run, repeated — so the form
+   offers both and the evaluation is identical: each run keeps its own date, its
+   own readings and its own verdict.
+   ========================================================================= */
+export const IQC_ENTRY_SCOPES = ['single', 'batch'] as const;
+export type IqcEntryScope = (typeof IQC_ENTRY_SCOPES)[number];
+
+export const IQC_ENTRY_SCOPE_LABELS: Record<IqcEntryScope, string> = {
+  single: 'Single run',
+  batch: 'Multiple runs',
+};
+
+export const IQC_ENTRY_SCOPE_HINTS: Record<IqcEntryScope, string> = {
+  single: 'One run of this control, entered or received now.',
+  batch: 'Several runs of this control in one entry, each on its own date.',
+};
+
+/** How many runs one entry carries. Beyond this, the batch is split. */
+export const IQC_MAX_BATCH_RUNS = 200;
+
 export const IQC_RUN_KIND_LABELS: Record<IqcRunKind, string> = {
   control: 'Control material',
   retained_sample: 'Previously run sample',

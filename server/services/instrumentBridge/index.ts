@@ -51,7 +51,7 @@ import {
   LHIMS_MAX_ATTEMPTS, LHIMS_TAP_FILENAME, LHIMS_TAP_MAX_CATCHUP_BYTES, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
   lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
 } from '../../../shared/constants/lhims.js';
-import { diagnoseWatchPath } from './watchPath.js';
+import { alreadyRecorded, parkControlRun, recordTransmission } from './intake.js';
 
 /* ============================================================================
    Where the client's log actually is
@@ -1299,30 +1299,22 @@ class Link {
        * transmission is broken.
        */
       const fingerprint = this.fingerprint(message, text);
-      if (this.rereading && fingerprint) {
-        try {
-          const seen = db.prepare('SELECT id FROM instrument_messages WHERE link_id = ? AND message_hash = ?')
-            .get(this.id, fingerprint) as any;
-          if (seen) {
-            this.emit('info', `Already recorded — ${message.sampleId ?? 'this transmission'} was read before, so it has not been stored again.`);
-            continue;
-          }
-        } catch { /* without the column, store it; a duplicate is visible, a lost result is not */ }
+      if (this.rereading && fingerprint && alreadyRecorded(db, this.id, fingerprint)) {
+        this.emit('info', `Already recorded — ${message.sampleId ?? 'this transmission'} was read before, so it has not been stored again.`);
+        continue;
       }
 
       let messageId = 0;
       try {
-        const inserted = db.prepare(`INSERT INTO instrument_messages
-            (link_id, peer, raw_message, sample_id, lot_number, instrument_name, instrument_run_at,
-             result_count, parsed_values, kind, forward_status, message_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(this.id, peer, text.slice(0, 60_000), message.sampleId, message.lotNumber,
-            message.instrument, message.runAt, values.length, JSON.stringify(values), kind,
-            linkForwards(this.row.role, this.row.forward_enabled) ? 'pending' : 'not_required', fingerprint);
-        messageId = Number(inserted.lastInsertRowid);
-
-        db.prepare(`UPDATE instrument_links SET last_message_at = CURRENT_TIMESTAMP,
-            messages_received = messages_received + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(this.id);
+        // Recorded through the one intake every road in uses, so a transmission
+        // read off a socket and one posted to a feed are the same record.
+        messageId = recordTransmission(db, {
+          linkId: this.id, peer, raw: text,
+          sampleId: message.sampleId, lotNumber: message.lotNumber,
+          instrument: message.instrument, runAt: message.runAt,
+          values, kind, fingerprint,
+          forwardStatus: linkForwards(this.row.role, this.row.forward_enabled) ? 'pending' : 'not_required',
+        });
       } catch (error) {
         // Losing the database is not a reason to drop the connection; the next
         // message may well land.
@@ -1425,36 +1417,14 @@ class Link {
    * board is where they make it.
    */
   private routeControl(db: DB, messageId: number, message: AnalyserMessage, values: any[]): void {
-    // Which control is it? The lot is the strongest signal, then the sample
-    // identifier, then the link's own instrument.
-    let material: any = null;
-    if (message.lotNumber) {
-      material = db.prepare('SELECT * FROM iqc_materials WHERE lot_number = ? AND is_active = 1').get(message.lotNumber);
-    }
-    if (!material && message.sampleId) {
-      material = db.prepare('SELECT * FROM iqc_materials WHERE is_active = 1 AND (material_code = ? OR lot_number = ?)')
-        .get(message.sampleId, message.sampleId);
-    }
-    if (!material && this.row.equipment_id) {
-      // One active control on this instrument is unambiguous; more than one and
-      // the bench chooses, because guessing between Level 1 and Level 2 is how
-      // a control record becomes fiction.
-      const candidates = db.prepare('SELECT * FROM iqc_materials WHERE equipment_id = ? AND is_active = 1').all(this.row.equipment_id) as any[];
-      if (candidates.length === 1) material = candidates[0];
-    }
-
     try {
-      const feed = db.prepare(`INSERT INTO iqc_feed_messages
-          (feed_id, link_id, instrument_message_id, raw_message, sample_id, lot_number,
-           instrument_run_at, parsed_values, iqc_material_id, status, status_note)
-          VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(this.id, messageId, message.raw.slice(0, 60_000), message.sampleId, message.lotNumber,
-          message.runAt, JSON.stringify(values), material?.id ?? null,
-          material ? 'matched' : 'unmatched',
-          material ? null
-            : `Recognised as a control from "${message.sampleId ?? message.lotNumber ?? 'the sample identifier'}", but no active control material matched it. Match it by hand on the bench, or add its lot to the control.`);
-      db.prepare('UPDATE instrument_messages SET iqc_feed_message_id = ? WHERE id = ?').run(Number(feed.lastInsertRowid), messageId);
-      db.prepare('UPDATE instrument_links SET controls_matched = controls_matched + ? WHERE id = ?').run(material ? 1 : 0, this.id);
+      // Which control it is, and the parking of it, are the same for every road
+      // in — see `intake.ts`.
+      const { material } = parkControlRun(db, {
+        instrumentMessageId: messageId, linkId: this.id,
+        raw: message.raw, sampleId: message.sampleId, lotNumber: message.lotNumber,
+        runAt: message.runAt, values, equipmentId: this.row.equipment_id ?? null,
+      });
       this.emit(material ? 'ok' : 'warn', material
         ? `Waiting on the IQC bench as ${material.material_name ?? material.material_code ?? 'a registered control'} — nothing is accepted until somebody accepts it.`
         : `No registered control material matched "${message.sampleId ?? message.lotNumber ?? 'this run'}". It is waiting on the IQC bench to be matched by hand.`);

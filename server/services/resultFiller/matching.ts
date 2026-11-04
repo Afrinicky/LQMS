@@ -73,7 +73,10 @@ export interface IdentifierCandidate {
  * is tried first.
  */
 export function orderCandidates(candidates: IdentifierCandidate[]): IdentifierCandidate[] {
-  const rank: Record<string, number> = { sample: 0, request: 1, patient: 2, other: 3 };
+  // A control lot sits below the sample rules and above the patient's: on a
+  // control form it is the only identifier there is, and on a patient form a
+  // bare "Lot No" is the reagent's and must never outrank the barcode.
+  const rank: Record<string, number> = { sample: 0, request: 1, control: 2, patient: 3, other: 4 };
   return [...candidates]
     .filter(candidate => String(candidate.value ?? '').trim())
     .sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9) || Number(b.confidence ?? 0) - Number(a.confidence ?? 0));
@@ -228,7 +231,7 @@ export function tidyDetectedIdentifiers(raw: unknown): DetectedIdentifier[] {
     if (!value) continue;
     const kind = String((entry as any)?.kind ?? 'other');
     out.push({
-      kind: (['sample', 'patient', 'request', 'other'].includes(kind) ? kind : 'other') as DetectedIdentifier['kind'],
+      kind: (['sample', 'patient', 'request', 'control', 'other'].includes(kind) ? kind : 'other') as DetectedIdentifier['kind'],
       label: cleanLabel((entry as any)?.label).slice(0, 80),
       value: value.slice(0, 64),
       source: String((entry as any)?.source ?? 'unknown').slice(0, 20),
@@ -240,7 +243,8 @@ export function tidyDetectedIdentifiers(raw: unknown): DetectedIdentifier[] {
 
 /** A one-line account of what a scan understood, for the panel and the record. */
 export function describeScan(identifiers: DetectedIdentifier[], fields: DetectedField[]): string {
-  const sample = identifiers.find(i => i.kind === 'sample');
+  const sample = identifiers.find(i => i.kind === 'sample')
+    ?? identifiers.find(i => i.kind === 'control');
   const parts: string[] = [];
   parts.push(sample ? `${sample.label || 'Sample'} ${sample.value}` : 'no sample identifier found');
   parts.push(`${fields.length} result field(s) on the page`);
