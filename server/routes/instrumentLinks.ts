@@ -33,7 +33,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { getBridge, resolveTapTarget } from '../services/instrumentBridge/index.js';
-import { diagnoseWatchPath } from '../services/instrumentBridge/watchPath.js';
+import { diagnoseWatchPathAsync, forgetWatchPath } from '../services/instrumentBridge/watchPath.js';
 import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
@@ -360,6 +360,10 @@ export function instrumentLinkRoutes() {
 
     // Settings changed means the socket has to be rebuilt; a link that is now
     // LHIMS's, or now inactive, is stopped rather than restarted.
+    // The folder may have just been corrected; a remembered verdict about
+    // the old one would answer the very question the correction asked.
+    forgetWatchPath(existing.watch_path);
+    forgetWatchPath(v.watchPath);
     bridge.restart(Number(req.params.id));
     audit(req, { action: 'edit', entity: 'instrument_links', entityId: req.params.id, oldValue: { role: existing.role, port: existing.listen_port }, newValue: { role: v.role, port: v.listenPort } });
     res.json(currentState(db, Number(req.params.id)));
@@ -512,7 +516,7 @@ export function instrumentLinkRoutes() {
    * actionable. Each check says what it found and, where there is one, the
    * thing to change.
    */
-  router.get('/:id/checks', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+  router.get('/:id/checks', numericOnly, requirePermission(MODULE, 'view'), async (req, res) => {
     const db = getDb();
     const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
     if (!link) return res.status(404).json({ error: 'Link not found' });
@@ -562,7 +566,7 @@ export function instrumentLinkRoutes() {
       // and the one most often true — a path read off the analyser's own
       // screen, on the analyser's own disk — looks identical to a typing
       // mistake unless it is said outright.
-      const folder = diagnoseWatchPath(link.watch_path);
+      const folder = await diagnoseWatchPathAsync(link.watch_path);
       add('address', 'The folder exists', folder.ok ? 'ok' : 'todo',
         folder.ok ? `Watching ${link.watch_path}.` : folder.note, folder.fix);
     } else {
@@ -709,7 +713,7 @@ export function instrumentLinkRoutes() {
    * "the port is not open" from "the analyser is not sending", which are two
    * completely different afternoons.
    */
-  router.post('/:id/self-test', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+  router.post('/:id/self-test', numericOnly, requirePermission(MODULE, 'view'), async (req, res) => {
     const db = getDb();
     const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
     if (!link) return res.status(404).json({ error: 'Link not found' });
@@ -726,7 +730,7 @@ export function instrumentLinkRoutes() {
     }
 
     if (link.mode === 'file_drop') {
-      const folder = diagnoseWatchPath(link.watch_path);
+      const folder = await diagnoseWatchPathAsync(link.watch_path);
       return res.json({
         ok: folder.ok,
         note: folder.ok || !folder.fix ? folder.note : `${folder.note} ${folder.fix}`,

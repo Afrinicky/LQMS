@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { diagnoseWatchPath, watchPathShape } from '../server/services/instrumentBridge/watchPath.ts';
+import { diagnoseWatchPath, watchPathShape, credentialAdvice } from '../server/services/instrumentBridge/watchPath.ts';
 import { decodeExport, parseAstm, astmTime } from '../server/services/instrumentBridge/protocols.ts';
 import { mapAnalyte } from '../shared/constants/instruments.ts';
 
@@ -79,6 +79,30 @@ check('a rooted path that is not here is diagnosed the same way',
   check('nothing entered yet is not an error about a folder',
     diagnoseWatchPath('').reason === 'unset' && diagnoseWatchPath(null).reason === 'unset');
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+/*
+ * The share that is spelled correctly, permitted correctly, and still refused.
+ *
+ * Windows defaults to password-protected sharing: the computer refuses an
+ * unauthenticated connection before it ever consults the share's permissions,
+ * so "Everyone: Read" is set, correct and never reached. Windows reports that
+ * as a bad network path rather than as access denied, so it reads exactly like
+ * a misspelled share name — and a laboratory spends the afternoon checking a
+ * name that was right all along. That happened.
+ */
+{
+  const advice = credentialAdvice('\\\\LABCHEMMAC003\\Output Worklist');
+  check('the advice names the computer that is doing the refusing',
+    advice.includes('LABCHEMMAC003'), advice);
+  check('it explains why "Everyone: Read" is not reached',
+    /Everyone/.test(advice) && /never reached|before it allows/.test(advice), advice);
+  check('it gives the command that stores the credentials',
+    /net use .*\/persistent:yes/.test(advice), advice);
+  check('and names the other way out, password-protected sharing',
+    /password-protected sharing/i.test(advice));
+  check('and says plainly what each choice costs',
+    /private to one account/.test(advice) && /everyone on the network/.test(advice), advice);
 }
 
 check('the shape of a path is read without touching the disk',

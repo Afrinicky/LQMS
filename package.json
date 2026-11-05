@@ -42,7 +42,7 @@
     "check:lhims": "node scripts/lhims-bridge-check.mjs",
     "check:transmission": "node scripts/lhims-transmission-check.mjs",
     "check:humastar-folder": "npx tsx scripts/humastar-folder-check.mjs",
-    "check:units": "npx tsx scripts/units-check.mjs",
+    "check:measurement-units": "npx tsx scripts/units-check.mjs",
     "check:middleware": "node scripts/middleware-check.mjs",
     "check:result-filler": "node scripts/result-filler-check.mjs",
     "check:middleware-engine": "npx tsx scripts/middleware-engine-check.mjs",

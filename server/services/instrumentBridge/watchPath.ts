@@ -16,6 +16,7 @@
  * told what to do about it.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export type WatchPathReason =
@@ -91,6 +92,27 @@ function suggestionFor(target: string): string {
   return `\\\\ANALYSER-PC\\${leaf || 'Shared Folder'}`;
 }
 
+
+/**
+ * What to do about a share that refuses this computer.
+ *
+ * Said in one place because it is the same answer to two different-looking
+ * failures, and because the easy fix and the right fix are not the same thing:
+ * switching password protection off is one click and opens the folder to
+ * everyone on the hospital network, which is a decision a laboratory should
+ * make deliberately rather than discover.
+ */
+export function credentialAdvice(share: string): string {
+  const computer = /^[\\/]{2}([^\\/]+)/.exec(share)?.[1] ?? 'that computer';
+  return `With password protection on, ${computer} wants a username and password that exists ON ${computer} `
+    + 'before it allows any share access, so "Everyone: Read" is never reached. Either give this computer '
+    + `those credentials once — on THIS computer, signed in as the account SECHLIMS runs as, run `
+    + `net use ${share} /user:${computer}\\<account> <password> /persistent:yes — or, if the laboratory `
+    + `accepts it, switch password-protected sharing off on ${computer} under Network and Sharing Center, `
+    + 'Advanced sharing settings, All networks. The first keeps the folder private to one account; '
+    + 'the second opens it to everyone on the network.';
+}
+
 /**
  * Look at a watched folder and say what is wrong with it.
  *
@@ -135,8 +157,39 @@ export function diagnoseWatchPath(given?: string | null): WatchPathVerdict {
             + 'not blocked by its firewall.',
         };
       }
+      /*
+       * A UNC path only means anything on Windows. Elsewhere it is just a
+       * string with backslashes in it, and reporting "the share could not be
+       * reached" sends somebody to check a share that was never going to be
+       * reached this way.
+       */
+      if (os.platform() !== 'win32') {
+        return {
+          ok: false, reason: 'share_missing',
+          note: `${target} is a Windows network path, and SECHLIMS is not running on Windows here.`,
+          fix: 'Mount the share on this computer and point the link at the mount point instead — for example '
+            + `mount it at /mnt/analyser and enter /mnt/analyser. The share itself is fine; this computer `
+            + 'just cannot address it the Windows way.',
+        };
+      }
+
+      /*
+       * Why the SHARE could not be opened, which is a different question from
+       * why the folder inside it could not.
+       *
+       * The answer that costs an afternoon is a refusal that does not look
+       * like one. With password-protected sharing on — the Windows default —
+       * a computer refuses an unauthenticated connection before it ever
+       * consults the share's permissions, so "Everyone: Read" is set, correct,
+       * and irrelevant. Windows reports that as a bad network path rather than
+       * as access denied, so it reads exactly like a misspelled share name and
+       * sends somebody to check a name that was right all along.
+       */
+      let shareError: unknown = null;
       let shareReachable = false;
-      try { fs.accessSync(share, fs.constants.R_OK); shareReachable = true; } catch { /* answered below */ }
+      try { fs.accessSync(share, fs.constants.R_OK); shareReachable = true; }
+      catch (error) { shareError = error; }
+
       if (shareReachable) {
         return {
           ok: false, reason: 'missing',
@@ -146,12 +199,24 @@ export function diagnoseWatchPath(given?: string | null): WatchPathVerdict {
             + 'and the folders above it are not repeated.',
         };
       }
+
+      const shareCode = errno(shareError);
+      if (shareCode === 'EACCES' || shareCode === 'EPERM') {
+        return {
+          ok: false, reason: 'denied',
+          note: `${share} is there, and refused this computer.`,
+          fix: credentialAdvice(share),
+        };
+      }
+
       return {
         ok: false, reason: 'share_missing',
-        note: `${share} could not be reached from this host.`,
-        fix: 'Check the computer name and the share name are spelt right, that the folder is still shared, '
-          + 'and that this computer can reach that one. Browsing to it in Explorer from this computer '
-          + 'settles all three at once.',
+        note: `${share} could not be opened from this host.`,
+        fix: 'Two things look identical here and only one of them is a spelling mistake. '
+          + 'If you can browse to it from the ANALYSER\u2019s own computer but not from this one, the name is '
+          + 'right and the connection is being refused: see whether that computer has password-protected '
+          + `sharing switched on. ${credentialAdvice(share)} `
+          + 'Otherwise check the computer name and the share name, and that the folder is still shared.',
       };
     }
 
@@ -199,4 +264,168 @@ export function watchPathShape(given?: string | null): 'empty' | 'unc' | 'drive'
   if (DRIVE.test(target)) return 'drive';
   if (target.startsWith('/')) return 'posix';
   return 'relative';
+}
+
+/* ============================================================================
+   Asking without stopping everything else
+   ----------------------------------------------------------------------------
+   The probes above are synchronous, and that is fine on a local disk where
+   they take microseconds. On a network share that is NOT answering, a single
+   one blocks for as long as SMB takes to give up — tens of seconds — and
+   because it is synchronous it blocks Node's event loop, which means it blocks
+   the whole API. Every other screen in the laboratory stops with it, and the
+   browser that asked gives up and says only "Failed to fetch".
+
+   So anything reached from a request asks through here instead: the probe runs
+   on the thread pool, the answer is bounded by a timeout, and the verdict is
+   remembered briefly so a screen that refreshes every few seconds does not
+   start a new probe each time.
+   ========================================================================= */
+
+/** How long a verdict is reused before the folder is looked at again. */
+const VERDICT_TTL_MS = 15_000;
+/** How long to wait for a filesystem that may never answer. */
+const PROBE_TIMEOUT_MS = 4_000;
+
+const remembered = new Map<string, { at: number; verdict: WatchPathVerdict }>();
+const inFlight = new Map<string, Promise<WatchPathVerdict>>();
+
+/**
+ * The same verdict, without blocking the event loop.
+ *
+ * A probe that does not answer within the timeout is reported as exactly
+ * that — a folder that did not answer is a real and useful finding, and far
+ * better than a screen that hangs until the browser gives up.
+ */
+export async function diagnoseWatchPathAsync(given?: string | null): Promise<WatchPathVerdict> {
+  const target = String(given ?? '').trim();
+  if (!target) return diagnoseWatchPath(target);
+
+  const held = remembered.get(target);
+  if (held && Date.now() - held.at < VERDICT_TTL_MS) return held.verdict;
+
+  // One probe at a time per path: ten screens asking at once is still one.
+  const running = inFlight.get(target);
+  if (running) return running;
+
+  const probe = (async (): Promise<WatchPathVerdict> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const verdict = await Promise.race([
+        probeAsync(target),
+        new Promise<WatchPathVerdict>(resolve => {
+          timer = setTimeout(() => resolve({
+            ok: false, reason: 'host_unreachable',
+            note: `${target} did not answer within ${PROBE_TIMEOUT_MS / 1000} seconds.`,
+            fix: 'That usually means the computer holding it is off, asleep or off the network. It is also what '
+              + 'a share being refused looks like while the connection times out, so try browsing to it in '
+              + 'Explorer from this computer.',
+          }), PROBE_TIMEOUT_MS);
+        }),
+      ]);
+      remembered.set(target, { at: Date.now(), verdict });
+      if (remembered.size > 200) remembered.delete(remembered.keys().next().value as string);
+      return verdict;
+    } finally {
+      if (timer) clearTimeout(timer);
+      inFlight.delete(target);
+    }
+  })();
+
+    inFlight.set(target, probe);
+  return probe;
+}
+
+/** Forget what was learned about a path, so the next ask looks again. */
+export function forgetWatchPath(given?: string | null): void {
+  const target = String(given ?? '').trim();
+  if (target) remembered.delete(target);
+  else remembered.clear();
+}
+
+/**
+ * The same questions as the synchronous diagnosis, asked with fs.promises.
+ *
+ * This is the part that matters: fs.promises runs the work on Node's thread
+ * pool, so a share that takes half a minute to refuse costs one pooled thread
+ * and nothing else. The synchronous version blocks the event loop, which on a
+ * dead share stops every other request in the host — which is what "Failed to
+ * fetch" on an unrelated screen actually was.
+ */
+async function probeAsync(target: string): Promise<WatchPathVerdict> {
+  try {
+    const stat = await fs.promises.stat(target);
+    if (!stat.isDirectory()) {
+      return {
+        ok: false, reason: 'not_a_folder',
+        note: `${target} is a file, not a folder.`,
+        fix: 'Point the link at the folder that holds the analyser\'s exports, not at one file inside it.',
+      };
+    }
+    await fs.promises.access(target, fs.constants.R_OK);
+    return { ok: true, reason: 'ok', note: `${target} is readable from this host.` };
+  } catch (error) {
+    const code = errno(error);
+    if (code === 'EACCES' || code === 'EPERM') {
+      const share = shareRootOf(target);
+      return {
+        ok: false, reason: 'denied',
+        note: `${target} exists and refused this computer.`,
+        fix: share ? credentialAdvice(share)
+          : 'Give this computer read access to the folder — on the share and in its Security tab, which are '
+            + 'two separate lists. If SECHLIMS runs as a Windows service it is the service\'s account that '
+            + 'needs it, not yours.',
+      };
+    }
+
+    const share = shareRootOf(target);
+    if (share) {
+      if (code === 'ETIMEDOUT' || code === 'EHOSTUNREACH' || code === 'ENETUNREACH' || code === 'ENETDOWN') {
+        return {
+          ok: false, reason: 'host_unreachable',
+          note: `The computer in ${target} did not answer.`,
+          fix: 'Check that computer is switched on, awake and on the hospital network, and that file sharing '
+            + 'is not blocked by its firewall.',
+        };
+      }
+      if (os.platform() !== 'win32') {
+        return {
+          ok: false, reason: 'share_missing',
+          note: `${target} is a Windows network path, and SECHLIMS is not running on Windows here.`,
+          fix: 'Mount the share on this computer and point the link at the mount point instead — for example '
+            + 'mount it at /mnt/analyser and enter /mnt/analyser. The share itself is fine; this computer '
+            + 'just cannot address it the Windows way.',
+        };
+      }
+      let shareError: unknown = null;
+      try { await fs.promises.access(share, fs.constants.R_OK); }
+      catch (e) { shareError = e; }
+      if (!shareError) {
+        return {
+          ok: false, reason: 'missing',
+          note: `${share} is readable, but there is no ${path.basename(target)} inside it.`,
+          fix: `Open ${share} from this computer and check what the folder is actually called. `
+            + 'A share is often made ON the export folder, in which case the path ends at the share name '
+            + 'and the folders above it are not repeated.',
+        };
+      }
+      const shareCode = errno(shareError);
+      if (shareCode === 'EACCES' || shareCode === 'EPERM') {
+        return { ok: false, reason: 'denied', note: `${share} is there, and refused this computer.`, fix: credentialAdvice(share) };
+      }
+      return {
+        ok: false, reason: 'share_missing',
+        note: `${share} could not be opened from this host.`,
+        fix: 'Two things look identical here and only one of them is a spelling mistake. '
+          + 'If you can browse to it from the ANALYSER\u2019s own computer but not from this one, the name is '
+          + 'right and the connection is being refused: see whether that computer has password-protected '
+          + `sharing switched on. ${credentialAdvice(share)} `
+          + 'Otherwise check the computer name and the share name, and that the folder is still shared.',
+      };
+    }
+
+    // Not a network path: the synchronous reasoning needs no I/O beyond what
+    // has already failed, so it answers the local cases without blocking.
+    return diagnoseWatchPath(target);
+  }
 }
