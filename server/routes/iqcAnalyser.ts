@@ -371,8 +371,10 @@ export function iqcAnalyserRoutes() {
   router.get('/analyser/transmissions', requirePermission('iqc', 'view'), (req, res) => {
     const q = req.query as Record<string, unknown>;
     res.json(listTransmissions(getDb(), {
-      linkId: parseIntNullable(q.linkId),
-      materialId: parseIntNullable(q.materialId),
+      source: typeof q.source === 'string' ? q.source : parseIntNullable(q.linkId),
+      // A control may be named, or 'unmatched' asked for by name.
+      materialId: q.materialId === 'unmatched' ? 'unmatched' : parseIntNullable(q.materialId),
+      includeUnmatched: q.includeUnmatched === '1' || q.includeUnmatched === 'true',
       from: typeof q.from === 'string' ? q.from : null,
       to: typeof q.to === 'string' ? q.to : null,
       search: typeof q.search === 'string' ? q.search : null,

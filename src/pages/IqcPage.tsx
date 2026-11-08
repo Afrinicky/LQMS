@@ -40,6 +40,7 @@ import LiveTransmission from '../components/instruments/LiveTransmission';
 import TransmissionsDialog from '../components/instruments/TransmissionsDialog';
 import TransmissionPreview from '../components/instruments/TransmissionPreview';
 import DefineControlForm from '../components/iqc/DefineControlForm';
+import ControlProgramme, { type RunTarget } from '../components/iqc/ControlProgramme';
 import BulkRunQueue, {
   BulkRunOutcome, blankQueuedRun, filledCount, queuedFromMapping,
   type BulkOutcome, type QueueMapping, type QueuedRun,
@@ -176,6 +177,11 @@ type RunOutcome = {
   }[];
 };
 
+/** What a control is called on screen: its name, its level and its lot. */
+function controlLabel(m: { material_name: string; level_label: string | null; lot_number: string }): string {
+  return `${m.material_name}${m.level_label ? ` — ${m.level_label}` : ''} · lot ${m.lot_number}`;
+}
+
 const STATUS_TONE: Record<string, string> = { in_control: 'ok', warning: 'warn', out_of_control: 'bad' };
 const STATUS_LABEL: Record<string, string> = { in_control: 'In control', warning: 'Warning', out_of_control: 'Rejected' };
 
@@ -226,6 +232,16 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [summary, setSummary] = useState<Record<string, number> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * What the programme sent somebody here to do.
+   *
+   * A screen that reports a missed control and leaves the person to find the
+   * form is a screen that gets read once: the run form opens on the control
+   * and the day the programme named.
+   */
+  const [runTarget, setRunTarget] = useState<RunTarget | null>(null);
+  /** An examination with no control, carried to the form that defines one. */
+  const [testToControl, setTestToControl] = useState<{ id: number; testName: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -241,7 +257,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   useEffect(() => { if (embedded || isEnabled('iqc')) void load(); }, [embedded, isEnabled, load]);
   if (!embedded && !isEnabled('iqc')) return <DisabledModule />;
 
-  const tabs = ['Dashboard', 'Controls', 'New Control', 'Run Control', 'Review', 'Levey-Jennings', 'Lot Changes', 'Analyser Links']
+  const tabs = ['Dashboard', 'Controls', 'Programme', 'New Control', 'Run Control', 'Review', 'Levey-Jennings', 'Lot Changes', 'Analyser Links']
     .filter(n => !embedded || n !== 'Dashboard');
 
   const pendingReview = runs.filter(r => !r.reviewed_at && r.status !== 'in_control');
@@ -273,6 +289,14 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         </>
       )}
 
+      {tab === 'Programme' && (
+        <ControlProgramme
+          onRecordRun={target => { setRunTarget(target); setTab('Run Control'); }}
+          onDefineControl={test => { setTestToControl(test); setTab('New Control'); }}
+          onOpenReview={() => setTab('Review')}
+        />
+      )}
+
       {tab === 'Controls' && (
         <ControlRegister
           materials={materials} onChanged={load}
@@ -293,7 +317,11 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
               }} />}
               <DefineControlForm sections={unitsForDefining} staff={staff} equipment={equipment}
                 mySectionId={mySectionId ?? (unitsLed[0]?.id ?? null)}
-                onSaved={async () => { await load(); setNotice('Control defined. It is ready to run.'); setTab('Controls'); }}
+                defaultTestName={testToControl?.testName}
+                onSaved={async () => {
+                  await load(); setTestToControl(null);
+                  setNotice('Control defined. It is ready to run.'); setTab('Controls');
+                }}
                 onError={setError} />
             </>
           : <p className="muted">You do not have permission to define new controls.</p>
@@ -303,6 +331,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         canCreate
           ? <RunControl materials={materials.filter(m => m.is_active && (canCreateAll || ownUnit(m)))} equipment={equipment} staff={staff}
               sections={unitsForDefining} mySectionId={mySectionId ?? (unitsLed[0]?.id ?? null)}
+              preset={runTarget} onPresetUsed={() => setRunTarget(null)}
               onRecorded={async (msg) => { await load(); setNotice(msg); }} onError={setError} />
           : <p className="muted">You do not have permission to record control runs.</p>
       )}
@@ -905,10 +934,17 @@ function ImportControls({ onImported }: { onImported: (created: number) => void 
 
 /* --------------------------------------------------------------- run control */
 
-function RunControl({ materials, equipment, staff, sections, mySectionId, onRecorded, onError }: {
+function RunControl({ materials, equipment, staff, sections, mySectionId, preset, onPresetUsed, onRecorded, onError }: {
   materials: Material[]; equipment: EquipmentItem[]; staff: Staff[];
   /** The units this account may record a run for. One unit means no picker. */
   sections: Section[]; mySectionId: number | null;
+  /**
+   * The run the programme sent somebody here to record: which control, and
+   * the day it was due. The form opens on both, so a missed Tuesday is
+   * entered against Tuesday rather than against today.
+   */
+  preset?: { materialId: number; date: string; shift: string | null } | null;
+  onPresetUsed?: () => void;
   onRecorded: (msg: string) => void | Promise<void>; onError: (m: string) => void;
 }) {
   const { can } = usePermissions();
@@ -970,6 +1006,25 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
   useEffect(() => {
     if (materialId && !inUnit.some(m => String(m.id) === materialId)) setMaterialId('');
   }, [unitId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /*
+   * Opened from the programme, on the run it named.
+   *
+   * The unit picker is cleared first: a control the picker is filtering away
+   * cannot be selected, and the person did not come here to find out why the
+   * form ignored them.
+   */
+  useEffect(() => {
+    if (!preset) return;
+    setUnitId('');
+    setRunKind('control');
+    setScope('single');
+    setMaterialId(String(preset.materialId));
+    setMeta(m => ({ ...m, runDate: preset.date, shift: preset.shift ?? m.shift }));
+    onPresetUsed?.();
+    // The preset is consumed once; onPresetUsed is a setState in the caller.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.materialId, preset?.date, preset?.shift]);
 
   useEffect(() => {
     setOutcome(null); setValues({}); setSampleId(''); setEnrolling(false); setSamples([]);
@@ -1320,7 +1375,8 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
               With nothing to listen to it stands disabled and says why. */}
           {analyser && (
             <AnalyserPanel
-              materialId={Number(materialId)} status={analyser} mapping={mapping}
+              materialId={Number(materialId)} controlName={material ? controlLabel(material) : ''}
+              status={analyser} mapping={mapping}
               linkId={linkId} onLink={setLinkId} equipmentId={meta.equipmentId}
               onStatus={setAnalyser}
               onMapping={next => {
@@ -1459,11 +1515,10 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
       {picking && material && (
         <TransmissionsDialog
           endpoint="/iqc/analyser/transmissions"
-          /* Deliberately not narrowed to this control: an analyser that puts no
-             lot number in its transmission leaves every run of it matched to
-             nothing, and hiding those would hide most of what the bench came
-             here for. Which control a run is recorded against is the one chosen
-             on the form, and the queue names any read as another. */
+          /* This control's register, not the laboratory's. Runs matched to no
+             control are one checkbox away, from this control's own analyser
+             only — see the dialog. */
+          control={{ id: material.id, name: controlLabel(material) }}
           mapUrl={row => `/iqc/materials/${material.id}/analyser/messages/${row.id}/map`}
           title={`Transmissions for ${material.material_name}`}
           lead="Each transmission selected is recorded as a run of its own, on the date the analyser ran it."
@@ -1490,8 +1545,11 @@ function RunControl({ materials, equipment, staff, sections, mySectionId, onReco
  * quietly dropped — a system that decides column four is MCHC and is wrong has
  * written a false control record with a real name on it.
  */
-function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentId, onStatus, onMapping, onReadings, onError }: {
-  materialId: number; status: AnalyserStatus; mapping: AnalyserMapping | null;
+function AnalyserPanel({ materialId, controlName, status, mapping, linkId, onLink, equipmentId, onStatus, onMapping, onReadings, onError }: {
+  materialId: number;
+  /** The control these transmissions are being read against. */
+  controlName: string;
+  status: AnalyserStatus; mapping: AnalyserMapping | null;
   /** Set when the bench has overridden which analyser to take results from. */
   linkId: string; onLink: (id: string) => void;
   /** The instrument chosen on the run, which is the first guess. */
@@ -1652,6 +1710,8 @@ function AnalyserPanel({ materialId, status, mapping, linkId, onLink, equipmentI
       {browsing && (
         <TransmissionsDialog
           endpoint="/iqc/analyser/transmissions"
+          control={{ id: materialId, name: controlName }}
+          title={`Transmissions for ${controlName}`}
           mapUrl={row => `/iqc/materials/${materialId}/analyser/messages/${row.id}/map`}
           busyId={busy}
           onClose={() => setBrowsing(false)}

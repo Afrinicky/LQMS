@@ -5777,6 +5777,132 @@ button.cell-mark:disabled { cursor: default; }
 .iqc-verdict-list li.warning { background: var(--warning-bg); color: var(--warning); }
 
 /* ============================================================================
+   Internal quality control programme
+   ----------------------------------------------------------------------------
+   One screen in the module and on the bench, so a supervisor reading it in
+   either place is reading the same thing.
+   ========================================================================= */
+.iqcp { display: flex; flex-direction: column; gap: 14px; }
+.iqcp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.iqcp-head h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.iqcp-head p { margin: 4px 0 0; font-size: 12px; }
+.iqcp-period { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.iqcp-period strong { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; min-width: 150px; justify-content: center; }
+.iqcp-period select { padding: 6px 9px; font-size: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.iqcp-period button { padding: 5px 9px; }
+
+.iqcp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 9px; }
+.iqcp-tile {
+  display: flex; flex-direction: column; gap: 2px; padding: 11px 13px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.iqcp-tile strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.iqcp-tile span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.iqcp-tile.t-ok strong { color: var(--success); }
+.iqcp-tile.t-warn strong { color: var(--warning); }
+.iqcp-tile.t-crit strong { color: var(--danger); }
+
+.iqcp-banner {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0;
+  padding: 9px 13px; border-radius: 9px; font-size: 12px;
+  background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-line);
+}
+
+.iqcp-panel {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 11px;
+}
+.iqcp-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.iqcp-panel-head h4 { margin: 0; font-size: 13.5px; }
+.iqcp-panel-head .muted { font-size: 11.5px; }
+
+.iqcp-gaps, .iqcp-missed, .iqcp-dayrows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.iqcp-gaps li, .iqcp-missed li, .iqcp-dayrows li {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px;
+  padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+}
+.iqcp-gaps li > div, .iqcp-missed li > div, .iqcp-dayrows li > div { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 1px; }
+.iqcp-gaps .muted, .iqcp-missed .muted, .iqcp-dayrows .muted { font-size: 11px; }
+.iqcp-missed { max-height: 42vh; overflow-y: auto; }
+.iqcp-gaps .crit { color: var(--danger); }
+.iqcp-exempt summary { font-size: 12px; cursor: pointer; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.iqcp-exempt[open] summary { margin-bottom: 8px; }
+
+.iqcp-legend { display: flex; gap: 11px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); }
+.iqcp-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.iqcp-key { width: 11px; height: 11px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; flex: none; }
+
+/* One square for one expected run. Colour carries the state and the title
+   carries it in words, because colour alone is not a message. */
+.iqcp-key.s-in_control, .iqcp-cell.s-in_control { background: var(--success); border-color: var(--success); }
+.iqcp-key.s-warning, .iqcp-cell.s-warning { background: var(--warning); border-color: var(--warning); }
+.iqcp-key.s-rejected, .iqcp-cell.s-rejected { background: var(--danger); border-color: var(--danger); }
+.iqcp-key.s-missed, .iqcp-cell.s-missed { background: var(--danger-bg); border-color: var(--danger); }
+.iqcp-key.s-excused, .iqcp-cell.s-excused { background: var(--warning-bg); border-color: var(--warning-line); }
+.iqcp-key.s-due, .iqcp-cell.s-due { background: var(--overlay-1); border-color: var(--border-strong); border-style: dashed; }
+.iqcp-cell.s-not_scheduled { background: transparent; border-color: transparent; }
+
+.iqcp-group h5 { margin: 0 0 7px; font-size: 12px; color: var(--muted); }
+.iqcp-grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.iqcp-grid { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 11px; }
+.iqcp-grid th, .iqcp-grid td { padding: 3px 4px; text-align: center; }
+.iqcp-grid thead th { position: sticky; top: 0; background: var(--panel); color: var(--faint); font-size: 10px; font-weight: 600; }
+.iqcp-grid th.iqcp-name {
+  position: sticky; left: 0; z-index: 2; background: var(--card);
+  text-align: left; min-width: 230px; max-width: 280px; border-right: 1px solid var(--border);
+}
+.iqcp-grid thead th.iqcp-name { z-index: 3; background: var(--panel); }
+.iqcp-grid tbody tr:nth-child(even) th.iqcp-name { background: var(--surface); }
+.iqcp-grid tbody tr:nth-child(even) td { background: var(--surface); }
+.iqcp-grid td.iqcp-num, .iqcp-grid th.iqcp-num { min-width: 42px; font-variant-numeric: tabular-nums; }
+.iqcp-grid td.iqcp-num.crit { color: var(--danger); font-weight: 600; }
+.iqcp-day { min-width: 20px; }
+
+.iqcp-plan {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
+  background: none; border: 0; box-shadow: none; padding: 5px 7px; cursor: pointer; color: inherit; font: inherit;
+  border-radius: 7px;
+}
+.iqcp-plan:hover { background: var(--overlay-1); }
+.iqcp-plan:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.iqcp-plan strong { font-size: 11.5px; }
+.iqcp-plan .muted { font-size: 10.5px; }
+.iqcp-sched { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--accent-bright); }
+
+.iqcp-cell {
+  width: 16px; height: 16px; border-radius: 4px; padding: 0; margin: 0 auto;
+  border: 1px solid var(--border-strong); background: var(--overlay-1);
+  cursor: pointer; display: block; box-shadow: none;
+}
+.iqcp-cell:disabled { cursor: default; }
+.iqcp-cell:not(:disabled):hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.iqcp-dayact { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11.5px; }
+.iqcp-account {
+  display: flex; flex-direction: column; gap: 7px; padding: 11px 13px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.iqcp-account strong { font-size: 12px; }
+.iqcp-account label { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+
+.iqcp-plan-form { display: flex; flex-direction: column; gap: 11px; }
+.iqcp-plan-form .stack { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.iqcp-plan-form em { font-size: 10.5px; font-style: normal; line-height: 1.5; }
+.iqcp-days { display: flex; gap: 6px; flex-wrap: wrap; }
+.iqcp-days button {
+  padding: 5px 11px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+}
+.iqcp-days button.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-bright); }
+.iqcp-switch { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; color: var(--muted); }
+.iqcp-switch input { margin-top: 2px; width: 14px; height: 14px; accent-color: var(--accent); }
+
+@media (max-width: 720px) {
+  .iqcp-head { flex-direction: column; }
+  .iqcp-grid th.iqcp-name { min-width: 170px; }
+}
+
+/* ============================================================================
    Decontamination programme (Facilities & Safety)
    ========================================================================= */
 .dc-split { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 16px; align-items: start; }
@@ -7282,6 +7408,13 @@ button.il-tx-open {
 }
 button.il-tx-open:hover strong, button.il-tx-open:focus-visible strong { text-decoration: underline; }
 button.il-tx-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* A filter the window states rather than offers: the control it was opened
+   for, and the one switch that widens it. */
+.il-tx-fixed strong { font-size: 12px; color: var(--text); padding: 5px 0; }
+.il-tx-toggle { flex-direction: row !important; align-items: center; gap: 7px; font-size: 11.5px; }
+.il-tx-toggle input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.il-tx-toggle span { color: var(--muted); }
+
 /* Selecting several, where a screen records a set of runs rather than one. */
 .il-tx-list li.is-picked { border-color: var(--accent); background: var(--accent-soft); }
 .il-tx-pick { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex: none; }

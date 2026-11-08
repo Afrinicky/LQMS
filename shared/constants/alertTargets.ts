@@ -70,6 +70,8 @@ export const ALERT_TARGETS: Record<string, AlertTarget> = {
 
   /* Quality control */
   iqc_review: { tab: 'Review' },
+  // A missed run and an uncontrolled examination are both closed in the programme.
+  iqc_programme: { tab: 'Programme' },
   eqa_event: { tab: 'EQA Events' },
   method_verification_approval: { tab: 'Register' },
   equipment_verification_approval: { tab: 'Equipment verification' },
