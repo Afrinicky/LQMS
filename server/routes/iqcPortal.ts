@@ -1115,8 +1115,10 @@ export function iqcPortalRoutes() {
     const scope = resolveUnitScope(req, q.sectionId);
     res.json(listTransmissions(getDb(), {
       sectionId: scope.sectionId,
-      linkId: parseIntNullable(q.linkId),
-      materialId: parseIntNullable(q.materialId),
+      source: typeof q.source === 'string' ? q.source : parseIntNullable(q.linkId),
+      // A control may be named, or 'unmatched' asked for by name.
+      materialId: q.materialId === 'unmatched' ? 'unmatched' : parseIntNullable(q.materialId),
+      includeUnmatched: q.includeUnmatched === '1' || q.includeUnmatched === 'true',
       from: typeof q.from === 'string' ? q.from : null,
       to: typeof q.to === 'string' ? q.to : null,
       search: typeof q.search === 'string' ? q.search : null,

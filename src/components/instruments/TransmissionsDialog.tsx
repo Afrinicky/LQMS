@@ -33,9 +33,16 @@ export type Transmission = {
 type Page = {
   rows: Transmission[];
   total: number;
-  sources: Array<{ id: number; name: string }>;
+  /** Every analyser that could transmit, as 'link:3' / 'feed:2'. */
+  sources: Array<{ id: string; name: string }>;
+  /** Every control this laboratory has registered, in this unit. */
   controls: Array<{ id: number; name: string }>;
+  /** Runs from this control's analyser that no control was matched to. */
+  unmatchedAvailable?: number;
 };
+
+/** The control a window was opened for, where it was opened for one. */
+export type TransmissionControl = { id: number; name: string };
 
 const PAGE = 50;
 
@@ -47,7 +54,7 @@ const STATES = [
 ];
 
 export default function TransmissionsDialog({
-  endpoint, scope, mapUrl, title, lead, onUse, onUseMany, selectLimit = 200, onReject, onClose, busyId,
+  endpoint, scope, control, mapUrl, title, lead, onUse, onUseMany, selectLimit = 200, onReject, onClose, busyId,
 }: {
   /** Where the list comes from — the module's, or the bench's own unit-scoped one. */
   endpoint: string;
@@ -61,6 +68,15 @@ export default function TransmissionsDialog({
    * that" about a register with thousands of rows in it.
    */
   scope?: Record<string, string | number | null | undefined>;
+  /**
+   * The control this window was opened for.
+   *
+   * Given, the register answers "what has THIS control transmitted?" and shows
+   * that control's runs only — a bench recording Level 3 has no business being
+   * offered Level 1's. Omitted, it answers "what has arrived?" and every
+   * control is on the picker.
+   */
+  control?: TransmissionControl;
   /**
    * Where the reading of one row is found, so a row can be opened rather than
    * only used. Omitted where the screen cannot say which control to read it
@@ -99,9 +115,17 @@ export default function TransmissionsDialog({
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [linkId, setLinkId] = useState('');
+  const [source, setSource] = useState('');
   const [materialId, setMaterialId] = useState('');
   const [state, setState] = useState('waiting');
+  /**
+   * Whether runs matched to no control are shown beside this control's.
+   *
+   * Off by default: a run matched to nothing is not evidence that it is this
+   * control's. On, only the ones from this control's own analyser appear, and
+   * each says so.
+   */
+  const [withUnmatched, setWithUnmatched] = useState(false);
   /** The transmission being looked at, before anything is taken from it. */
   const [preview, setPreview] = useState<Transmission | null>(null);
   /**
@@ -127,8 +151,12 @@ export default function TransmissionsDialog({
     if (search.trim()) q.set('search', search.trim());
     if (from) q.set('from', from);
     if (to) q.set('to', to);
-    if (linkId) q.set('linkId', linkId);
-    if (materialId) q.set('materialId', materialId);
+    if (source) q.set('source', source);
+    // Opened for a control, the control is not a filter the reader chooses.
+    if (control) {
+      q.set('materialId', String(control.id));
+      if (withUnmatched) q.set('includeUnmatched', '1');
+    } else if (materialId) q.set('materialId', materialId);
     if (state) q.set('state', state);
     q.set('limit', String(PAGE));
     q.set('offset', String(offset));
@@ -142,7 +170,7 @@ export default function TransmissionsDialog({
     finally { setLoading(false); }
     // `scope` itself is deliberately not a dependency: see scopeKey above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpoint, scopeKey, search, from, to, linkId, materialId, state, offset]);
+  }, [endpoint, scopeKey, search, from, to, source, materialId, state, offset, control?.id, withUnmatched]);
 
   // Typing in the search box should not fire a query per keystroke.
   useEffect(() => {
@@ -157,6 +185,19 @@ export default function TransmissionsDialog({
   const rows = page?.rows ?? [];
   const total = page?.total ?? 0;
   const shown = offset + rows.length;
+  const unmatchedWaiting = page?.unmatchedAvailable ?? 0;
+
+  /*
+   * An empty window has to say WHICH kind of empty it is.
+   *
+   * "Nothing matches that" over a control whose analyser has sent two thousand
+   * runs it could not match tells the bench the feature is broken. The count of
+   * what is sitting unmatched is the one fact that explains it, and the
+   * checkbox above is the remedy.
+   */
+  const emptyWord = control && !withUnmatched && unmatchedWaiting > 0
+    ? `No transmission is matched to this control. ${unmatchedWaiting.toLocaleString()} from its analyser were matched to no control — include them above to select from those.`
+    : 'Nothing matches that.';
 
   return (
     <div className="ls-modal-back" onClick={onClose}>
@@ -186,19 +227,32 @@ export default function TransmissionsDialog({
           {(page?.sources.length ?? 0) > 1 && (
             <label>
               <span>Analyser</span>
-              <select value={linkId} onChange={e => narrow(setLinkId)(e.target.value)}>
+              <select value={source} onChange={e => narrow(setSource)(e.target.value)}>
                 <option value="">Any</option>
                 {page?.sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </label>
           )}
-          {(page?.controls.length ?? 0) > 0 && (
+          {/* Opened for a control, the control is stated rather than chosen:
+              this window is that control's register. Opened from the board, it
+              is a filter, and it offers every control the laboratory has
+              registered — not only the ones something has already matched to,
+              which is how a control whose runs all arrive unmatched became
+              impossible to narrow to. */}
+          {!control && (page?.controls.length ?? 0) > 0 && (
             <label>
               <span>Control</span>
               <select value={materialId} onChange={e => narrow(setMaterialId)(e.target.value)}>
-                <option value="">Any</option>
+                <option value="">Any control</option>
+                <option value="unmatched">Not matched to a control</option>
                 {page?.controls.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+            </label>
+          )}
+          {control && (
+            <label className="il-tx-fixed">
+              <span>Control</span>
+              <strong>{control.name}</strong>
             </label>
           )}
           <label>
@@ -207,11 +261,23 @@ export default function TransmissionsDialog({
               {STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </label>
+          {/* An analyser that puts no lot number in its transmission leaves
+              every run of every control matched to nothing. Those are not this
+              control's runs on the record, so they are not shown as though
+              they were — but they are one click away, from this control's own
+              analyser only, and each row says it was matched to nothing. */}
+          {control && (
+            <label className="il-tx-toggle">
+              <input type="checkbox" checked={withUnmatched}
+                onChange={e => narrow(setWithUnmatched)(e.target.checked)} />
+              <span>Include transmissions not matched to a control</span>
+            </label>
+          )}
         </div>
 
         <p className="il-tx-count">
           {loading ? <><Loader2 size={12} className="pd-spin" /> Looking…</>
-            : total === 0 ? 'Nothing matches that.'
+            : total === 0 ? emptyWord
             : `${total.toLocaleString()} transmission${total === 1 ? '' : 's'}${total > rows.length ? ` · showing ${offset + 1}–${shown}` : ''}`}
           {selecting && rows.some(usable) && (
             <>

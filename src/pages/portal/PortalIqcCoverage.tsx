@@ -193,8 +193,15 @@ function Stat({ value, label, tone }: { value: number; label: string; tone?: str
  * The dialog adds only what the portal knows: the unit they work in, and the
  * test and instrument of the row they pressed the button on.
  */
-function SetUpControlDialog({ test, onClose, onSaved }: {
-  test: IqcCoverageTest | null;
+export function SetUpControlDialog({ test, onClose, onSaved }: {
+  /**
+   * The examination the control is being defined for.
+   *
+   * Only the two things the wizard needs, so the quality control programme can
+   * open this same dialog from its own list of uncontrolled examinations
+   * rather than carrying a second one.
+   */
+  test: { testName: string; equipmentId?: number | null } | null;
   onClose: () => void;
   onSaved: (message: string) => void | Promise<void>;
 }) {

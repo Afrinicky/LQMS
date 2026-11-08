@@ -6,6 +6,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
 import { currentObligations } from '../services/scheduleRollover.js';
+import { missedRunsRecently, uncontrolledExaminations } from '../services/iqcProgramme.js';
 
 const NOTIFICATION_STATUSES = ['unread', 'read', 'acknowledged', 'resolved', 'dismissed'];
 const NOTIFICATION_SEVERITIES = ['info', 'low', 'medium', 'high', 'urgent'];
@@ -239,6 +240,61 @@ function collectScanCandidates(db: any): ScanCandidate[] {
   } else if (tableExists(db, 'iqc_results')) {
     const rows = db.prepare("SELECT id, run_date FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'").all() as any[];
     for (const r of rows) out.push({ moduleKey: 'iqc', recordType: 'iqc_results', recordId: String(r.id), title: `IQC result pending review`, message: `IQC #${r.id} from ${r.run_date} requires review`, dueDate: r.run_date, severity: 'medium', notificationType: 'review_required', itemType: 'iqc_review' });
+  }
+
+  /*
+   * Control runs the programme expected and nobody recorded.
+   *
+   * The failure this closes is the quietest one in the module: a daily control
+   * that simply stops being run. Nothing fails, nothing is rejected, and
+   * nothing says anything — until an assessor asks for a fortnight of charts.
+   * A missed run reaches the unit the same way everything else overdue does,
+   * and it is closed by recording the run on the day it was performed or by
+   * stating why it was not.
+   *
+   * Bounded to a fortnight: switching the programme on over a year of history
+   * must raise this week's omissions, not three hundred of last year's.
+   */
+  if (tableExists(db, 'iqc_schedules') && tableExists(db, 'iqc_runs')) {
+    try {
+      for (const gap of missedRunsRecently(db, 14)) {
+        out.push({
+          moduleKey: 'iqc', recordType: 'iqc_materials', recordId: String(gap.materialId),
+          title: `Control not run: ${gap.materialName}${gap.levelLabel ? ` — ${gap.levelLabel}` : ''}`,
+          message: `${gap.missed} scheduled run${gap.missed === 1 ? '' : 's'} of this control ${gap.missed === 1 ? 'was' : 'were'} not recorded, the oldest on ${gap.oldest}. Record the run on the day it was performed, or state why it was not run.`,
+          dueDate: gap.oldest, severity: gap.missed > 3 ? 'high' : 'medium',
+          notificationType: 'overdue', itemType: 'iqc_programme', sectionId: gap.sectionId ?? undefined,
+        });
+      }
+    } catch { /* the programme is a view over the runs; it never blocks the scan */ }
+  }
+
+  /*
+   * Examinations with neither a control nor a recorded exemption.
+   *
+   * ISO 15189:2022 §7.3.7.1 wants a quality control procedure for each
+   * examination. A test on the menu with nothing against it is a finding, and
+   * one the unit head can close two ways from the programme.
+   */
+  if (tableExists(db, 'iqc_test_exemptions') && tableExists(db, 'lab_test_catalog')) {
+    try {
+      const gaps = uncontrolledExaminations(db);
+      const byUnit = new Map<number, { name: string | null; tests: string[] }>();
+      for (const gap of gaps) {
+        const unit = byUnit.get(gap.sectionId) ?? { name: gap.sectionName, tests: [] };
+        unit.tests.push(gap.testName);
+        byUnit.set(gap.sectionId, unit);
+      }
+      for (const [sectionId, unit] of byUnit) {
+        out.push({
+          moduleKey: 'iqc', recordType: 'sections', recordId: String(sectionId),
+          title: `${unit.tests.length} examination${unit.tests.length === 1 ? '' : 's'} with no quality control${unit.name ? `: ${unit.name}` : ''}`,
+          message: `${unit.tests.slice(0, 6).join(', ')}${unit.tests.length > 6 ? `, and ${unit.tests.length - 6} more` : ''}. Define a control, or record why the examination is not controlled.`,
+          dueDate: null, severity: 'medium', notificationType: 'follow_up',
+          itemType: 'iqc_programme', sectionId,
+        });
+      }
+    } catch { /* as above */ }
   }
 
   // EQA events due / unsatisfactory

@@ -7163,6 +7163,77 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
     }
   }
 
+  /*
+   * The internal quality control programme.
+   *
+   * A register of the runs that happened cannot show that the plan was
+   * followed: it holds no record of the mornings nobody ran anything, which
+   * are the mornings worth knowing about. Three tables carry the plan and the
+   * exceptions to it, and none of them touches a run — a run is still recorded
+   * in iqc_runs, by a person, exactly as before.
+   *
+   *   iqc_schedules        what each control is expected to do, and when.
+   *                        Absent, the control's own registered frequency
+   *                        decides, so the programme answers for every control
+   *                        from the day it is switched on.
+   *
+   *   iqc_missed_runs      a scheduled run that did not happen, and why. A
+   *                        laboratory that cannot record this will invent the
+   *                        run instead, which is the one outcome worth
+   *                        designing against.
+   *
+   *   iqc_test_exemptions  an examination deliberately left out of the
+   *                        programme, with the ground, who decided and when it
+   *                        is reviewed. Silence is not an exemption.
+   */
+  database.exec(`
+CREATE TABLE IF NOT EXISTS iqc_schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  iqc_material_id INTEGER NOT NULL UNIQUE REFERENCES iqc_materials(id) ON DELETE CASCADE,
+  frequency TEXT NOT NULL DEFAULT 'daily',     -- daily | per_shift | weekly | event
+  weekdays TEXT,                               -- JSON [1..7], 1 = Monday; null or [] = every day
+  shifts TEXT,                                 -- JSON ['Morning','Afternoon','Night'], for per_shift
+  starts_on TEXT,                              -- nothing is expected before this day
+  ends_on TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS iqc_missed_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  iqc_material_id INTEGER NOT NULL REFERENCES iqc_materials(id) ON DELETE CASCADE,
+  due_date TEXT NOT NULL,
+  shift TEXT,
+  reason TEXT NOT NULL,
+  recorded_by_staff_id INTEGER REFERENCES staff(id),
+  recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER REFERENCES users(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_iqc_missed_once
+  ON iqc_missed_runs(iqc_material_id, due_date, IFNULL(shift, ''));
+CREATE INDEX IF NOT EXISTS idx_iqc_missed_date ON iqc_missed_runs(due_date);
+CREATE TABLE IF NOT EXISTS iqc_test_exemptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  test_id INTEGER NOT NULL REFERENCES lab_test_catalog(id) ON DELETE CASCADE,
+  section_id INTEGER REFERENCES sections(id),
+  ground TEXT NOT NULL DEFAULT 'other',
+  reason TEXT NOT NULL,
+  review_on TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  withdrawn_at TEXT,
+  withdrawn_by INTEGER REFERENCES users(id),
+  withdrawal_reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- One live exemption per examination; a withdrawn one stays on the record.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_iqc_exemption_live
+  ON iqc_test_exemptions(test_id) WHERE is_active = 1;
+`);
+
   // ── A placement has an end, and the end has to arrive on its own ──────────
   //
   // A student, an intern, a national service person or a locum is in the

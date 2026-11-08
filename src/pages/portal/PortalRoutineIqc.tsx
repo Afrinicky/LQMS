@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowRight, Beaker, Check, CheckCircle2, ClipboardPaste, Clock, MonitorPlay,
   Download, FileSpreadsheet, FileUp, Keyboard, LineChart, Loader2, Lock, Plus,
-  Printer, Radio, ScanLine, Search, ShieldAlert, Table2, Upload, X, XCircle,
+  Printer, Radio, ScanLine, Search, ShieldAlert, Table2, Upload, X, XCircle, ClipboardList,
 } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { downloadXlsx, openPrintable } from '../../services/xlsx';
@@ -29,7 +29,8 @@ import TransmissionsDialog, { type Transmission } from '../../components/instrum
 import type {
   IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
 } from '../../../shared/types/api';
-import PortalIqcCoverage from './PortalIqcCoverage';
+import PortalIqcCoverage, { SetUpControlDialog } from './PortalIqcCoverage';
+import ControlProgramme from '../../components/iqc/ControlProgramme';
 
 /**
  * IQC on the bench.
@@ -66,6 +67,11 @@ import PortalIqcCoverage from './PortalIqcCoverage';
  * false control record with a real name on it.
  */
 
+/** What a control is called on screen: its name, its level and its lot. */
+function controlTitle(c: { materialName: string; levelLabel?: string | null; lotNumber?: string | null }): string {
+  return `${c.materialName}${c.levelLabel ? ` — ${c.levelLabel}` : ''}${c.lotNumber ? ` · lot ${c.lotNumber}` : ''}`;
+}
+
 const METHOD_ICONS: Record<IqcEntryMethod, ReactNode> = {
   manual: <Keyboard size={13} />,
   paste: <ClipboardPaste size={13} />,
@@ -75,7 +81,7 @@ const METHOD_ICONS: Record<IqcEntryMethod, ReactNode> = {
   instrument: <Radio size={13} />,
 };
 
-type QcFace = 'board' | 'charts';
+type QcFace = 'board' | 'programme' | 'charts';
 
 export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | null } = {}) {
   const [board, setBoard] = useState<IqcBoard | null>(null);
@@ -85,6 +91,16 @@ export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | n
   const [chartControl, setChartControl] = useState<IqcBoardControl | null>(null);
   const [showFeed, setShowFeed] = useState(false);
   const [face, setFace] = useState<QcFace>('board');
+  /**
+   * The run the programme sent the bench here to record.
+   *
+   * A screen that reports a missed control and leaves somebody to find the
+   * form is a screen that gets read once, so the run dialog opens on the
+   * control and the day the programme named.
+   */
+  const [programmeRun, setProgrammeRun] = useState<{ control: IqcBoardControl; date: string } | null>(null);
+  /** An examination the programme found with no control against it. */
+  const [defineFor, setDefineFor] = useState<{ testName: string } | null>(null);
 
   const load = useCallback(async () => {
     try { setBoard(await api<IqcBoard>(`/iqc/portal/board${sectionId ? `?sectionId=${sectionId}` : ''}`)); setProblem(null); }
@@ -120,6 +136,11 @@ export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | n
         <button type="button" className={face === 'board' ? 'is-on' : ''} onClick={() => setFace('board')}>
           <Beaker size={13} /> Today&rsquo;s controls
         </button>
+        {/* The plan behind today's controls: what is expected of each of them,
+            what was done, and which examinations have nothing covering them. */}
+        <button type="button" className={face === 'programme' ? 'is-on' : ''} onClick={() => setFace('programme')}>
+          <ClipboardList size={13} /> Programme
+        </button>
         <button type="button" className={face === 'charts' ? 'is-on' : ''} onClick={() => setFace('charts')}>
           <LineChart size={13} /> Charts and records
         </button>
@@ -127,6 +148,27 @@ export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | n
 
       {face === 'charts' && (
         <ChartsFace controls={controls} onOpen={setChartControl} />
+      )}
+
+      {face === 'programme' && (
+        <section className="portal-panel">
+          <ControlProgramme
+            sectionId={sectionId ?? null}
+            onRecordRun={target => {
+              const control = controls.find(c => c.id === target.materialId);
+              // A control the board cannot show — one attached to equipment
+              // that does not report results — cannot be run from here, and
+              // saying so beats a button that does nothing.
+              if (!control) {
+                setProblem(`${target.materialName} is not on this unit's board, so its run cannot be recorded here. Open it in Quality Control.`);
+                setFace('board');
+                return;
+              }
+              setProgrammeRun({ control, date: target.date });
+            }}
+            onDefineControl={test => setDefineFor({ testName: test.testName })}
+          />
+        </section>
       )}
 
       {face === 'board' && (
@@ -198,15 +240,30 @@ export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | n
 
       {chartControl && <ChartDialog control={chartControl} onClose={() => setChartControl(null)} />}
 
-      <PortalIqcCoverage onChanged={load} sectionId={sectionId ?? null} />
+      {/* Coverage belongs with today's board. The programme carries its own,
+          with the exemptions beside it, so it is not shown twice. */}
+      {face === 'board' && <PortalIqcCoverage onChanged={load} sectionId={sectionId ?? null} />}
 
       {openControl && (
         <RunControlDialog control={openControl} sectionId={sectionId ?? null}
           onClose={() => setOpenControl(null)}
           onSaved={() => { setOpenControl(null); void load(); }} />
       )}
+      {/* The run the programme named, on the day it was due. */}
+      {programmeRun && (
+        <RunControlDialog control={programmeRun.control} sectionId={sectionId ?? null}
+          presetDate={programmeRun.date}
+          onClose={() => setProgrammeRun(null)}
+          onSaved={() => { setProgrammeRun(null); void load(); }} />
+      )}
       {showFeed && (
         <FeedDialog sectionId={sectionId ?? null} onClose={() => setShowFeed(false)} onChanged={load} />
+      )}
+      {/* The same wizard the coverage panel opens, from the programme's own
+          list of examinations with nothing against them. */}
+      {defineFor && (
+        <SetUpControlDialog test={defineFor} onClose={() => setDefineFor(null)}
+          onSaved={() => { setDefineFor(null); void load(); }} />
       )}
     </div>
   );
@@ -478,8 +535,14 @@ type Detail = {
   canPerform: boolean; canReview: boolean;
 };
 
-function RunControlDialog({ control, sectionId, onClose, onSaved }: {
+function RunControlDialog({ control, sectionId, presetDate, onClose, onSaved }: {
   control: IqcBoardControl;
+  /**
+   * The day this run belongs to, where the programme opened the form on a run
+   * that was missed. Entered against that day, not against today — which is
+   * the whole point of being able to enter it at all.
+   */
+  presetDate?: string;
   /**
    * The unit whose board this control was opened from.
    *
@@ -510,8 +573,8 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
    * would put a point on the wrong day of the Levey-Jennings chart and count a
    * missed day as done.
    */
-  const [runDate, setRunDate] = useState(new Date().toISOString().slice(0, 10));
-  const [runTime, setRunTime] = useState(new Date().toTimeString().slice(0, 5));
+  const [runDate, setRunDate] = useState(presetDate ?? new Date().toISOString().slice(0, 10));
+  const [runTime, setRunTime] = useState(presetDate ? '' : new Date().toTimeString().slice(0, 5));
   const [reagentLot, setReagentLot] = useState('');
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -948,8 +1011,11 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
             <TransmissionsDialog
               endpoint="/iqc/portal/transmissions"
               scope={{ sectionId }}
+              /* This control's register, not the unit's: a bench recording
+                 Level 3 has no business being offered Level 1's runs. */
+              control={{ id: control.id, name: controlTitle(control) }}
               mapUrl={row => `/iqc/portal/feed-messages/${row.id}/mapping?materialId=${control.id}`}
-              title="Earlier results from the analysers"
+              title={`Earlier transmissions for ${controlTitle(control)}`}
               onClose={() => setBrowsing(false)}
               onUse={async (row: Transmission) => {
                 setBrowsing(false);
@@ -1157,8 +1223,9 @@ function RunControlDialog({ control, sectionId, onClose, onSaved }: {
             <TransmissionsDialog
               endpoint="/iqc/portal/transmissions"
               scope={{ sectionId }}
+              control={{ id: control.id, name: controlTitle(control) }}
               mapUrl={row => `/iqc/portal/feed-messages/${row.id}/mapping?materialId=${control.id}`}
-              title={`Transmissions for ${control.materialName}`}
+              title={`Transmissions for ${controlTitle(control)}`}
               lead="Each transmission selected is recorded as a run of its own, on the date the analyser ran it."
               selectLimit={IQC_MAX_BATCH_RUNS - queue.length}
               onClose={() => setPicking(false)}

@@ -21,6 +21,7 @@ import { safetyRoutes } from './routes/safety.js';
 import { organisationRoutes } from './routes/organisation.js';
 import { iqcRoutes } from './routes/iqc.js';
 import { iqcRunRoutes } from './routes/iqcRuns.js';
+import { iqcProgrammeRoutes } from './routes/iqcProgramme.js';
 import { iqcRetainedRoutes } from './routes/iqcRetained.js';
 import { iqcAnalyserRoutes } from './routes/iqcAnalyser.js';
 import { analyserFeedRoutes } from './routes/analyserFeed.js';
@@ -138,6 +139,7 @@ export function createApiServer() {
   app.use('/api/organisation', organisationRoutes());
   // Runs, analytes and charts mount first so their specific paths win over
   // the older material/result routes that share the same prefix.
+  app.use('/api/iqc', iqcProgrammeRoutes());
   app.use('/api/iqc', iqcPortalRoutes());
   app.use('/api/iqc', iqcAdminRoutes());
   app.use('/api/iqc', iqcImportExportRoutes());
