@@ -6006,6 +6006,185 @@ button.cell-mark:disabled { cursor: default; }
 }
 
 /* ============================================================================
+   The control schedule, as a month's sheet
+   ----------------------------------------------------------------------------
+   Deliberately the environmental monitoring log sheet: a sheet per control
+   down the left, the days across the top, a row per lot. The one thing this
+   sheet says that the environmental one does not is that a lot has a period —
+   so a cell outside it is shaded and dead, and reads as "not this lot's day"
+   rather than as a day nobody recorded.
+   ========================================================================= */
+.iqs-wrap { display: flex; flex-direction: column; gap: 10px; }
+
+.iqs-picker { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.iqs-pick {
+  width: 100%; text-align: left; padding: 8px 11px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  display: flex; align-items: flex-start; gap: 9px;
+}
+.iqs-pick:hover { border-color: var(--border-strong); background: var(--panel-2); }
+.iqs-pick.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.iqs-pick-body { min-width: 0; flex: 1; }
+.iqs-pick-name {
+  display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.iqs-pick-meta {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  font-size: 10.5px; color: var(--faint); margin-top: 3px;
+}
+.iqs-pick-pct { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); }
+.iqs-pick-meta .crit { color: var(--danger); }
+.iqs-pick-dot { flex: none; width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: var(--border-strong); }
+.iqs-pick.t-ok .iqs-pick-dot { background: var(--success); }
+.iqs-pick.t-warn .iqs-pick-dot { background: var(--warning); }
+.iqs-pick.t-crit .iqs-pick-dot { background: var(--danger); }
+
+.iqs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.iqs-head h5 { margin: 0; font-size: 13px; }
+.iqs-sub { margin: 2px 0 0; font-size: 11px; color: var(--faint); }
+.iqs-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+
+.iqs-note {
+  display: flex; align-items: center; gap: 7px; margin: 0; padding: 7px 11px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  font-size: 11px; color: var(--muted);
+}
+.iqs-note.warn { border-color: var(--warning-line); background: var(--warning-bg); color: var(--warning); }
+
+.iqs-scroll { overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.iqs-grid { border-collapse: collapse; font-size: 10.5px; width: max-content; min-width: 100%; }
+.iqs-grid th, .iqs-grid td {
+  border: 1px solid var(--border); padding: 0; text-align: center; height: 22px;
+  min-width: var(--iqs-day, 30px); width: var(--iqs-day, 30px);
+}
+.iqs-grid thead th { background: var(--panel); font-weight: 600; color: var(--muted); font-size: 10px; }
+.iqs-grid thead th.is-today, .iqs-grid td.is-today { background: var(--accent-soft); }
+.iqs-rowhead {
+  position: sticky; left: 0; z-index: 2; text-align: left !important; padding: 0 !important;
+  min-width: 180px !important; width: 180px !important; max-width: 180px;
+  background: var(--panel) !important; vertical-align: top;
+}
+.iqs-grid thead th.iqs-rowhead { z-index: 3; padding: 3px 8px !important; }
+.iqs-period {
+  position: sticky; left: 180px; z-index: 2; min-width: 124px !important; width: 124px !important;
+  background: var(--panel-2) !important; font-size: 9.5px; color: var(--faint);
+  padding: 0 6px !important; white-space: nowrap;
+}
+.iqs-shift {
+  position: sticky; left: 304px; z-index: 2; min-width: 56px !important; width: 56px !important;
+  background: var(--panel-2) !important; font-size: 9.5px; color: var(--faint); font-weight: 600;
+}
+.iqs-row-first > .iqs-rowhead, .iqs-row-first > .iqs-period { border-top: 2px solid var(--border-strong); }
+.iqs-num { min-width: 40px !important; width: 40px !important; font-variant-numeric: tabular-nums; }
+.iqs-num.crit { color: var(--danger); font-weight: 600; }
+
+.iqs-lot {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
+  background: none; border: 0; box-shadow: none; padding: 4px 8px; cursor: pointer; color: inherit; font: inherit;
+}
+.iqs-lot:hover { background: var(--overlay-1); }
+.iqs-lot:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.iqs-lot strong { font-size: 11px; }
+.iqs-sched {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; color: var(--accent-bright);
+  max-width: 164px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* One square for one expected run, and the title says it in words: colour
+   alone is not a message, and this sheet gets printed in black and white. */
+.iqs-cell {
+  position: relative; width: 100%; height: 20px; min-width: 0; padding: 0; margin: 0;
+  border: 0; border-radius: 0; box-shadow: none; background: transparent; cursor: pointer;
+  display: block; font: inherit; color: var(--text);
+}
+.iqs-cell:not(:disabled):hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.iqs-cell:disabled { cursor: default; }
+.iqs-cell.s-in_control { background: var(--success); }
+.iqs-cell.s-warning { background: var(--warning); }
+.iqs-cell.s-rejected { background: var(--danger); }
+/* Not run: hatched, never blank. The whole value of a chart is that it shows
+   what was not done. */
+.iqs-cell.s-missed {
+  background: repeating-linear-gradient(45deg,
+    var(--danger-bg), var(--danger-bg) 3px, var(--danger) 3px, var(--danger) 5px);
+}
+.iqs-cell.s-excused { background: var(--warning-bg); }
+.iqs-cell.s-not_scheduled { background: transparent; }
+/* Outside the lot's period: shaded and dead, exactly as the environmental
+   sheet shades a day that has not come. It has to read as "not this lot's
+   day" at arm's length, so it is a flat fill rather than a tint of white —
+   an empty-looking cell on a quality control chart means something else
+   entirely. */
+.iqs-cell.s-out_of_use { background: var(--overlay-3); }
+/* Due, but not yet: outlined rather than filled, so a day still to come is
+   never mistaken for one that was run. */
+.iqs-cell.s-due { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.iqs-count {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 8.5px; font-weight: 700; color: var(--text);
+}
+
+.iqs-legend { display: flex; flex-wrap: wrap; gap: 13px; font-size: 10.5px; color: var(--faint); align-items: center; }
+.iqs-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.iqs-sw { width: 10px; height: 10px; border: 1px solid var(--border-strong); border-radius: 2px; background: var(--surface); }
+.iqs-sw.s-in_control { background: var(--success); }
+.iqs-sw.s-warning { background: var(--warning); }
+.iqs-sw.s-rejected { background: var(--danger); }
+.iqs-sw.s-missed {
+  background: repeating-linear-gradient(45deg,
+    var(--danger-bg), var(--danger-bg) 2px, var(--danger) 2px, var(--danger) 4px);
+}
+.iqs-sw.s-excused { background: var(--warning-bg); }
+.iqs-sw.s-due { background: var(--surface); border-style: dashed; }
+.iqs-sw.s-out_of_use { background: var(--overlay-3); border-color: var(--border-strong); }
+
+.iqs-expand {
+  position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center;
+  padding: 12px; background: var(--scrim); backdrop-filter: blur(2px);
+}
+.iqs-expand-panel {
+  position: relative; display: flex; flex-direction: column;
+  width: 98vw; height: 95vh; min-width: 420px; min-height: 280px; max-width: 99vw; max-height: 97vh;
+  resize: both; overflow: hidden;
+  border: 1px solid var(--border-strong); border-radius: 12px;
+  background: var(--panel); box-shadow: var(--shadow-lg);
+}
+.iqs-expand-panel .iqs-head { padding: 14px 52px 0 16px; }
+.iqs-expand-body {
+  flex: 1; min-height: 0; overflow: hidden; padding: 12px 16px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.iqs-expand-body .iqs-scroll { flex: 1; min-height: 0; overflow: auto; }
+.iqs-expand-close {
+  position: absolute; top: 10px; right: 12px; z-index: 1; display: inline-flex;
+  align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  color: var(--muted); cursor: pointer;
+}
+.iqs-expand-close:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* The lot's period on the plan dialog, and on the registration form: read-only
+   where it is read, editable only where the lot itself is. */
+.iqcp-lotperiod strong { font-size: 12.5px; }
+.iqcp-lotperiod em { line-height: 1.5; }
+/* The link to the lot is a link, not a field: inside a column of stacked
+   full-width inputs it would otherwise stretch into a button-shaped box. */
+.iqcp-lotperiod .pq-link { align-self: flex-start; }
+.iqc-period { margin-top: 4px; }
+
+@media (max-width: 950px) {
+  .iqs-wrap .rs-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .iqs-expand { padding: 0; }
+  .iqs-expand-panel { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; border-radius: 0; resize: none; }
+  .iqs-rowhead { min-width: 140px !important; width: 140px !important; }
+  .iqs-period { display: none; }
+  .iqs-shift { left: 140px; }
+}
+
+/* ============================================================================
    Decontamination programme (Facilities & Safety)
    ========================================================================= */
 .dc-split { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 16px; align-items: start; }

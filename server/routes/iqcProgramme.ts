@@ -22,6 +22,11 @@ import { resolveUnitScope, unitScopePayload } from '../services/unitScope.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { programmeFor } from '../services/iqcProgramme.js';
+import { materialDates } from '../services/iqcSeries.js';
+import { blankMonthRows, gridRows, MARK_LEGEND, sheetFor } from '../services/iqcSheet.js';
+import { buildWorkbook, sendWorkbook } from '../utils/xlsxRegister.js';
+import { htmlEscape, printSheet } from '../utils/printLayout.js';
+import { inUseOn, periodLabel } from '../../shared/constants/iqcSeries.js';
 import {
   EXEMPTION_GROUNDS, EXEMPTION_REVIEW_MONTHS, IQC_SHIFTS, PROGRAMME_FREQUENCIES, WEEKDAYS,
   type IqcShift, type ProgrammeFrequency, type Weekday,
@@ -101,6 +106,97 @@ export function iqcProgrammeRoutes() {
     });
   });
 
+  /* ======================================================= the month's sheet */
+
+  /** The month a sheet opens on, and the series it is asked for. */
+  function sheetQuery(req: any) {
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month ?? '')) ? String(req.query.month)
+      : new Date().toISOString().slice(0, 7);
+    return { month, seriesId: parseIntNullable(req.query.seriesId) };
+  }
+
+  /**
+   * The sheet as the laboratory knows it, ready to print or save as PDF.
+   *
+   * Marks rather than colours: a printed chart gets photocopied, faxed and
+   * filed in black and white, and a grid of grey squares says nothing.
+   */
+  router.get('/programme/sheet/print', requirePermission('iqc', 'print'), (req, res) => {
+    const scope = resolveUnitScope(req, req.query.sectionId);
+    const { month, seriesId } = sheetQuery(req);
+    const sheet = sheetFor(getDb(), { sectionId: scope.sectionId, month, seriesId });
+
+    const body = sheet.series.length === 0
+      ? '<p class="none">No control of this unit was in use in this month.</p>'
+      : sheet.series.map(group => `
+<h3>${htmlEscape(group.name)}</h3>
+<p class="legend">${htmlEscape(group.testName)}${group.equipmentName ? ` · ${htmlEscape(group.equipmentName)}` : ''} · ${htmlEscape(MARK_LEGEND)}</p>
+<table>
+  <thead>
+    <tr><th>Lot</th><th>In use</th>${sheet.days.map(d => `<th class="tick">${Number(d.slice(8, 10))}</th>`).join('')}<th>Done</th><th>Not run</th><th>%</th></tr>
+  </thead>
+  <tbody>
+    ${gridRows(group).map((row, index) => `<tr>
+      <td>${htmlEscape(row.label)}</td>
+      <td>${htmlEscape(row.period)}</td>
+      ${group.rows[index].cells.map((cell, i) => `<td class="tick"${cell.state === 'out_of_use' ? ' style="background:#eef2f7"' : ''}>${htmlEscape(row.marks[i])}</td>`).join('')}
+      <td class="tick">${row.performed}</td><td class="tick">${row.missed}</td><td class="tick">${htmlEscape(row.compliance)}</td>
+    </tr>`).join('')}
+  </tbody>
+</table>`).join('<div style="height:14px"></div>');
+
+    audit(req, { action: 'print', entity: 'iqc_schedules', newValue: { month, sectionId: scope.sectionId, series: sheet.series.length } });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printSheet({
+      title: `Control schedule ${month}`,
+      documentTitle: `Internal quality control schedule — ${month}${sheet.sectionName ? ` · ${sheet.sectionName}` : ''}`,
+      body,
+      autoprint: req.query.autoprint !== '0',
+      footerNote: 'Internal quality control record — retain with the unit’s quality records.',
+    }));
+  });
+
+  /** The same grid as a workbook, with a row per lot and a column per day. */
+  router.get('/programme/sheet/export.xlsx', requirePermission('iqc', 'export'), (req, res) => {
+    const scope = resolveUnitScope(req, req.query.sectionId);
+    const { month, seriesId } = sheetQuery(req);
+    const sheet = sheetFor(getDb(), { sectionId: scope.sectionId, month, seriesId });
+
+    const headers = ['Series', 'Test', 'Instrument', 'Lot', 'In use',
+      ...sheet.days.map(d => String(Number(d.slice(8, 10)))), 'Done', 'Not run', '%'];
+    const rows: unknown[][] = [];
+    for (const group of sheet.series) {
+      for (const row of gridRows(group)) {
+        rows.push([group.name, group.testName, group.equipmentName ?? '', row.label, row.period,
+          ...row.marks, row.performed, row.missed, row.compliance]);
+      }
+    }
+    rows.push([], [MARK_LEGEND]);
+
+    audit(req, { action: 'export', entity: 'iqc_schedules', newValue: { month, series: sheet.series.length } });
+    sendWorkbook(res, buildWorkbook(headers, rows, 'CONTROL SCHEDULE'),
+      `Control_schedule_${month}.xlsx`);
+  });
+
+  /**
+   * A blank month, in the shape the run importer reads.
+   *
+   * Pre-filled with this month's scheduled days, the lot that was in use on
+   * each of them and that lot's parameters, so the bench fills in results and
+   * nothing else — and loads it back through "Load a month", which puts every
+   * row through the same evaluation as a run typed in at the bench.
+   */
+  router.get('/programme/sheet/template.xlsx', requirePermission('iqc', 'export'), (req, res) => {
+    const db = getDb();
+    const scope = resolveUnitScope(req, req.query.sectionId);
+    const { month, seriesId } = sheetQuery(req);
+    const sheet = sheetFor(db, { sectionId: scope.sectionId, month, seriesId });
+    const headers = ['Lot number', 'Run date', 'Run time', 'Shift', 'Instrument', 'Operator', 'Reagent lot',
+      'Analyte', 'Result', 'Qualitative result', 'Comment'];
+    const rows = blankMonthRows(db, sheet);
+    sendWorkbook(res, buildWorkbook(headers, rows, 'IQC RUNS'), `Control_runs_blank_${month}.xlsx`);
+  });
+
   /**
    * What a control is expected to do.
    *
@@ -128,11 +224,20 @@ export function iqcProgrammeRoutes() {
     if (frequency === 'per_shift' && shifts.length === 0) {
       return res.status(400).json({ error: 'Say which shifts the control is run on.' });
     }
-    const startsOn = day(req.body?.startsOn);
-    const endsOn = day(req.body?.endsOn);
-    if (startsOn && endsOn && endsOn < startsOn) {
-      return res.status(400).json({ error: 'The schedule ends before it begins.' });
-    }
+    /*
+     * The period is the LOT's, and it is not editable here.
+     *
+     * A lot states when it was put into use and when it was exhausted, the
+     * expiry date standing as the end. A schedule carrying its own from-and-
+     * until would be a second answer to the same question, free to disagree
+     * with the vial on the shelf, and the laboratory would have two dates to
+     * keep in step. So whatever is stored stays stored, the sheet shows the
+     * lot's own period, and the control is where it is changed.
+     */
+    const existing = db.prepare('SELECT starts_on, ends_on FROM iqc_schedules WHERE iqc_material_id = ?')
+      .get(materialId) as any;
+    const startsOn = existing?.starts_on ?? null;
+    const endsOn = existing?.ends_on ?? null;
     const isActive = req.body?.isActive === false ? 0 : 1;
 
     db.prepare(`INSERT INTO iqc_schedules (iqc_material_id, frequency, weekdays, shifts, starts_on, ends_on,
@@ -147,9 +252,14 @@ export function iqcProgrammeRoutes() {
 
     audit(req, {
       action: 'edit', entity: 'iqc_schedules', entityId: materialId,
-      newValue: { control: material.material_name, frequency, weekdays, shifts, startsOn, endsOn, isActive: Boolean(isActive) },
+      newValue: { control: material.material_name, frequency, weekdays, shifts, isActive: Boolean(isActive) },
     });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      note: (req.body?.startsOn !== undefined || req.body?.endsOn !== undefined)
+        ? 'The period a lot is run in is set on the lot itself, not on its schedule, so those dates were not changed.'
+        : undefined,
+    });
   });
 
   /**
@@ -163,7 +273,7 @@ export function iqcProgrammeRoutes() {
     const db = getDb();
     const materialId = parseIntNullable(req.body?.iqcMaterialId);
     if (!materialId) return res.status(400).json({ error: 'Say which control this is about.' });
-    const material = db.prepare('SELECT id, material_name FROM iqc_materials WHERE id = ?').get(materialId) as any;
+    const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(materialId) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
     if (!mayActOnUnit(req, 'iqc', 'create', controlSection(db, materialId))) {
       return res.status(403).json({ error: 'Accounting for a missed run needs the create right on Quality Control, or the running of the unit the control belongs to.' });
@@ -171,6 +281,13 @@ export function iqcProgrammeRoutes() {
 
     const dueDate = day(req.body?.dueDate);
     if (!dueDate) return res.status(400).json({ error: 'Say which day was missed.' });
+    // Nothing was expected of a lot on a day it was not in use, so there is
+    // nothing to account for either.
+    if (!inUseOn(materialDates(material), dueDate)) {
+      return res.status(400).json({
+        error: `Lot ${material.lot_number} was in use ${periodLabel(materialDates(material)).toLowerCase()}, so no run was expected of it on ${dueDate}.`,
+      });
+    }
     if (dueDate > new Date().toISOString().slice(0, 10)) {
       return res.status(400).json({ error: 'That day has not happened yet.' });
     }

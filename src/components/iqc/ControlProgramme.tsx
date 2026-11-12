@@ -12,6 +12,8 @@ import {
   WEEKDAYS, WEEKDAY_SHORT,
   type ExemptionGround, type IqcShift, type OccurrenceState, type ProgrammeFrequency, type Weekday,
 } from '../../../shared/constants/iqcProgramme';
+import { periodLabel } from '../../../shared/constants/iqcSeries';
+import ControlSheet from './ControlSheet';
 
 /**
  * The internal quality control programme, on one screen.
@@ -58,6 +60,10 @@ type ProgrammeControl = {
   id: number; materialName: string; testName: string; levelLabel: string | null; lotNumber: string;
   controlType: string; equipmentId: number | null; equipmentName: string | null;
   expired: boolean; recordingBasis: string; analyteCount: number;
+  /** The series this lot belongs to, and the stretch it was in use for. */
+  seriesId: number | null; continuesMaterialId: number | null;
+  inUseFrom: string | null; inUseTo: string | null; endIsExpiry: boolean;
+  runsOutsidePeriod: number;
   schedule: Schedule; days: Day[];
   expected: number; performed: number; missed: number; excused: number; rejected: number; due: number;
   compliance: number | null; lastRunDate: string | null; oldestMissed: string | null;
@@ -106,7 +112,7 @@ function worstOf(days: Day[]): OccurrenceState {
   return 'not_scheduled';
 }
 
-export default function ControlProgramme({ sectionId, onRecordRun, onDefineControl, onOpenReview }: {
+export default function ControlProgramme({ sectionId, onRecordRun, onDefineControl, onOpenReview, onEditControl }: {
   /**
    * The unit to answer for, where the screen around this one already chooses.
    *
@@ -121,6 +127,14 @@ export default function ControlProgramme({ sectionId, onRecordRun, onDefineContr
   onDefineControl?: (test: { id: number; testName: string }) => void;
   /** Where failures and sign-offs are dealt with. */
   onOpenReview?: () => void;
+  /**
+   * Open the lot itself.
+   *
+   * The period a lot is run in is kept on the lot and nowhere else, so the
+   * schedule shows it and sends the person there to change it — the same rule
+   * the appointment register follows for who holds a post.
+   */
+  onEditControl?: (control: { id: number; materialName: string; lotNumber: string }) => void;
 }) {
   const [month, setMonth] = useState(() => new Date());
   const [unitId, setUnitId] = useState<string>(sectionId != null ? String(sectionId) : '');
@@ -326,74 +340,22 @@ export default function ControlProgramme({ sectionId, onRecordRun, onDefineContr
           <section className="iqcp-panel">
             <div className="iqcp-panel-head">
               <h4>Control schedule</h4>
-              <div className="iqcp-legend">
-                {(['in_control', 'warning', 'rejected', 'missed', 'excused', 'due'] as OccurrenceState[]).map(state => (
-                  <span key={state}><i className={`iqcp-key s-${state}`} /> {OCCURRENCE_STATE_LABELS[state]}</span>
-                ))}
-              </div>
+              <span className="muted">
+                One sheet per control, its lots across the days each was in use. A shaded day is a day that lot
+                was not in use; a hatched one is a scheduled run that did not happen.
+              </span>
             </div>
 
-            {programme.controls.length === 0 ? (
-              <p className="muted">No control is registered for this unit yet.</p>
-            ) : groups.map(group => (
-              <div key={group.name} className="iqcp-group">
-                <h5>{group.name}</h5>
-                <div className="iqcp-grid-wrap">
-                  <table className="iqcp-grid">
-                    <thead>
-                      <tr>
-                        <th className="iqcp-name">Control</th>
-                        {days.map(date => (
-                          <th key={date} className="iqcp-day" title={date}>{Number(date.slice(8, 10))}</th>
-                        ))}
-                        <th className="iqcp-num">Done</th>
-                        <th className="iqcp-num">Not run</th>
-                        <th className="iqcp-num">%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.controls.map(control => (
-                        <tr key={control.id}>
-                          <th className="iqcp-name">
-                            <button type="button" className="iqcp-plan" onClick={() => setPlanning(control)}
-                              title="Set what this control is expected to do">
-                              <strong>{control.materialName}{control.levelLabel ? ` — ${control.levelLabel}` : ''}</strong>
-                              <span className="muted">
-                                {control.testName} · lot {control.lotNumber}
-                              </span>
-                              <span className="iqcp-sched">
-                                <SlidersHorizontal size={10} /> {control.schedule.summary}
-                                {control.schedule.isDefault ? ' (from its frequency)' : ''}
-                              </span>
-                            </button>
-                          </th>
-                          {days.map(date => {
-                            const onDay = control.days.filter(d => d.date === date);
-                            const state = onDay.length ? worstOf(onDay) : 'not_scheduled';
-                            const label = onDay.length
-                              ? `${date} · ${OCCURRENCE_STATE_LABELS[state]}`
-                              : `${date} · not scheduled`;
-                            return (
-                              <td key={date}>
-                                {/* The day in words for a reader who cannot
-                                    see the colour, on the control itself —
-                                    colour alone is not a message. */}
-                                <button type="button" className={`iqcp-cell s-${state}`} title={label}
-                                  aria-label={label} disabled={!onDay.length}
-                                  onClick={() => setOpenDay({ control, date, days: onDay })} />
-                              </td>
-                            );
-                          })}
-                          <td className="iqcp-num">{control.performed}</td>
-                          <td className={`iqcp-num${control.missed ? ' crit' : ''}`}>{control.missed}</td>
-                          <td className="iqcp-num">{control.compliance == null ? '—' : `${control.compliance}%`}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))}
+            <ControlSheet<ProgrammeControl>
+              controls={programme.controls}
+              from={from} to={to}
+              sectionId={programme.sectionId}
+              canRecord={programme.canRecord}
+              onOpenDay={(control, date, dayEntries) => setOpenDay({ control, date, days: dayEntries })}
+              onPlan={setPlanning}
+              onProblem={setProblem}
+              onReloaded={() => { setNotice('The month is loaded, and every run in it evaluated.'); void load(); }}
+            />
           </section>
 
           {/* ------------------------------------------------- outstanding */}
@@ -450,7 +412,7 @@ export default function ControlProgramme({ sectionId, onRecordRun, onDefineContr
 
       {planning && (
         <PlanDialog control={planning} onClose={() => setPlanning(null)}
-          canPlan={programme?.canPlan ?? false}
+          canPlan={programme?.canPlan ?? false} onEditControl={onEditControl}
           onSaved={async () => { setPlanning(null); setNotice('The schedule is saved.'); await load(); }}
           onProblem={setProblem} />
       )}
@@ -599,16 +561,15 @@ function DayDialog({ control, date, days, canRecord, onRecordRun, onClose, onDon
 /* ----------------------------------------------------------------------------
    What a control is expected to do
    ------------------------------------------------------------------------- */
-function PlanDialog({ control, canPlan, onClose, onSaved, onProblem }: {
+function PlanDialog({ control, canPlan, onClose, onSaved, onProblem, onEditControl }: {
   control: ProgrammeControl; canPlan: boolean;
   onClose: () => void; onSaved: () => void | Promise<void>; onProblem: (m: string) => void;
+  onEditControl?: (control: { id: number; materialName: string; lotNumber: string }) => void;
 }) {
   const [frequency, setFrequency] = useState<ProgrammeFrequency>(control.schedule.frequency);
   const [weekdays, setWeekdays] = useState<Weekday[]>(
     control.schedule.weekdays.length ? control.schedule.weekdays : [...WEEKDAYS]);
   const [shifts, setShifts] = useState<IqcShift[]>(control.schedule.shifts);
-  const [startsOn, setStartsOn] = useState(control.schedule.startsOn ?? '');
-  const [endsOn, setEndsOn] = useState(control.schedule.endsOn ?? '');
   const [isActive, setIsActive] = useState(control.schedule.isActive);
   const [notes, setNotes] = useState(control.schedule.notes ?? '');
   const [busy, setBusy] = useState(false);
@@ -621,10 +582,7 @@ function PlanDialog({ control, canPlan, onClose, onSaved, onProblem }: {
     try {
       await api(`/iqc/programme/controls/${control.id}/schedule`, {
         method: 'PUT',
-        body: JSON.stringify({
-          frequency, weekdays, shifts, isActive,
-          startsOn: startsOn || null, endsOn: endsOn || null, notes: notes || null,
-        }),
+        body: JSON.stringify({ frequency, weekdays, shifts, isActive, notes: notes || null }),
       });
       await onSaved();
     } catch (e) { onProblem(errorText(e)); }
@@ -684,15 +642,25 @@ function PlanDialog({ control, canPlan, onClose, onSaved, onProblem }: {
             </div>
           )}
 
-          <label className="stack">
-            <span>In the programme from</span>
-            <input type="date" value={startsOn} disabled={!canPlan} onChange={e => setStartsOn(e.target.value)} />
-            <em className="muted">Nothing is expected before this day, so a lot registered today arrives with no history behind it.</em>
-          </label>
-          <label className="stack">
-            <span>Until (optional)</span>
-            <input type="date" value={endsOn} disabled={!canPlan} onChange={e => setEndsOn(e.target.value)} />
-          </label>
+          {/* The period is the LOT's, and it is kept in one place. A schedule
+              with its own from-and-until would be a second answer to the same
+              question, free to disagree with the vial on the shelf. */}
+          <div className="stack iqcp-lotperiod">
+            <span>In use</span>
+            <strong>{periodLabel(control)}</strong>
+            <em className="muted">
+              {control.inUseFrom || control.inUseTo
+                ? `Nothing is expected of this lot outside these dates, and no run may be recorded against it there either.${control.endIsExpiry ? ' The end is its expiry date.' : ''}`
+                : 'This lot has no period, so it is treated as always in use and the schedule cannot say which lot a day belongs to.'}
+              {onEditControl ? ' It is set on the lot itself:' : ' It is set on the lot itself, in the control register.'}
+            </em>
+            {onEditControl && (
+              <button type="button" className="pq-link"
+                onClick={() => onEditControl({ id: control.id, materialName: control.materialName, lotNumber: control.lotNumber })}>
+                Open lot {control.lotNumber}
+              </button>
+            )}
+          </div>
           <label className="iqcp-switch">
             <input type="checkbox" checked={isActive} disabled={!canPlan}
               onChange={e => setIsActive(e.target.checked)} />

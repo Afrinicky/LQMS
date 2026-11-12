@@ -18,6 +18,7 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { mayActOnUnit } from '../services/unitLeadership.js';
 import { audit } from '../services/auditService.js';
+import { guardRunDate } from '../services/iqcSeries.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import {
@@ -418,6 +419,20 @@ export function iqcRunRoutes() {
       return res.status(400).json({ error: `That control lot expired on ${material.expiry_date}. Use a current lot, or register this one as a retrospective record.` });
     }
 
+    /*
+     * And the lot has to have been the lot in use that day.
+     *
+     * A run is a measurement of a specific vial. Recorded against the lot that
+     * had already been exhausted it attributes a number to material that was
+     * not in the analyser, and every mean, SD and chart built on it is wrong
+     * in a way nobody can see later. The refusal names the lot that WAS open,
+     * so the bench is redirected rather than stopped.
+     */
+    if (runKind === 'control') {
+      const period = guardRunDate(db, material, runDate);
+      if (!period.ok) return res.status(400).json({ error: period.error });
+    }
+
     const isCs = material.control_type === 'culture_sensitivity';
     const observedOrganism = isCs ? (String(req.body?.observedOrganism ?? '').trim() || null) : null;
 
@@ -526,6 +541,8 @@ export function iqcRunRoutes() {
       if (lotExpired(material.expiry_date, runDate, material.recording_basis)) {
         return refused.push({ index, runDate, reason: `The lot expired on ${material.expiry_date}.` });
       }
+      const period = guardRunDate(db, material, runDate);
+      if (!period.ok) return refused.push({ index, runDate, reason: period.error! });
       const readings = readingsOf(raw?.readings);
       const observedOrganism = isCs ? (String(raw?.observedOrganism ?? '').trim() || null) : null;
       if (readings.length === 0 && !(isCs && observedOrganism)) {

@@ -81,6 +81,10 @@ const made = await j('/iqc/materials', {
     lotNumber: `PRG-${stamp}`, levelLabel: 'Level 1', source: 'commercial',
     controlType: 'quantitative', ruleProfile: 'westgard_standard', qcFrequency: 'daily',
     sectionId: unit.id, performingSectionId: unit.id, expiryDate: day(-400),
+    // The period a lot is run in lives on the lot, and it is what the
+    // schedule is drawn from, so the window this check works over is opened
+    // here rather than on the schedule.
+    inUseFrom: day(9),
     analytes: [{ analyte: 'ANALYTE', unit: 'g/L', targetMean: 10, targetSd: 0.5, acceptableLow: 8, acceptableHigh: 12, decimalPlaces: 1 }],
   },
 });
@@ -102,7 +106,7 @@ check('the control is in the programme without being configured', Boolean(contro
 check('its schedule is read from the frequency it was registered with',
   control?.schedule?.isDefault === true && control?.schedule?.frequency === 'daily',
   JSON.stringify(control?.schedule));
-check('nothing is expected before the control existed',
+check('nothing is expected before the lot was put into use',
   control?.days?.every(d => d.date >= String(control.schedule.startsOn ?? d.date)) === true,
   JSON.stringify(control?.schedule?.startsOn));
 check('today is not yet counted as missed',
@@ -110,13 +114,13 @@ check('today is not yet counted as missed',
   JSON.stringify((control?.days ?? []).filter(d => d.date === day(0))));
 
 /*
- * A control registered today is expected from today, which is the point of the
- * check above — so the rest of this needs a plan that opens the period
- * deliberately, exactly as a laboratory entering its history would write one.
+ * A plan written over the default, which is what the laboratory is then judged
+ * against. The period it runs over is the lot's own, set when the lot was
+ * registered — the schedule carries the days and the shifts and nothing else.
  */
 await j(`/iqc/programme/controls/${materialId}/schedule`, {
   token: A, method: 'PUT',
-  body: { frequency: 'daily', weekdays: [1, 2, 3, 4, 5, 6, 7], startsOn: day(9), isActive: true },
+  body: { frequency: 'daily', weekdays: [1, 2, 3, 4, 5, 6, 7], isActive: true },
 });
 
 /* ========================================================================
@@ -190,7 +194,7 @@ check('a day with a run on it cannot be declared missed', contradiction.status =
 section('A schedule the laboratory writes');
 const planned = await j(`/iqc/programme/controls/${materialId}/schedule`, {
   token: A, method: 'PUT',
-  body: { frequency: 'weekly', weekdays: [1], startsOn: day(9), isActive: true },
+  body: { frequency: 'weekly', weekdays: [1], isActive: true },
 });
 check('a schedule can be written', planned.status === 200, JSON.stringify(planned.json));
 p = await programme();
@@ -206,13 +210,13 @@ const badShifts = await j(`/iqc/programme/controls/${materialId}/schedule`, {
 check('a per-shift schedule with no shift named is refused', badShifts.status === 400, `${badShifts.status}`);
 
 await j(`/iqc/programme/controls/${materialId}/schedule`, {
-  token: A, method: 'PUT', body: { frequency: 'daily', weekdays: [1, 2, 3, 4, 5, 6, 7], startsOn: day(9), isActive: false },
+  token: A, method: 'PUT', body: { frequency: 'daily', weekdays: [1, 2, 3, 4, 5, 6, 7], isActive: false },
 });
 p = await programme();
 control = (p.controls ?? []).find(c => c.id === materialId);
 check('a control taken out of the programme expects nothing', control.expected === 0, String(control.expected));
 await j(`/iqc/programme/controls/${materialId}/schedule`, {
-  token: A, method: 'PUT', body: { frequency: 'daily', weekdays: [1, 2, 3, 4, 5, 6, 7], startsOn: day(9), isActive: true },
+  token: A, method: 'PUT', body: { frequency: 'daily', weekdays: [1, 2, 3, 4, 5, 6, 7], isActive: true },
 });
 
 /* ========================================================================

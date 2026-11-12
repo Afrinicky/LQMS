@@ -7127,6 +7127,38 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
   }
 
   /*
+   * A lot of a control, and the series its lots form.
+   *
+   * The register held one row per lot and nothing tying the lots together, so
+   * eight consecutive lots of the same control read as eight unrelated
+   * controls: the schedule showed eight lines, the chart broke at every lot
+   * change, and a month in which the laboratory ran the control every single
+   * day reported seven controls as never run.
+   *
+   *   continues_material_id   the lot this one took over from
+   *   series_id               the first lot of the chain — the series itself
+   *   in_use_from / in_use_to the stretch this lot may be run in
+   *
+   * Every existing lot becomes a series of one, which is exactly what it is
+   * until somebody says a later lot continues it. The period is left empty on
+   * what is already recorded: a lot nobody has dated is treated as always in
+   * use, so nothing already on the system changes meaning overnight.
+   */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_materials)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('continues_material_id')) {
+      database.exec('ALTER TABLE iqc_materials ADD COLUMN continues_material_id INTEGER REFERENCES iqc_materials(id)');
+    }
+    if (!cols.has('series_id')) {
+      database.exec('ALTER TABLE iqc_materials ADD COLUMN series_id INTEGER REFERENCES iqc_materials(id)');
+    }
+    if (!cols.has('in_use_from')) database.exec('ALTER TABLE iqc_materials ADD COLUMN in_use_from TEXT');
+    if (!cols.has('in_use_to')) database.exec('ALTER TABLE iqc_materials ADD COLUMN in_use_to TEXT');
+    database.exec('UPDATE iqc_materials SET series_id = id WHERE series_id IS NULL');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_iqc_materials_series ON iqc_materials(series_id)');
+  }
+
+  /*
    * Which transmission a previously run sample was enrolled from.
    *
    * `feed_message_id` points at iqc_feed_messages, which holds CONTROL runs —
