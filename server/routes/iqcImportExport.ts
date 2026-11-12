@@ -24,6 +24,7 @@ import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
+import { guardRunDate } from '../services/iqcSeries.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
@@ -397,6 +398,11 @@ export function iqcImportExportRoutes() {
           errors.push(`Lot "${g.lot}": the lot expired on ${material.expiry_date}, before the run date ${g.runDate}.`);
           continue;
         }
+        // A month loaded from a spreadsheet is held to the lot's period
+        // exactly as a typed run is, and the error names the lot that was in
+        // use — the commonest cause is a month carried over from the old lot.
+        const period = guardRunDate(database, material, g.runDate);
+        if (!period.ok) { errors.push(period.error!); continue; }
 
         const analytes = database.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id')
           .all(material.id) as AnalyteDef[];

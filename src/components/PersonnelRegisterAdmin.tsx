@@ -7,7 +7,7 @@ import {
   GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES, EXIT_REASONS,
   emptyStaffForm, staffFormFrom, yearsOfService, isTimeLimited, PLACEMENT_GRACE_DAYS, type StaffFormValues,
 } from '../../shared/constants/personnel';
-import type { Staff, Section, Position, ProfessionalRank } from '../../shared/types/api';
+import type { Staff, Section, ProfessionalRank } from '../../shared/types/api';
 import TextField from './ui/TextField';
 import { Notice } from './ui/Feedback';
 
@@ -63,7 +63,6 @@ export default function PersonnelRegisterAdmin() {
   const { can } = usePermissions();
   const [staff, setStaff] = useState<Staff[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
   const [former, setFormer] = useState<Staff[]>([]);
   const [query, setQuery] = useState('');
@@ -102,7 +101,6 @@ export default function PersonnelRegisterAdmin() {
   useEffect(() => {
     void load();
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
-    api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
     api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(() => setRanks([]));
   }, []);
 
@@ -423,7 +421,12 @@ export default function PersonnelRegisterAdmin() {
         <label>Cadre<select value={form.cadre} onChange={set('cadre')}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Professional rank<select value={form.professionalRank} onChange={set('professionalRank')}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
         <label>Availability<select value={form.availabilityStatus} onChange={set('availabilityStatus')}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Assign position<select value={form.positionId} onChange={set('positionId')}><option value="">— keep current —</option>{positions.filter(p => !!p.isActive).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
+        {/* The post a person holds is an appointment, and appointments are
+            made in one place. This changed it here with no regard for who
+            already held it, which is how two people came to hold one post. */}
+        <label>Post held
+          <span className="appt-readonly">{editing?.primaryPosition ?? '—'}</span>
+        </label>
         <label>Staff file location<TextField value={form.staffFileLocation} onValue={setText('staffFileLocation')} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
       </form>}
     </DetailModal>

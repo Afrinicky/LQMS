@@ -33,6 +33,7 @@ import {
 import { LINK_STATE_LABELS } from '../../shared/constants/instruments';
 import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
+import { periodLabel } from '../../shared/constants/iqcSeries';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 import InstrumentLinksTab from './InstrumentLinksTab';
@@ -78,6 +79,10 @@ type Material = {
   continuity_tolerance_kind: string | null; continuity_tolerance_value: number | null;
   /** 'prospective' (a lot in use) or 'retrospective' (history being entered). */
   recording_basis: string | null;
+  /** The series this lot belongs to, and the lot it took over from. */
+  series_id: number | null; continues_material_id: number | null;
+  /** The stretch this lot may be run in. The expiry date stands as the end. */
+  in_use_from: string | null; in_use_to: string | null;
   analyte_count: number; run_count: number; last_run_date: string | null;
 };
 
@@ -240,6 +245,8 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
    * and the day the programme named.
    */
   const [runTarget, setRunTarget] = useState<RunTarget | null>(null);
+  /** A lot the schedule sent us to, so the register opens on it. */
+  const [openControlId, setOpenControlId] = useState<number | null>(null);
   /** An examination with no control, carried to the form that defines one. */
   const [testToControl, setTestToControl] = useState<{ id: number; testName: string } | null>(null);
 
@@ -294,12 +301,15 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
           onRecordRun={target => { setRunTarget(target); setTab('Run Control'); }}
           onDefineControl={test => { setTestToControl(test); setTab('New Control'); }}
           onOpenReview={() => setTab('Review')}
+          // The period a lot is run in lives on the lot, so the schedule sends
+          // the person to the lot rather than keeping a second copy of it.
+          onEditControl={control => { setOpenControlId(control.id); setTab('Controls'); }}
         />
       )}
 
       {tab === 'Controls' && (
         <ControlRegister
-          materials={materials} onChanged={load}
+          materials={materials} onChanged={load} openId={openControlId}
           onRun={() => setTab('Run Control')}
           onChart={() => setTab('Levey-Jennings')}
           canEdit={can('iqc', 'edit')} ownUnit={ownUnit}
@@ -396,15 +406,21 @@ function ControlReadiness({ materials, runs, onOpen }: { materials: Material[]; 
 
 /* --------------------------------------------------------------- register */
 
-function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, ownUnit, sections, staff, equipment, isAdmin, onError, onNotice }: {
+function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, openId, ownUnit, sections, staff, equipment, isAdmin, onError, onNotice }: {
   materials: Material[]; onChanged: () => void; onRun: () => void; onChart: () => void; canEdit: boolean;
+  /** A lot to open on arrival, where the register was reached from elsewhere. */
+  openId?: number | null;
   /** A control this account may work on because it runs the unit that owns it. */
   ownUnit: (m: Material) => boolean;
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[]; isAdmin: boolean;
   onError: (m: string) => void; onNotice: (m: string) => void;
 }) {
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(openId ?? null);
   const [analytes, setAnalytes] = useState<Record<number, Analyte[]>>({});
+
+  // Arriving here from the schedule, the lot in question is already open: the
+  // whole point of the link is that nobody has to find it again.
+  useEffect(() => { if (openId) setOpen(openId); }, [openId]);
 
   const expand = async (m: Material) => {
     setOpen(open === m.id ? null : m.id);
@@ -456,7 +472,15 @@ function ControlRegister({ materials, onChanged, onRun, onChart, canEdit, ownUni
                 <td>{m.test_name}</td>
                 <td><span className={`chip type-${m.control_type}`}>{IQC_CONTROL_TYPE_LABELS[m.control_type]}</span></td>
                 <td><span className={`chip src-${m.source}`}>{m.source === 'in_house' ? 'In-house' : 'Commercial'}</span></td>
-                <td>{m.lot_number}</td>
+                <td>
+                  {m.lot_number}
+                  {/* The period the lot is in use for: what the schedule is
+                      drawn from, so it belongs beside the lot it governs. */}
+                  <div className="cell-sub">{periodLabel({
+                    inUseFrom: m.in_use_from, inUseTo: m.in_use_to, expiryDate: m.expiry_date,
+                  })}</div>
+                  {m.continues_material_id && <div className="cell-sub">Continues an earlier lot</div>}
+                </td>
                 <td>
                   {m.expiry_date || '—'}
                   {m.recording_basis === 'retrospective'
@@ -695,6 +719,8 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     levelLabel: material.level_label ?? '', manufacturer: material.manufacturer ?? '',
     expiryDate: material.expiry_date ?? '', openVialExpiry: material.open_vial_expiry ?? '',
     recordingBasis: material.recording_basis ?? 'prospective',
+    inUseFrom: material.in_use_from ?? '', inUseTo: material.in_use_to ?? '',
+    continuesMaterialId: material.continues_material_id ? String(material.continues_material_id) : '',
     storageCondition: (material as Record<string, any>).storage_condition ?? '',
     sectionId: material.section_id ? String(material.section_id) : '',
     equipmentId: material.equipment_id ? String(material.equipment_id) : '',
@@ -719,9 +745,20 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
   })));
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  /** The other lots of this control, which this one may be said to continue. */
+  const [continuable, setContinuable] = useState<Array<{ id: number; lotNumber: string; period: string }>>([]);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
   const setRow = (i: number, k: string, v: string) => setRows(rs => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+
+  useEffect(() => {
+    const query = new URLSearchParams({
+      testName: material.test_name, levelLabel: material.level_label ?? '', excludeId: String(material.id),
+    });
+    if (material.section_id) query.set('sectionId', String(material.section_id));
+    api<Array<{ id: number; lotNumber: string; period: string }>>(`/iqc/series/candidates?${query}`)
+      .then(setContinuable).catch(() => setContinuable([]));
+  }, [material.id, material.test_name, material.level_label, material.section_id]);
 
   // Which targets the operator has actually moved, and therefore whether a
   // reason is needed. Worked out here so the requirement appears as they type
@@ -796,6 +833,21 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
           </select>
         </label>
         <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
+        {/* The stretch this lot may be run in. It is what the schedule is
+            drawn from, and the only place those dates are kept. */}
+        <label>In use from<input type="date" value={form.inUseFrom} max={form.inUseTo || undefined}
+          onChange={e => set('inUseFrom', e.target.value)} /></label>
+        <label>In use until<input type="date" value={form.inUseTo} min={form.inUseFrom || undefined}
+          onChange={e => set('inUseTo', e.target.value)} /></label>
+        <label>Continues the lot
+          <select value={form.continuesMaterialId} onChange={e => set('continuesMaterialId', e.target.value)}
+            disabled={continuable.length === 0}>
+            <option value="">
+              {continuable.length === 0 ? 'No other lot of this control' : 'Nothing — this starts the series'}
+            </option>
+            {continuable.map(c => <option key={c.id} value={c.id}>Lot {c.lotNumber} · {c.period}</option>)}
+          </select>
+        </label>
         <label>Section<select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Run frequency<select value={form.qcFrequency} onChange={e => set('qcFrequency', e.target.value)}>{IQC_FREQUENCIES.map(f => <option key={f} value={f}>{IQC_FREQUENCY_LABELS[f]}</option>)}</select></label>

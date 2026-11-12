@@ -9,6 +9,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import { parseTolerance, IQC_RECORDING_BASES } from '../../shared/constants/iqc.js';
+import { checkSeries, seriesCandidates } from '../services/iqcSeries.js';
 
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const IQC_MATERIAL_HEADERS = ['Material name', 'Test', 'Analyte', 'Lot number', 'Manufacturer', 'Expiry date', 'Storage condition', 'Target mean', 'Target SD', 'Acceptable low', 'Acceptable high', 'Section'] as const;
@@ -161,6 +162,38 @@ export function iqcRoutes() {
     }
 
     const db = getDb();
+
+    /*
+     * When this lot is in use, and which lot it took over from.
+     *
+     * The period is what the schedule is drawn from and what a run is checked
+     * against, so it is settled here rather than left to be configured later:
+     * a lot registered without one is treated as always in use, which is
+     * honest but says nothing, and the sheet asks for it.
+     */
+    const dateOnly = (value: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? '').trim()) ? String(value).trim() : null);
+    const inUseFrom = dateOnly(req.body.inUseFrom);
+    const inUseTo = dateOnly(req.body.inUseTo);
+    if (inUseFrom && inUseTo && inUseTo < inUseFrom) {
+      return res.status(400).json({ error: 'The lot cannot be taken out of use before it was put into use.' });
+    }
+    if (inUseTo && req.body.expiryDate && inUseTo > String(req.body.expiryDate)) {
+      return res.status(400).json({ error: `The lot expires on ${req.body.expiryDate}; it cannot be in use past that date.` });
+    }
+
+    const continuesId = parseIntNullable(req.body.continuesMaterialId);
+    let seriesId: number | null = null;
+    if (continuesId) {
+      const series = checkSeries(db, {
+        continuesMaterialId: continuesId,
+        testName: req.body.testName,
+        levelLabel: req.body.levelLabel ?? null,
+        sectionId: parseIntNullable(req.body.sectionId),
+      });
+      if (!series.ok) return res.status(series.status ?? 400).json({ error: series.error });
+      seriesId = series.seriesId ?? null;
+    }
+
     const createdAt = new Date().toISOString();
     // The number lands in a UNIQUE column, so derive it collision-safely.
     const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', createdAt, 'material_code');
@@ -174,8 +207,9 @@ export function iqcRoutes() {
           source, control_type, level_label, unit, qc_frequency, rule_profile,
           prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary,
           stability_period, open_vial_expiry, instructions, expected_organism, cs_scope,
-          continuity_tolerance_kind, continuity_tolerance_value, recording_basis)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          continuity_tolerance_kind, continuity_tolerance_value, recording_basis,
+          continues_material_id, in_use_from, in_use_to)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           materialCode, req.body.materialName, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
           req.body.testName,
@@ -200,8 +234,13 @@ export function iqcRoutes() {
           // A lot in current use, unless the laboratory says it is entering an
           // already-run one for the record.
           IQC_RECORDING_BASES.includes(req.body.recordingBasis) ? req.body.recordingBasis : 'prospective',
+          continuesId, inUseFrom, inUseTo,
         );
       materialId = Number(result.lastInsertRowid);
+      // A lot that continues nothing starts its own series, which is what a
+      // first lot is. Written here rather than defaulted in the schema so the
+      // column is never null and every reader can join on it.
+      db.prepare('UPDATE iqc_materials SET series_id = ? WHERE id = ?').run(seriesId ?? materialId, materialId);
 
       const analytes = Array.isArray(req.body.analytes) && req.body.analytes.length
         ? req.body.analytes
@@ -222,8 +261,29 @@ export function iqcRoutes() {
     });
     tx();
 
-    audit(req, { action: 'create', entity: 'iqc_materials', entityId: materialId, newValue: { materialCode, source, controlType } });
+    audit(req, {
+      action: 'create', entity: 'iqc_materials', entityId: materialId,
+      newValue: { materialCode, source, controlType, continuesMaterialId: continuesId, inUseFrom, inUseTo },
+    });
     res.status(201).json({ id: materialId, materialCode });
+  });
+
+  /**
+   * The lots a new lot could be said to continue.
+   *
+   * Narrowed to the same examination, the same level and the same unit,
+   * because that is what a series is — and because a picker offering every
+   * control in the laboratory is a picker through which the wrong one gets
+   * chosen. Each entry carries the period it was in use for, so the person
+   * registering the new lot can see where theirs picks up.
+   */
+  router.get('/series/candidates', requirePermission('iqc', 'view'), (req, res) => {
+    res.json(seriesCandidates(getDb(), {
+      sectionId: parseIntNullable(req.query.sectionId),
+      testName: req.query.testName ? String(req.query.testName) : null,
+      levelLabel: req.query.levelLabel !== undefined ? String(req.query.levelLabel) : null,
+      excludeId: parseIntNullable(req.query.excludeId),
+    }));
   });
 
   // ---- IQC materials — Excel export / template / import ----

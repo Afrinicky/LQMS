@@ -30,6 +30,7 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { requireAdministrator, requiredReason, isAdministrator } from '../middleware/administrator.js';
 import { audit } from '../services/auditService.js';
+import { checkSeries } from '../services/iqcSeries.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { evaluateRun, type AnalyteDef, type History } from '../services/iqcEvaluation.js';
 import {
@@ -147,12 +148,47 @@ export function iqcAdminRoutes() {
         needsReason: true, targetsMoved, affectedRuns: runCount,
       });
     }
+    /*
+     * The lot's period, and the lot it continues.
+     *
+     * Correctable here because this is where a control is corrected, and
+     * because the likelier fault is the date rather than the runs: a period
+     * typed a month short leaves real runs standing outside it, and the
+     * programme says so rather than hiding them.
+     */
+    const dateOnly = (value: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? '').trim()) ? String(value).trim() : null);
+    const inUseFrom = req.body?.inUseFrom === undefined ? (before.in_use_from ?? null) : dateOnly(req.body.inUseFrom);
+    const inUseTo = req.body?.inUseTo === undefined ? (before.in_use_to ?? null) : dateOnly(req.body.inUseTo);
+    if (inUseFrom && inUseTo && inUseTo < inUseFrom) {
+      return res.status(400).json({ error: 'The lot cannot be taken out of use before it was put into use.' });
+    }
+
+    let continuesId = req.body?.continuesMaterialId === undefined
+      ? (before.continues_material_id ?? null)
+      : parseIntNullable(req.body.continuesMaterialId);
+    let seriesId = continuesId ? null : Number(before.id);
+    if (continuesId) {
+      const series = checkSeries(db, {
+        continuesMaterialId: continuesId,
+        materialId: Number(before.id),
+        testName,
+        levelLabel: String(given(req.body?.levelLabel, before.level_label) ?? '') || null,
+        sectionId: req.body?.sectionId === undefined ? (before.section_id ?? null) : parseIntNullable(req.body.sectionId),
+      });
+      if (!series.ok) return res.status(series.status ?? 400).json({ error: series.error });
+      seriesId = series.seriesId ?? null;
+    }
+
 
     const after = {
       material_name: materialName,
       test_name: testName,
       lot_number: lotNumber,
       level_label: given(req.body?.levelLabel, before.level_label),
+      continues_material_id: continuesId,
+      series_id: seriesId ?? Number(before.id),
+      in_use_from: inUseFrom,
+      in_use_to: inUseTo,
       source, control_type: controlType, rule_profile: ruleProfile, qc_frequency: qcFrequency,
       manufacturer: given(req.body?.manufacturer, before.manufacturer),
       expiry_date: given(req.body?.expiryDate, before.expiry_date),
@@ -194,13 +230,32 @@ export function iqcAdminRoutes() {
           preparation_date = ?, preparation_method = ?, base_material = ?, validation_summary = ?,
           stability_period = ?, instructions = ?, expected_organism = ?, cs_scope = ?,
           continuity_tolerance_kind = ?, continuity_tolerance_value = ?,
+          continues_material_id = ?, series_id = ?, in_use_from = ?, in_use_to = ?,
           is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(after.material_name, after.test_name, after.lot_number, after.level_label, after.source,
           after.control_type, after.rule_profile, after.qc_frequency, after.manufacturer, after.expiry_date,
           after.open_vial_expiry, after.recording_basis, after.storage_condition, after.section_id, after.equipment_id,
           after.prepared_by_staff_id, after.preparation_date, after.preparation_method, after.base_material,
           after.validation_summary, after.stability_period, after.instructions, after.expected_organism, after.cs_scope,
-          after.continuity_tolerance_kind, after.continuity_tolerance_value, after.is_active, req.params.id);
+          after.continuity_tolerance_kind, after.continuity_tolerance_value,
+          after.continues_material_id, after.series_id, after.in_use_from, after.in_use_to,
+          after.is_active, req.params.id);
+
+      // Lots that continue THIS one follow it into its series, so a chain
+      // re-pointed at its head does not leave the tail behind in a series of
+      // its own.
+      const root = after.series_id;
+      const walk = [Number(before.id)];
+      const seen = new Set<number>(walk);
+      while (walk.length) {
+        const current = walk.shift()!;
+        for (const row of db.prepare('SELECT id FROM iqc_materials WHERE continues_material_id = ?').all(current) as Array<{ id: number }>) {
+          if (seen.has(Number(row.id))) continue;
+          seen.add(Number(row.id));
+          db.prepare('UPDATE iqc_materials SET series_id = ? WHERE id = ?').run(root, row.id);
+          walk.push(Number(row.id));
+        }
+      }
 
       if (!sent) return;
       const keep = new Set<number>();

@@ -22,6 +22,7 @@ import {
   type Weekday,
 } from '../../shared/constants/iqcProgramme.js';
 import { lotExpired } from '../../shared/constants/iqc.js';
+import { periodOf, runsOutsidePeriod } from './iqcSeries.js';
 
 type DB = any;
 
@@ -47,16 +48,33 @@ function json<T>(value: unknown, fallback: T): T {
  */
 export function scheduleFor(material: any, row: any | null): ProgrammeSchedule {
   const registeredOn = String(material?.created_at ?? '').slice(0, 10) || null;
-  if (!row) return defaultSchedule(material?.qc_frequency, registeredOn);
+  /*
+   * The lot's own period owns the window.
+   *
+   * A lot states when it was put into use and when it was exhausted, the
+   * expiry date standing as the end until somebody says otherwise, and that is
+   * the only place those dates are kept. A schedule with dates of its own
+   * would be a second answer to the same question, free to disagree with the
+   * vial on the shelf — which is how a programme ends up expecting runs of a
+   * lot that was thrown away in September.
+   */
+  const period = periodOf(material);
+  const base = row
+    ? {
+      frequency: String(row.frequency ?? 'daily') as ProgrammeFrequency,
+      weekdays: json<Weekday[]>(row.weekdays, []),
+      shifts: json<IqcShift[]>(row.shifts, []),
+      startsOn: row.starts_on ?? registeredOn,
+      endsOn: row.ends_on ?? null,
+      isActive: Number(row.is_active ?? 1) === 1,
+      isDefault: false,
+      notes: row.notes ?? null,
+    }
+    : defaultSchedule(material?.qc_frequency, registeredOn);
   return {
-    frequency: String(row.frequency ?? 'daily') as ProgrammeFrequency,
-    weekdays: json<Weekday[]>(row.weekdays, []),
-    shifts: json<IqcShift[]>(row.shifts, []),
-    startsOn: row.starts_on ?? registeredOn,
-    endsOn: row.ends_on ?? null,
-    isActive: Number(row.is_active ?? 1) === 1,
-    isDefault: false,
-    notes: row.notes ?? null,
+    ...base,
+    startsOn: period.from ?? base.startsOn,
+    endsOn: period.to ?? base.endsOn,
   };
 }
 
@@ -77,6 +95,16 @@ export interface ProgrammeDay extends Occurrence {
 
 export interface ProgrammeControl {
   id: number;
+  /** The first lot of the chain this lot belongs to — the series. */
+  seriesId: number;
+  continuesMaterialId: number | null;
+  /** The stretch this lot may be run in. The expiry date stands as the end. */
+  inUseFrom: string | null;
+  inUseTo: string | null;
+  /** True where the end of the period is the expiry date rather than a stated one. */
+  endIsExpiry: boolean;
+  /** Runs already recorded outside the period: kept, and flagged. */
+  runsOutsidePeriod: number;
   materialName: string;
   testName: string;
   levelLabel: string | null;
@@ -219,6 +247,8 @@ export function programmeFor(db: DB, options: {
     analyteCounts.set(Number(row.iqc_material_id), Number(row.n));
   }
 
+  const outsidePeriod = runsOutsidePeriod(db, ids);
+
   const controls: ProgrammeControl[] = materials.map(material => {
     const id = Number(material.id);
     const schedule = scheduleFor(material, schedules.get(id) ?? null);
@@ -272,8 +302,15 @@ export function programmeFor(db: DB, options: {
     const rejected = days.filter(d => d.state === 'rejected').length;
     const due = days.filter(d => d.state === 'due').length;
 
+    const period = periodOf(material);
     return {
       id,
+      seriesId: Number(material.series_id ?? material.id),
+      continuesMaterialId: material.continues_material_id ?? null,
+      inUseFrom: period.from,
+      inUseTo: period.to,
+      endIsExpiry: period.endIsExpiry,
+      runsOutsidePeriod: outsidePeriod.get(id) ?? 0,
       materialName: material.material_name,
       testName: material.test_name,
       levelLabel: material.level_label ?? null,

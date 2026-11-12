@@ -57,6 +57,21 @@ check('three units exist', !!mine && !!theirs && !!third, JSON.stringify({ mine,
 
 const mkStaff = async (no, first, sur, sectionId) => (await j('/staff', { token: A, method: 'POST',
   body: { employeeNo: no, firstName: first, surname: sur, sectionId } })).json;
+
+/*
+ * Putting somebody in charge of a unit.
+ *
+ * Through the appointment register, which is the only thing that does it now:
+ * a unit is run by whoever holds the post that supervises it, and the unit
+ * record follows the appointment. It used to be set on the unit's own profile,
+ * independently of the post anybody held, and the two could name different
+ * people — which is the fault that register exists to end.
+ */
+const putInCharge = async (sectionId, staffId, title) => {
+  const post = (await j('/positions', { token: A, method: 'POST', body: { title, isCore: true } })).json;
+  await j(`/appointments/posts/${post.id}/supervises`, { token: A, method: 'PUT', body: { sectionId } });
+  return j('/appointments', { token: A, method: 'POST', body: { positionId: post.id, staffId } });
+};
 const roles = (await j('/roles', { token: A })).json;
 const roleId = n => roles.find(r => r.name === n)?.id;
 const mkUser = async (username, staffId, roleName) => (await j('/users', { token: A, method: 'POST',
@@ -66,7 +81,7 @@ const mkUser = async (username, staffId, roleName) => (await j('/users', { token
 // laboratory reported: the post is recorded on the unit, not on the account.
 const head = await mkStaff(`UH-${stamp}`, 'Hanna', 'Head', mine);
 await mkUser(`uh${stamp}`, head.id, 'Biomedical Scientist');
-await j(`/section-config/sections/${mine}`, { token: A, method: 'PUT', body: { headStaffId: head.id } });
+await putInCharge(mine, head.id, `Unit Supervisor ${stamp} A`);
 // Somebody standing in for the head of the OTHER unit, also on a bench profile.
 const stand = await mkStaff(`AC-${stamp}`, 'Ama', 'Acting', theirs);
 await mkUser(`ac${stamp}`, stand.id, 'Biomedical Scientist');
@@ -83,7 +98,7 @@ await mkUser(`bs${stamp}`, bench.id, 'Biomedical Scientist');
 // because they run that one unit.
 const scoped = await mkStaff(`SC-${stamp}`, 'Sena', 'Scoped', third);
 await mkUser(`sc${stamp}`, scoped.id, 'Quality Team Member');
-await j(`/section-config/sections/${third}`, { token: A, method: 'PUT', body: { headStaffId: scoped.id } });
+await putInCharge(third, scoped.id, `Unit Supervisor ${stamp} C`);
 
 const H = await login(`uh${stamp}`);
 const S = await login(`ac${stamp}`);

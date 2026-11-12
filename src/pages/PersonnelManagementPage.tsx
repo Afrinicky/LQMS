@@ -5,7 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
-import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard, ActingSupervisorsBoard } from './SchedulingBoards';
+import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
@@ -251,7 +251,16 @@ export function PersonnelManagementPage() {
   // register has loaded it.
   useFocusTarget(staff);
 
-  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Files', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
+  /*
+   * Unit Supervisors is no longer a tab here.
+   *
+   * It answered "who runs each unit today" and let somebody appoint a
+   * stand-in — which made it one of six places a supervisor could be set, each
+   * unaware of the others. All of it now lives in the appointment register
+   * under Settings → People & Access → Positions & Organogram → Appointments,
+   * where who holds a post and who is standing in are answered together.
+   */
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Files', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Bench Schedules', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" />
@@ -414,7 +423,6 @@ export function PersonnelManagementPage() {
 
     {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
     {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} sections={sections} canEdit={canEditRosters} onNavigate={setTab} />}
-    {tab === 'Unit Supervisors' && <ActingSupervisorsBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
     {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} staff={staff} canEdit={canEditRosters} />}
 
 

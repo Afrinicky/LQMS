@@ -24,6 +24,7 @@
     "audit:cache": "node scripts/access-cache-check.mjs",
     "audit:dashboard": "node scripts/dashboard-perf-check.mjs",
     "check:accounts": "node scripts/account-check.mjs",
+    "check:appointments": "node scripts/appointments-check.mjs",
     "check:iqc": "node scripts/iqc-check.mjs",
     "check:iqc-bulk": "node scripts/iqc-bulk-check.mjs",
     "check:iqc-programme": "node scripts/iqc-programme-check.mjs",
@@ -86,7 +87,8 @@
     "check:mappings": "node scripts/parameter-mappings-check.mjs",
     "validate:oq": "node scripts/validation/oq-suite.mjs",
     "validate:pq": "node scripts/validation/pq-recovery.mjs",
-    "validate": "npm run validate:oq && npm run validate:pq"
+    "validate": "npm run validate:oq && npm run validate:pq",
+    "check:iqc-series": "node scripts/iqc-series-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

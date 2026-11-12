@@ -40,6 +40,13 @@ export type AnalyteDraft = {
   continuityTolerance: string;
 };
 
+/** A lot already on the register that a new lot could continue. */
+type SeriesCandidate = {
+  id: number; materialName: string; testName: string; levelLabel: string | null; lotNumber: string;
+  seriesId: number; equipmentName: string | null; inUseFrom: string | null; inUseTo: string | null;
+  period: string; lotsInSeries: number;
+};
+
 export const emptyAnalyte = (): AnalyteDraft => ({
   analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '',
   decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '',
@@ -80,6 +87,7 @@ export default function DefineControlForm({
   const [form, setForm] = useState({
     materialName: '', testName: defaultTestName ?? '', lotNumber: '', levelLabel: '', manufacturer: '',
     expiryDate: '', openVialExpiry: '', storageCondition: '', recordingBasis: 'prospective',
+    continuesMaterialId: '', inUseFrom: '', inUseTo: '',
     sectionId: mySectionId != null ? String(mySectionId) : '',
     equipmentId: defaultEquipmentId != null ? String(defaultEquipmentId) : '',
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
@@ -91,6 +99,8 @@ export default function DefineControlForm({
   const [rows, setRows] = useState<AnalyteDraft[]>([emptyAnalyte()]);
   const [scale, setScale] = useState(QUALITATIVE_SCALES[0].key);
   const [busy, setBusy] = useState(false);
+  /** The lots this one could be said to continue: same test, same level, same unit. */
+  const [candidates, setCandidates] = useState<SeriesCandidate[]>([]);
   const isCs = controlType === 'culture_sensitivity';
   const wantsOrganism = isCs && csNeedsOrganism(form.csScope);
   const wantsPanel = isCs && csNeedsPanel(form.csScope);
@@ -105,6 +115,38 @@ export default function DefineControlForm({
   useEffect(() => {
     if (mySectionId != null) setForm(f => (f.sectionId ? f : { ...f, sectionId: String(mySectionId) }));
   }, [mySectionId]);
+  /*
+   * The lots a new lot can continue.
+   *
+   * Asked of the server as the test and the level are typed, because the
+   * answer depends on both: a series is one examination at one level, and a
+   * picker that offered every control in the laboratory is a picker through
+   * which the wrong lot gets joined to the wrong chain.
+   */
+  useEffect(() => {
+    const test = form.testName.trim();
+    if (!test) { setCandidates([]); return; }
+    const query = new URLSearchParams({ testName: test, levelLabel: form.levelLabel.trim() });
+    if (form.sectionId) query.set('sectionId', form.sectionId);
+    let live = true;
+    const timer = setTimeout(() => {
+      api<SeriesCandidate[]>(`/iqc/series/candidates?${query}`)
+        .then(rows => { if (live) setCandidates(rows); })
+        .catch(() => { if (live) setCandidates([]); });
+    }, 350);
+    return () => { live = false; clearTimeout(timer); };
+  }, [form.testName, form.levelLabel, form.sectionId]);
+
+  // A lot chosen for one level is not a candidate at another, so the choice
+  // goes with the question rather than lingering invisibly on the payload.
+  useEffect(() => {
+    if (form.continuesMaterialId && !candidates.some(c => String(c.id) === form.continuesMaterialId)) {
+      set('continuesMaterialId', '');
+    }
+  }, [candidates]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const continues = candidates.find(c => String(c.id) === form.continuesMaterialId) ?? null;
+
   const profiles = PROFILES_FOR_TYPE[controlType];
   useEffect(() => { if (!profiles.includes(form.ruleProfile)) set('ruleProfile', profiles[0]); }, [controlType]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -143,7 +185,10 @@ export default function DefineControlForm({
     try {
       await api('/iqc/materials', { method: 'POST', body: JSON.stringify({ ...form, source, controlType, analytes: payloadAnalytes }) });
       await onSaved();
-      setForm(f => ({ ...f, materialName: '', lotNumber: '', levelLabel: '', expectedOrganism: '' }));
+      setForm(f => ({
+        ...f, materialName: '', lotNumber: '', levelLabel: '', expectedOrganism: '',
+        continuesMaterialId: '', inUseFrom: '', inUseTo: '',
+      }));
       setRows([emptyAnalyte()]);
     } catch (err) { onError(errorText(err)); }
     finally { setBusy(false); }
@@ -201,7 +246,14 @@ export default function DefineControlForm({
           <label>Lot / batch number<TextField value={form.lotNumber} onValue={nextValue => set('lotNumber', nextValue)} required /></label>
           <label>Level or designation<TextField value={form.levelLabel} onValue={nextValue => set('levelLabel', nextValue)} placeholder="e.g. Level 1 (Normal), Positive control" /></label>
           {source === 'commercial' && <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => set('manufacturer', nextValue)} /></label>}
-          <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
+          <label>Expiry date<input type="date" value={form.expiryDate}
+            onChange={e => {
+              // The expiry date stands as the end of the period until the
+              // laboratory says the vial was finished earlier, so it fills the
+              // field it governs rather than leaving it to be retyped.
+              const next = e.target.value;
+              setForm(f => ({ ...f, expiryDate: next, inUseTo: (!f.inUseTo || f.inUseTo === f.expiryDate) ? next : f.inUseTo }));
+            }} /></label>
           <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
           {/* Sits beside the expiry it governs, because that is the one thing
               it changes: a lot already run and finished is being recorded, not
@@ -221,6 +273,39 @@ export default function DefineControlForm({
           <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         </div>
         <p className="iqc-note">{IQC_RECORDING_BASIS_HINTS[form.recordingBasis as 'prospective' | 'retrospective']}</p>
+
+        {/* 3a — when the lot is in use, and which lot it took over from.
+            These two answers are what the schedule is drawn from: the sheet
+            shows this lot across exactly these days, expects a run on none
+            outside them, and will not accept one either. */}
+        <div className="iqc-period">
+          <div className="form-grid">
+            <label>In use from<input type="date" value={form.inUseFrom}
+              max={form.inUseTo || undefined}
+              onChange={e => set('inUseFrom', e.target.value)} /></label>
+            <label>In use until<input type="date" value={form.inUseTo}
+              min={form.inUseFrom || undefined} max={form.expiryDate || undefined}
+              onChange={e => set('inUseTo', e.target.value)} /></label>
+            <label>Continues the lot
+              <select value={form.continuesMaterialId} onChange={e => set('continuesMaterialId', e.target.value)}
+                disabled={candidates.length === 0}>
+                <option value="">
+                  {candidates.length === 0 ? 'No earlier lot of this control' : 'Nothing — this starts a new series'}
+                </option>
+                {candidates.map(c => (
+                  <option key={c.id} value={c.id}>Lot {c.lotNumber} · {c.period}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="iqc-note">
+            {continues
+              ? `This lot joins the series that lot ${continues.lotNumber} belongs to — ${continues.lotsInSeries} lot${continues.lotsInSeries === 1 ? '' : 's'} so far. The series holds one line on the schedule and one chart, with each lot occupying the days it was in use.`
+              : form.inUseFrom || form.inUseTo
+                ? 'Runs can be recorded against this lot only within this period, and the schedule expects none outside it. The expiry date stands as the end unless the vial was finished earlier.'
+                : 'Give the stretch this lot is in use for — from the day it was put into use to the day it was exhausted. Without it the lot is treated as always in use, and the schedule cannot say which lot a day belongs to.'}
+          </p>
+        </div>
         {!form.sectionId && (
           <p className="iqc-note warn">
             Name the unit that runs this control. Until it has one it appears on nobody&rsquo;s bench board,
