@@ -41,6 +41,7 @@ import type {
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 import RiskCriteriaSettings from './settings/RiskCriteriaSettings';
+import Appointments, { AppointmentPointer } from '../components/settings/Appointments';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
 // it should inherit, so that selecting a position pre-fills the authorization grid
@@ -353,7 +354,14 @@ type OrgNodeData = { id: number; title: string; description?: string | null; rep
 
 export function Positions(){
   const { can } = usePermissions();
-  const [view,setView]=useState<'list'|'organogram'>('list');
+  /*
+   * Three views of one register: the posts that exist, who holds them, and
+   * how they report to each other. Appointing is its own view because it was
+   * previously done in five places that could contradict each other.
+   */
+  const [view,setView]=useState<'list'|'appointments'|'organogram'>(
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'appointments'
+      ? 'appointments' : 'list');
   const [positions,setPositions]=useState<Position[]>([]);
   const [staff,setStaff]=useState<Staff[]>([]);
   const [sections,setSections]=useState<Section[]>([]);
@@ -375,7 +383,7 @@ export function Positions(){
     e.preventDefault(); setError(null);
     const fd=new FormData(e.currentTarget);
     try {
-      await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),sectionId:fd.get('sectionId')||null,positionId:Number(fd.get('positionId'))})});
+      await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),sectionId:fd.get('sectionId')||null})});
       e.currentTarget.reset(); load();
     } catch (err) { setError(errorText(err)); }
   }
@@ -401,7 +409,11 @@ export function Positions(){
   const byId = (id?: number | null) => positions.find(p => p.id === id)?.title;
 
   return <div>
-    <div className="tabs"><button className={view==='list'?'active':''} onClick={()=>setView('list')}>Positions list</button><button className={view==='organogram'?'active':''} onClick={()=>setView('organogram')}>Organogram</button></div>
+    <div className="tabs">
+      <button className={view==='list'?'active':''} onClick={()=>setView('list')}>Positions list</button>
+      <button className={view==='appointments'?'active':''} onClick={()=>setView('appointments')}>Appointments</button>
+      <button className={view==='organogram'?'active':''} onClick={()=>setView('organogram')}>Organogram</button>
+    </div>
     {error && <Notice kind="error">{error}</Notice>}
 
     {view==='list' && <div className="grid cols-2">
@@ -430,21 +442,26 @@ export function Positions(){
               </tr>)}
         </tbody></table>
       </div>
-      <div className="card"><h3>Quick staff assignment</h3>
+      <div className="card"><h3>Add a member of staff</h3>
+        {/* It used to appoint them to a post as well, which made this a second
+            place a post changed hands. It registers the person; the post is an
+            appointment, and appointments are made in one place. */}
         {can('personnel.register', 'create') && <form className="form" onSubmit={addStaff}>
           <label>Employee no<input name="employeeNo"/></label>
           <label>Staff full name<input name="fullName" required/></label>
           <label>Email<input name="email"/></label>
           <label>Phone<input name="phone"/></label>
           <label>Section<select name="sectionId"><option value="">Unassigned</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
-          <label>Assign position<select name="positionId" required><option value="">Select…</option>{positions.filter(p=>p.isActive!==false).map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
           <button>Create staff</button>
         </form>}
+        <AppointmentPointer what="The post a person holds" />
         <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Section</th></tr></thead><tbody>
           {staff.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
         </tbody></table>
       </div>
     </div>}
+
+    {view==='appointments' && <Appointments />}
 
     {view==='organogram' && <><Organogram staff={staff} onChanged={load} /><RankConfig /></>}
   </div>;
@@ -572,46 +589,34 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
   useEffect(()=>{ setTitle(node.title); },[node.id, node.title]);
   const holder = node.occupants.find(o => o.assignmentType === 'primary');
   const deputy = node.occupants.find(o => o.assignmentType === 'deputy');
-  const secondaries = node.occupants.filter(o => o.assignmentType === 'secondary');
   const rt = roleType(node.title);
   const reportOptions = ctx.nodes.filter(n => n.id !== node.id && !ctx.descendants(node.id).has(n.id));
 
   // Takes the text it is given: the box hands over what was typed as it
   // loses focus, and React has not re-rendered this closure by then.
   function saveTitle(typed = title){ const t=typed.trim(); if(t && t!==node.title) ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({title:t})},'Title updated.'); }
-  function assign(staffId:string, assignmentType:'primary'|'deputy'|'secondary'){ if(staffId) ctx.call(`/positions/${node.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(staffId),assignmentType})}, assignmentType==='deputy'?'Deputy assigned.':'Occupant assigned.'); }
-  function removeOcc(staffId:number){ ctx.call(`/positions/${node.id}/occupant/${staffId}`,{method:'DELETE'},'Removed.'); }
   function addChildRole(e:FormEvent){ e.preventDefault(); const t=child.trim(); if(!t) return; ctx.call('/positions',{method:'POST',body:JSON.stringify({title:t, reportsToPositionId:node.id})},'Subordinate role added.').then(ok=>{ if(ok) setChild(''); }); }
-
-  const freeStaff = ctx.staff.filter(s => !!s.isActive);
 
   return <div className={`org-node org-node-edit rt-${rt}`}>
     <TextField className="org-title-input" value={title} onValue={nextValue => setTitle(nextValue)} onBlur={e => saveTitle((e.target as HTMLInputElement).value)} onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); (e.target as HTMLInputElement).blur(); } }} aria-label="Role title" />
 
+    {/* The chart SHOWS who holds the post; it no longer decides it.
+        Appointing here wrote its own rules — a successor demoted the incumbent
+        to a second, still-active assignment — so a post could end up with two
+        holders, one of them invisible on this very chart. */}
     <div className="org-edit-row">
       <span className="lab">Holder</span>
-      {holder ? <span className="who">{holder.staffName} <button type="button" className="x" title="Vacate" onClick={()=>removeOcc(holder.staffId)}>×</button></span> : <span className="who vacant">Vacant</span>}
-    </div>
-    <div className="org-edit-row">
-      <select defaultValue="" onChange={e=>{ assign(e.target.value,'primary'); e.target.value=''; }}>
-        <option value="" disabled>{holder ? 'Change holder…' : 'Assign holder…'}</option>
-        {freeStaff.map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
-      </select>
-      <Link className="org-newstaff" to="/settings/people" title="Create and link a new staff member">+ New</Link>
+      {holder ? <span className="who">{holder.staffName}</span> : <span className="who vacant">Vacant</span>}
     </div>
 
     <div className="org-edit-row">
       <span className="lab">Deputy</span>
-      {deputy ? <span className="who">{deputy.staffName} <button type="button" className="x" title="Remove deputy" onClick={()=>removeOcc(deputy.staffId)}>×</button></span> : <span className="who vacant">—</span>}
-    </div>
-    <div className="org-edit-row">
-      <select defaultValue="" onChange={e=>{ assign(e.target.value,'deputy'); e.target.value=''; }}>
-        <option value="" disabled>{deputy ? 'Change deputy…' : 'Assign deputy…'}</option>
-        {freeStaff.map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
-      </select>
+      {deputy ? <span className="who">{deputy.staffName}</span> : <span className="who vacant">—</span>}
     </div>
 
-    {secondaries.length>0 && <div className="org-edit-row wrap">{secondaries.map(o=><span key={o.staffId} className="badge">{o.staffName} <button type="button" className="x" onClick={()=>removeOcc(o.staffId)}>×</button></span>)}</div>}
+    <div className="org-edit-row">
+      <Link className="org-appoint" to="/settings/people?view=appointments">Appoint or change holder →</Link>
+    </div>
 
     <div className="org-edit-row">
       <span className="lab">Reports to</span>
@@ -779,11 +784,11 @@ export function SectionConfig() {
   }
 
   // --- new unit ---
-  const [newForm, setNewForm] = useState({ name: '', departmentId: '', code: '', operatingHours: '', headStaffId: '', serviceSummary: '', description: '' });
+  const [newForm, setNewForm] = useState({ name: '', departmentId: '', code: '', operatingHours: '', serviceSummary: '', description: '' });
   async function createSection(e: FormEvent) {
     e.preventDefault();
     const ok = await call('/section-config/sections', { method: 'POST', body: JSON.stringify(newForm) }, 'Unit created.');
-    if (ok) { setNewForm({ name: '', departmentId: '', code: '', operatingHours: '', headStaffId: '', serviceSummary: '', description: '' }); setShowNew(false); }
+    if (ok) { setNewForm({ name: '', departmentId: '', code: '', operatingHours: '', serviceSummary: '', description: '' }); setShowNew(false); }
   }
   async function deleteSection() {
     if (selectedId == null) return;
@@ -811,7 +816,9 @@ export function SectionConfig() {
           <label>Department<select value={newForm.departmentId} onChange={e => setNewForm({ ...newForm, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
           <label>Unit code<TextField value={newForm.code} onValue={nextValue => setNewForm({ ...newForm, code: nextValue })} placeholder="e.g. MOL" /></label>
           <label>Operating hours<TextField value={newForm.operatingHours} onValue={nextValue => setNewForm({ ...newForm, operatingHours: nextValue })} placeholder="e.g. 24/7 or Mon–Fri 08:00–17:00" /></label>
-          <label>Unit head<select value={newForm.headStaffId} onChange={e => setNewForm({ ...newForm, headStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          {/* A new unit has no supervisor until one is appointed to its
+              supervising post. Choosing one here was the second place that
+              decided who runs a unit, and the two could disagree. */}
         </div>
         <label>Service summary<TextField value={newForm.serviceSummary} onValue={nextValue => setNewForm({ ...newForm, serviceSummary: nextValue })} placeholder="Short description of what this unit provides" /></label>
         <label>Description / scope<TextField as="textarea" value={newForm.description} onValue={nextValue => setNewForm({ ...newForm, description: nextValue })} /></label>
@@ -857,8 +864,8 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
   call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>; sectionId: number;
 }) {
   const s = detail.section;
-  const [profile, setProfile] = useState({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', headStaffId: s.head_staff_id ? String(s.head_staff_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' });
-  useEffect(() => { setProfile({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', headStaffId: s.head_staff_id ? String(s.head_staff_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' }); }, [s.id]);
+  const [profile, setProfile] = useState({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' });
+  useEffect(() => { setProfile({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' }); }, [s.id]);
 
   const [svc, setSvc] = useState({ name: '', category: '', isOffered: 'yes', notes: '' });
   const [equip, setEquip] = useState({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' });
@@ -883,11 +890,19 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
         <label>Unit name<TextField value={profile.name} onValue={nextValue => setProfile({ ...profile, name: nextValue })} required /></label>
         <label>Unit code<TextField value={profile.code} onValue={nextValue => setProfile({ ...profile, code: nextValue })} /></label>
         <label>Department<select value={profile.departmentId} onChange={e => setProfile({ ...profile, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-        <label>Unit head<select value={profile.headStaffId} onChange={e => setProfile({ ...profile, headStaffId: e.target.value })}><option value="">—</option>{staff.map(st => <option key={st.id} value={st.id}>{st.fullName}</option>)}</select></label>
+        {/* Who runs the unit follows the appointment to its supervising post.
+            It was editable here with no connection to the post anybody held,
+            which is how a unit and its post came to name different people. */}
+        <label>Unit supervisor
+          <span className="appt-readonly">
+            {staff.find(st => Number(st.id) === Number(s.head_staff_id))?.fullName ?? 'Vacant'}
+          </span>
+        </label>
         <label>Operating hours<TextField value={profile.operatingHours} onValue={nextValue => setProfile({ ...profile, operatingHours: nextValue })} /></label>
       </div>
       <label>Service summary<TextField value={profile.serviceSummary} onValue={nextValue => setProfile({ ...profile, serviceSummary: nextValue })} /></label>
       <label>Description / scope<TextField as="textarea" value={profile.description} onValue={nextValue => setProfile({ ...profile, description: nextValue })} /></label>
+      <AppointmentPointer what="Who supervises a unit" />
       <button type="submit">Save profile</button>
     </form>}
 

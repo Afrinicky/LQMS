@@ -5777,6 +5777,109 @@ button.cell-mark:disabled { cursor: default; }
 .iqc-verdict-list li.warning { background: var(--warning-bg); color: var(--warning); }
 
 /* ============================================================================
+   The appointment register
+   ----------------------------------------------------------------------------
+   One screen where a post changes hands — substantively or by standing
+   somebody in — and a read-only value plus a pointer everywhere it used to be
+   changed.
+   ========================================================================= */
+.appt { display: flex; flex-direction: column; gap: 14px; }
+
+.appt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.appt-head h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; margin: 0; }
+.appt-head p { margin: 5px 0 0; font-size: 12px; max-width: 72ch; line-height: 1.6; }
+.appt-head-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.appt-head-acts input { min-width: 220px; }
+
+.appt-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 9px; }
+.appt-tile {
+  display: flex; flex-direction: column; gap: 2px; padding: 11px 13px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.appt-tile strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.appt-tile span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.appt-tile.t-ok strong { color: var(--success); }
+.appt-tile.t-warn strong { color: var(--warning); }
+.appt-tile.t-crit strong { color: var(--danger); }
+
+.appt-views { display: flex; gap: 7px; flex-wrap: wrap; }
+.appt-views button {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+}
+.appt-views button.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-bright); }
+.appt-pill {
+  min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); font-size: 10.5px;
+  background: var(--accent); color: #fff; text-align: center;
+}
+
+.appt-conflicts {
+  padding: 11px 14px; border-radius: 10px; font-size: 12px;
+  background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-line);
+}
+.appt-conflicts strong { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.appt-conflicts ul { margin: 0; padding-left: 18px; }
+
+.appt-panel {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 11px;
+}
+.appt-panel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.appt-panel-head h4 { margin: 0; font-size: 13.5px; }
+.appt-panel-head .muted { font-size: 11.5px; flex: 1; min-width: 220px; }
+.appt-panel-head .btn { margin-left: auto; }
+
+/* The table keeps its columns legible and scrolls sideways on a narrow
+   screen, rather than squeezing a status badge under a button. */
+.appt-table-wrap { overflow-x: auto; }
+/* The table fits the panel; a row whose buttons do not fit on one line wraps
+   them inside its own cell. Growing the table instead pushed the primary
+   action off the right of the screen, which is worse than a second line. */
+.appt-table { width: 100%; font-size: 12.5px; }
+.appt-table td { vertical-align: middle; }
+.appt-table tr.is-live td { background: var(--accent-soft); }
+.appt-table th:last-child, .appt-table td:last-child { text-align: right; }
+.appt-sub { display: block; font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+.appt-inline {
+  padding: 5px 8px; font-size: 12px; border-radius: 7px; min-width: 190px; max-width: 260px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.appt-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.appt-actions .btn { white-space: nowrap; }
+.appt-note { font-size: 11.5px; margin: 0; }
+.appt-grades summary { font-size: 12.5px; cursor: pointer; color: var(--muted); padding: 4px 0; }
+.appt-grades[open] summary { margin-bottom: 9px; }
+.badge.acting { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-line); margin-left: 6px; }
+
+/* The dialogs: one question per block, and the consequence before the button. */
+.appt-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 11px; }
+.appt-people { width: 100%; font-size: 12.5px; }
+.appt-consequence {
+  padding: 11px 13px; border-radius: 10px; font-size: 12px;
+  background: var(--accent-soft); border: 1px solid var(--accent);
+}
+.appt-consequence strong { display: block; margin-bottom: 5px; font-size: 12px; }
+.appt-consequence ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+
+/* What a screen shows where it used to decide. */
+.appt-readonly {
+  display: inline-block; padding: 7px 10px; border-radius: 8px; font-size: 12.5px;
+  background: var(--overlay-1); border: 1px dashed var(--border-strong); color: var(--text);
+}
+.appt-pointer {
+  display: flex; align-items: flex-start; gap: 7px; margin: 8px 0 0;
+  font-size: 11.5px; line-height: 1.6; color: var(--muted);
+}
+.appt-pointer svg { flex: none; margin-top: 2px; }
+.org-appoint { font-size: 11px; color: var(--accent-bright); }
+
+@media (max-width: 720px) {
+  .appt-head-acts { width: 100%; }
+  .appt-actions { justify-content: flex-start; }
+}
+
+/* ============================================================================
    Internal quality control programme
    ----------------------------------------------------------------------------
    One screen in the module and on the bench, so a supervisor reading it in

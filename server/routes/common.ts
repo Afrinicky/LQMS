@@ -24,6 +24,7 @@ import { pendingRequests, recentRequests, decideRequest } from '../services/pass
 import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
 import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
 import { audit } from '../services/auditService.js';
+import { appoint, vacate } from '../services/appointments.js';
 import { mintViewTicket, VIEW_TICKET_MS } from '../services/viewTickets.js';
 import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
@@ -1122,38 +1123,40 @@ export function commonRoutes() {
     res.json({ roots });
   });
 
-  // Assign a staff member to a position.
-  //  - 'primary' (the holder): one per position; any current holder is moved to secondary.
-  //  - 'deputy'  (the designated deputy / acting officer for continuity):
-  //              one per position; any current deputy is moved to secondary.
-  //  - 'secondary': an additional non-primary assignment.
+  /*
+   * Appointing somebody to a post, from the organogram.
+   *
+   * It used to hold its own rules, and they were the wrong ones: appointing a
+   * successor DEMOTED the incumbent to a 'secondary' assignment that stayed
+   * active, so the post had two holders — one of them invisible on the
+   * organogram and both of them resolving to the post's access profile. That
+   * is the defect the appointment register exists to end, so this route now
+   * states the intention and `appointments.ts` applies the rules.
+   *
+   * It stays rather than being removed because a client that has not been
+   * reloaded still calls it, and it must not be able to recreate the fault.
+   */
   router.post('/positions/:id/occupant', requirePermission('settings', 'edit'), (req, res) => {
-    const db = getDb();
-    const positionId = idOrNull(req.params.id);
-    const staffId = idOrNull(req.body.staffId);
-    if (!positionId || !db.prepare('SELECT id FROM positions WHERE id = ?').get(positionId)) return res.status(404).json({ error: 'Position not found' });
-    if (!staffId || !db.prepare('SELECT id FROM staff WHERE id = ?').get(staffId)) return res.status(400).json({ error: 'Select a valid staff member.' });
-    const assignmentType = ['primary', 'deputy', 'secondary'].includes(req.body.assignmentType) ? req.body.assignmentType : 'primary';
-    try {
-      db.transaction(() => {
-        if (assignmentType === 'primary' || assignmentType === 'deputy') {
-          db.prepare('UPDATE staff_position_assignments SET assignment_type = ? WHERE position_id = ? AND is_active = 1 AND assignment_type = ?').run('secondary', positionId, assignmentType);
-        }
-        const existing = db.prepare('SELECT id FROM staff_position_assignments WHERE position_id = ? AND staff_id = ? AND is_active = 1').get(positionId, staffId) as any;
-        if (existing) db.prepare('UPDATE staff_position_assignments SET assignment_type = ? WHERE id = ?').run(assignmentType, existing.id);
-        else db.prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(staffId, positionId, assignmentType);
-      })();
-      audit(req, { action: 'assign_occupant', entity: 'positions', entityId: positionId, newValue: { staffId, assignmentType } });
-      res.status(201).json({ ok: true });
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to assign occupant.' });
-    }
+    const outcome = appoint(getDb(), {
+      positionId: req.params.id,
+      staffId: req.body?.staffId,
+      kind: req.body?.assignmentType === 'deputy' ? 'deputy' : 'holder',
+    });
+    if (!outcome.ok) return res.status(outcome.status ?? 400).json({ error: outcome.error });
+    audit(req, {
+      action: 'appoint', entity: 'staff_position_assignments', entityId: outcome.positionId,
+      newValue: { ...outcome, via: 'organogram' },
+    });
+    res.status(201).json(outcome);
   });
   router.delete('/positions/:id/occupant/:staffId', requirePermission('settings', 'edit'), (req, res) => {
-    const db = getDb();
-    db.prepare('UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE position_id = ? AND staff_id = ? AND is_active = 1').run(req.params.id, req.params.staffId);
-    audit(req, { action: 'remove_occupant', entity: 'positions', entityId: req.params.id, newValue: { staffId: req.params.staffId } });
-    res.json({ ok: true });
+    const outcome = vacate(getDb(), { positionId: req.params.id, staffId: req.params.staffId });
+    if (!outcome.ok) return res.status(outcome.status ?? 400).json({ error: outcome.error });
+    audit(req, {
+      action: 'vacate', entity: 'staff_position_assignments', entityId: outcome.positionId,
+      newValue: { ...outcome, via: 'organogram' },
+    });
+    res.json(outcome);
   });
 
   // ---------------------------------------------------------------------
@@ -1676,7 +1679,12 @@ export function commonRoutes() {
     if (!cols.full_name) return res.status(400).json({ error: 'A full name (or first name + surname) is required.' });
     const keys = Object.keys(cols);
     const r = getDb().prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
-    if (idOrNull(req.body.positionId)) getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(r.lastInsertRowid, idOrNull(req.body.positionId), req.body.assignmentType ?? 'primary');
+    // An initial post is an appointment like any other, so it is made the same
+    // way — the post's existing holder stands down, and a unit it supervises
+    // changes hands with it.
+    if (idOrNull(req.body.positionId)) {
+      appoint(getDb(), { positionId: idOrNull(req.body.positionId), staffId: Number(r.lastInsertRowid), kind: 'holder' });
+    }
     audit(req, { action: 'create', entity: 'staff', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
   });
@@ -1714,16 +1722,22 @@ export function commonRoutes() {
     if (keys.length) {
       getDb().prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), req.params.id);
     }
-    if (req.body.positionId) {
-      const pid = Number(req.body.positionId);
-      const has = getDb().prepare("SELECT 1 FROM staff_position_assignments WHERE staff_id = ? AND position_id = ? AND is_active = 1").get(req.params.id, pid);
-      if (!has) {
-        getDb().prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND assignment_type = 'primary' AND is_active = 1").run(req.params.id);
-        getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(req.params.id, pid, 'primary');
-      }
-    }
+    /*
+     * A post is NOT changed here.
+     *
+     * This route ended whichever assignment the person held and gave them the
+     * new one, without once asking whether that post already had a holder —
+     * which is how two people came to hold one post. Appointments are made in
+     * one place now, and the register is it.
+     */
+    const postIgnored = Boolean(req.body.positionId);
     audit(req, { action: 'edit', entity: 'staff', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      note: postIgnored
+        ? 'The staff record was saved. Posts are held in the appointment register — change them under Settings → People & Access → Positions & Organogram → Appointments.'
+        : undefined,
+    });
   });
 
   // Comprehensive staff registration: creates the staff record, position assignments,
@@ -1757,11 +1771,21 @@ export function commonRoutes() {
         const staffId = Number(staffResult.lastInsertRowid);
         audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { employeeNo, fullName: composedName, email, phone, sectionId } });
 
+        /*
+         * The posts this person is being appointed to.
+         *
+         * Through the register, so registering somebody as a unit supervisor
+         * stands the incumbent down and hands the unit over, rather than
+         * quietly creating a second holder — which is exactly how a
+         * laboratory ended up with two Microbiology supervisors.
+         *
+         * A post that cannot be given — one already held and refused — does
+         * not fail the registration: the person is registered, and the
+         * appointment register shows what they hold.
+         */
         const allPositions = Array.from(new Set((positionIds ?? []).map(p => idOrNull(p)).filter((p): p is number => p !== null)));
-        const primary = idOrNull(primaryPositionId) ?? allPositions[0] ?? null;
         for (const positionId of allPositions) {
-          db.prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)')
-            .run(staffId, positionId, positionId === primary ? 'primary' : 'secondary');
+          appoint(db, { positionId, staffId, kind: 'holder' });
         }
 
         let userId: number | null = null;
@@ -1886,13 +1910,26 @@ export function commonRoutes() {
     res.json({ staff, positions, account, authorizations, activity, training });
   });
 
+  /**
+   * A further post for one person.
+   *
+   * A person may hold several posts — a unit supervisor who is also the safety
+   * officer holds both — so this stays. What it may not do is put a second
+   * holder into a post somebody already holds, which is why it goes through
+   * the register like everything else.
+   */
   router.post('/staff/:id/positions', requirePermission('personnel.register', 'edit'), (req, res) => {
-    const db = getDb();
-    if (!parseIntNullable(req.body.positionId)) return res.status(400).json({ error: 'positionId is required' });
-    const r = db.prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)')
-      .run(req.params.id, Number(req.body.positionId), req.body.assignmentType ?? 'secondary');
-    audit(req, { action: 'assign', entity: 'staff_position_assignments', entityId: Number(r.lastInsertRowid), newValue: { staffId: req.params.id, ...req.body } });
-    res.status(201).json({ id: Number(r.lastInsertRowid) });
+    const outcome = appoint(getDb(), {
+      positionId: req.body?.positionId,
+      staffId: req.params.id,
+      kind: req.body?.assignmentType === 'deputy' ? 'deputy' : 'holder',
+    });
+    if (!outcome.ok) return res.status(outcome.status ?? 400).json({ error: outcome.error });
+    audit(req, {
+      action: 'appoint', entity: 'staff_position_assignments', entityId: outcome.positionId,
+      newValue: { ...outcome, via: 'personnel register' },
+    });
+    res.status(201).json(outcome);
   });
 
   // ===== Removing a member of staff =====
@@ -2752,10 +2789,19 @@ export function commonRoutes() {
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'A unit/section name is required.' });
     const deptId = idOrNull(departmentId) ?? (db.prepare('SELECT id FROM departments ORDER BY id LIMIT 1').get() as any)?.id ?? null;
     try {
-      const r = db.prepare('INSERT INTO sections (department_id, name, code, description, service_summary, operating_hours, head_staff_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
-        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null, idOrNull(headStaffId));
+      // A new unit has no supervisor until one is appointed to its supervising
+      // post, in the appointment register. Accepting one here would be a
+      // second place that decides who runs a unit, which is the fault being
+      // removed.
+      const r = db.prepare('INSERT INTO sections (department_id, name, code, description, service_summary, operating_hours, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)')
+        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null);
       audit(req, { action: 'create', entity: 'sections', entityId: Number(r.lastInsertRowid), newValue: req.body });
-      res.status(201).json({ id: Number(r.lastInsertRowid) });
+      res.status(201).json({
+        id: Number(r.lastInsertRowid),
+        note: headStaffId
+          ? 'The unit was created. Appoint its supervisor under Settings → People & Access → Positions & Organogram → Appointments.'
+          : undefined,
+      });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error && /UNIQUE/.test(err.message) ? 'A unit with that name already exists in this department.' : (err instanceof Error ? err.message : 'Failed to create unit.') });
     }
@@ -2765,10 +2811,25 @@ export function commonRoutes() {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM sections WHERE id = ?').get(req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Unit not found' });
-    db.prepare('UPDATE sections SET name = ?, code = ?, description = ?, service_summary = ?, operating_hours = ?, department_id = ?, head_staff_id = ? WHERE id = ?')
-      .run(req.body.name ?? (oldValue as any).name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null, req.body.operatingHours ?? null, idOrNull(req.body.departmentId) ?? (oldValue as any).department_id, idOrNull(req.body.headStaffId), req.params.id);
+    /*
+     * The unit's supervisor is NOT set here.
+     *
+     * `head_staff_id` is read by scheduling, duty rosters, alert routing,
+     * quality control and the permission resolver, and it was editable on this
+     * screen with no connection to the post anybody actually held. It is
+     * maintained from the appointment register now; this route keeps whatever
+     * the register last wrote.
+     */
+    const headIgnored = req.body.headStaffId !== undefined;
+    db.prepare('UPDATE sections SET name = ?, code = ?, description = ?, service_summary = ?, operating_hours = ?, department_id = ?, head_staff_id = head_staff_id WHERE id = ?')
+      .run(req.body.name ?? (oldValue as any).name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null, req.body.operatingHours ?? null, idOrNull(req.body.departmentId) ?? (oldValue as any).department_id, req.params.id);
     audit(req, { action: 'edit', entity: 'sections', entityId: req.params.id, oldValue, newValue: req.body });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      note: headIgnored
+        ? 'The unit was saved. Who runs it follows the appointment to its supervising post — change that under Settings → People & Access → Positions & Organogram → Appointments.'
+        : undefined,
+    });
   });
 
   router.post('/section-config/sections/:id/toggle', requirePermission('settings', 'edit'), (req, res) => {

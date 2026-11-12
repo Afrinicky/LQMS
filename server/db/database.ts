@@ -7147,6 +7147,225 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
   }
 
   /*
+   * ONE APPOINTMENT REGISTER
+   * --------------------------------------------------------------------
+   * Who holds a post was recorded in two unrelated places and written from
+   * five. `staff_position_assignments` said who held "Microbiology Unit
+   * Supervisor"; `sections.head_staff_id` said who ran Microbiology; and the
+   * organogram, the unit profile, the personnel register, staff registration
+   * and the quick-assignment form each wrote one of them without consulting
+   * the other. Appointing a new supervisor therefore left the old one holding
+   * the post — visibly on the register, and invisibly in the permission
+   * resolver, which reads the post's access profile off exactly these rows.
+   *
+   * Three things make that impossible from here on.
+   *
+   *   A post SAYS WHICH UNIT IT SUPERVISES, rather than being guessed at from
+   *   its title, and a unit has at most one such post.
+   *
+   *   AN APPOINTED POST has at most ONE HOLDER. Appointing a successor ENDS
+   *   the predecessor's appointment; it no longer demotes them to a second,
+   *   invisible assignment that still carried the post's access. This holds of
+   *   appointed offices only — the manager, the officers, the unit
+   *   supervisors. A bench grade is a grade and not an office: ten technicians
+   *   hold "Laboratory Technician" and nothing about that is a conflict.
+   *
+   *   `sections.head_staff_id` is DERIVED from the appointment and maintained
+   *   with it, so the many readers of it — scheduling, duty rosters, alerts,
+   *   quality control, the permission resolver — keep working and cannot
+   *   disagree with the register.
+   *
+   * What is already on file is reconciled once, below: where a post has
+   * several holders the most recent appointment stands and the rest are
+   * ended, and every unit's head is set from its supervisor post. It is
+   * written to the audit log, and the Appointments tab shows the outcome so a
+   * laboratory can correct anything the reconciliation read differently.
+   */
+  {
+    const positionCols = new Set((database.prepare('PRAGMA table_info(positions)').all() as Array<{ name: string }>).map(c => c.name));
+    const hasPositions = positionCols.size > 0;
+    if (hasPositions && !positionCols.has('supervises_section_id')) {
+      database.exec('ALTER TABLE positions ADD COLUMN supervises_section_id INTEGER REFERENCES sections(id)');
+    }
+
+    /*
+     * Read the posts' own titles ONCE, and only while no post has been marked.
+     *
+     * Tying this to the moment the column was added was too narrow: a database
+     * that gained the column but never got as far as the backfill would have
+     * carried on with no post attached to any unit — which is worse than not
+     * having started, because nothing would then keep a unit's supervisor in
+     * step with the appointment. Keyed on the state instead, it runs once and
+     * never argues with a laboratory that has since said otherwise.
+     */
+    if (hasPositions) {
+      const marked = database.prepare('SELECT COUNT(*) AS n FROM positions WHERE supervises_section_id IS NOT NULL').get() as { n: number };
+      if (Number(marked?.n ?? 0) === 0) {
+      /*
+       * Which post supervises which unit, read once off the titles the
+       * laboratory already uses. Only one post per unit is marked — the
+       * longest title match, then the lowest id — because two posts claiming
+       * one unit is the very ambiguity being removed.
+       */
+      try {
+        const units = database.prepare('SELECT id, name FROM sections').all() as Array<{ id: number; name: string }>;
+        const posts = database.prepare("SELECT id, title FROM positions WHERE COALESCE(is_active, 1) = 1 ORDER BY id").all() as Array<{ id: number; title: string }>;
+        const synonyms: Record<string, string[]> = {
+          biochemistry: ['clinical chemistry', 'chemical pathology', 'chemistry'],
+          haematology: ['hematology'],
+          microbiology: ['micro'],
+          'blood bank': ['transfusion', 'immunohaematology', 'immunohematology'],
+        };
+        const takenUnit = new Set<number>();
+        const chosen = new Map<number, { positionId: number; score: number }>();
+        for (const post of posts) {
+          const title = String(post.title ?? '').toLowerCase();
+          if (!/supervisor|unit head|head of|in charge|incharge/.test(title)) continue;
+          let best: { unitId: number; score: number } | null = null;
+          for (const unit of units) {
+            const names = [String(unit.name ?? '').toLowerCase(), ...(synonyms[String(unit.name ?? '').toLowerCase()] ?? [])];
+            for (const name of names) {
+              if (name && title.includes(name) && (!best || name.length > best.score)) best = { unitId: unit.id, score: name.length };
+            }
+          }
+          if (!best) continue;
+          const held = chosen.get(best.unitId);
+          if (!held || best.score > held.score) chosen.set(best.unitId, { positionId: post.id, score: best.score });
+        }
+        const mark = database.prepare('UPDATE positions SET supervises_section_id = ? WHERE id = ?');
+        for (const [unitId, pick] of chosen) {
+          if (takenUnit.has(unitId)) continue;
+          takenUnit.add(unitId);
+          mark.run(unitId, pick.positionId);
+        }
+      } catch { /* a laboratory with no units marks its posts by hand */ }
+      }
+    }
+
+    /*
+     * One supervising post per unit, in the database.
+     *
+     * The companion rule — one holder per appointed post — cannot be an index,
+     * because whether a post is an office or a grade is a column of
+     * `positions` and an index cannot read across the join. It is held in
+     * `appointments.ts`, which every write now goes through, and the register
+     * reports any breach it finds rather than hiding it.
+     */
+    const enforce = () => {
+      try {
+        database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_one_supervisor_per_unit
+          ON positions(supervises_section_id)
+          WHERE supervises_section_id IS NOT NULL AND COALESCE(is_active, 1) = 1`);
+      } catch { /* left to the Appointments tab to resolve */ }
+    };
+
+    if (hasPositions) {
+      try {
+        const changes: Array<Record<string, unknown>> = [];
+        database.transaction(() => {
+          /*
+           * One holder per post: the most recent appointment stands.
+           *
+           * "Most recent" rather than "the one the unit record names", because
+           * the complaint this fixes is a successor who was appointed and an
+           * incumbent who would not go away. A laboratory that reads it
+           * differently changes it in one click on the Appointments tab.
+           */
+          const contested = database.prepare(`SELECT spa.position_id AS id, COUNT(*) AS n
+              FROM staff_position_assignments spa
+              JOIN positions p ON p.id = spa.position_id
+              WHERE spa.is_active = 1
+                -- An appointed office only. A bench grade is held by everybody
+                -- graded into it, and ending nine technicians' assignments
+                -- because a tenth shares their grade would be vandalism.
+                AND (COALESCE(p.is_core, 0) = 1 OR p.supervises_section_id IS NOT NULL)
+              GROUP BY spa.position_id HAVING n > 1`)
+            .all() as Array<{ id: number; n: number }>;
+          for (const post of contested) {
+            const rows = database.prepare(`SELECT id, staff_id, assignment_type FROM staff_position_assignments
+                WHERE position_id = ? AND is_active = 1
+                ORDER BY CASE assignment_type WHEN 'primary' THEN 0 ELSE 1 END, id DESC`)
+              .all(post.id) as Array<{ id: number; staff_id: number; assignment_type: string }>;
+            // A deputy is a different office and is left alone; one is kept.
+            const deputies = rows.filter(r => r.assignment_type === 'deputy');
+            const holders = rows.filter(r => r.assignment_type !== 'deputy');
+            const keepHolder = holders[0] ?? null;
+            const keepDeputy = deputies[0] ?? null;
+            for (const row of rows) {
+              if (row.id === keepHolder?.id || row.id === keepDeputy?.id) continue;
+              database.prepare(`UPDATE staff_position_assignments
+                  SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
+              changes.push({ positionId: post.id, endedStaffId: row.staff_id, was: row.assignment_type });
+            }
+            if (keepHolder && keepHolder.assignment_type !== 'primary') {
+              database.prepare("UPDATE staff_position_assignments SET assignment_type = 'primary' WHERE id = ?").run(keepHolder.id);
+              changes.push({ positionId: post.id, promotedStaffId: keepHolder.staff_id });
+            }
+          }
+
+          /*
+           * Every unit's head, from its supervisor post.
+           *
+           * Where the post is vacant and the unit names a head, the head
+           * becomes the appointment: the laboratory said who runs the unit and
+           * nothing here throws that away.
+           */
+          const supervised = database.prepare(`SELECT p.id AS position_id, p.supervises_section_id AS section_id,
+                (SELECT staff_id FROM staff_position_assignments spa
+                   WHERE spa.position_id = p.id AND spa.is_active = 1 AND spa.assignment_type = 'primary'
+                   ORDER BY spa.id DESC LIMIT 1) AS holder_staff_id
+              FROM positions p
+              WHERE p.supervises_section_id IS NOT NULL AND COALESCE(p.is_active, 1) = 1`)
+            .all() as Array<{ position_id: number; section_id: number; holder_staff_id: number | null }>;
+          for (const post of supervised) {
+            const unit = database.prepare('SELECT head_staff_id FROM sections WHERE id = ?').get(post.section_id) as
+              { head_staff_id: number | null } | undefined;
+            if (!unit) continue;
+            if (post.holder_staff_id) {
+              if (Number(unit.head_staff_id ?? 0) !== Number(post.holder_staff_id)) {
+                database.prepare('UPDATE sections SET head_staff_id = ? WHERE id = ?').run(post.holder_staff_id, post.section_id);
+                changes.push({ sectionId: post.section_id, headSetTo: post.holder_staff_id, from: unit.head_staff_id });
+              }
+              /*
+               * And the supervisor belongs to the unit they supervise.
+               *
+               * This is the other half of the rotation that went wrong: a
+               * supervisor moved to another unit kept her old unit on her
+               * staff record, and that record is what every unit-scoped screen
+               * reads to decide whose work she sees.
+               */
+              const holder = database.prepare('SELECT section_id FROM staff WHERE id = ?').get(post.holder_staff_id) as
+                { section_id: number | null } | undefined;
+              if (holder && Number(holder.section_id ?? 0) !== Number(post.section_id)) {
+                database.prepare('UPDATE staff SET section_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                  .run(post.section_id, post.holder_staff_id);
+                changes.push({ staffId: post.holder_staff_id, movedToSection: post.section_id, from: holder.section_id });
+              }
+            } else if (unit.head_staff_id) {
+              const exists = database.prepare(`SELECT id FROM staff_position_assignments
+                  WHERE position_id = ? AND staff_id = ? AND is_active = 1`).get(post.position_id, unit.head_staff_id);
+              if (!exists) {
+                database.prepare(`INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type)
+                    VALUES (?, ?, 'primary')`).run(unit.head_staff_id, post.position_id);
+                changes.push({ positionId: post.position_id, appointedFromUnitHead: unit.head_staff_id });
+              }
+            }
+          }
+        })();
+
+        if (changes.length) {
+          try {
+            database.prepare(`INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, new_value)
+                VALUES (NULL, 'reconcile', 'staff_position_assignments', 'appointments',
+                        ?)`).run(JSON.stringify({ changes: changes.slice(0, 200), total: changes.length }));
+          } catch { /* the reconciliation stands whether or not it could be logged */ }
+        }
+      } catch { /* a database that cannot be reconciled is left exactly as it was */ }
+      enforce();
+    }
+  }
+
+  /*
    * The internal quality control programme.
    *
    * A register of the runs that happened cannot show that the plan was

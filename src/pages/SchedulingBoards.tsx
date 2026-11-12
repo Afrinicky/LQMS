@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import { api, API_BASE, getToken, errorText } from '../services/api';
-import type { Staff, Section, ActingUnitHead, UnitSupervisor, UnitSupervisors } from '../../shared/types/api';
+import type { Staff, Section, UnitSupervisor, UnitSupervisors } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
@@ -355,8 +356,7 @@ export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { st
       </tbody></table>
 
       {canEdit && <ReRowForm staff={staff} sections={sections} heads={heads} editing={editingRow}
-        onSubmit={submitRow} onCancel={() => setEditingRow(null)}
-        onNavigateSupervisors={onNavigate ? () => onNavigate('Unit Supervisors') : undefined} />}
+        onSubmit={submitRow} onCancel={() => setEditingRow(null)} />}
       {!canEdit && <p className="muted" style={{ marginTop: 12 }}>Read-only.</p>}
     </div>}
   </div>;
@@ -366,12 +366,11 @@ export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { st
 // re-renders the form — not the whole board and its tables. (A controlled input
 // living on a large parent is what made the box feel frozen: every character
 // reconciled the entire page before it could paint.)
-function ReRowForm({ staff, sections, heads, editing, onSubmit, onCancel, onNavigateSupervisors }: {
+function ReRowForm({ staff, sections, heads, editing, onSubmit, onCancel }: {
   staff: Staff[]; sections: Section[]; heads: Record<number, UnitSupervisor>;
   editing: ReRow | null;
   onSubmit: (body: Record<string, unknown>, editingId: number | null) => Promise<void>;
   onCancel: () => void;
-  onNavigateSupervisors?: () => void;
 }) {
   const [form, setForm] = useState(emptyReRow);
   const staffName = (id: number | string) => staff.find(s => String(s.id) === String(id))?.fullName || '';
@@ -421,7 +420,12 @@ function ReRowForm({ staff, sections, heads, editing, onSubmit, onCancel, onNavi
           {form.sectionId
             ? <div className="rf-locked">
                 {linkedHead?.effective_name || '— no supervisor set —'}{linkedHead?.acting && <span className="badge acting">Acting</span>}
-                {onNavigateSupervisors && <button type="button" className="link-button rf-change" onClick={onNavigateSupervisors}>Change? Appoint an acting supervisor →</button>}
+                {/* The schedule READS who runs the unit; it does not decide
+                    it. Changing that — substantively or by standing somebody
+                    in — is one place, and this is the way there. */}
+                <Link className="link-button rf-change" to="/settings/people?view=appointments">
+                  Change? Appoint a supervisor or a stand-in →
+                </Link>
               </div>
             : <select value={form.supervisorStaffId} onChange={e => setForm({ ...form, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>}
         </div>
@@ -606,126 +610,13 @@ export function BenchScheduleBoard({ sections, staff, canEdit }: { sections: Sec
 // The substantive supervisor of a unit lives on the unit record (Settings →
 // Sections). This board shows who is effectively in charge of each unit today,
 // and lets a manager appoint an acting supervisor for a fixed period when the
-// substantive one is away. The acting role reverts on its own once the period
-// ends — the server judges it in force purely by today's date.
-//
-// Every unit is on this board, the blood bank included: it is a unit of the
-// laboratory like any other and is run the same way.
-const emptyActing = { sectionId: '', actingStaffId: '', startDate: '', endDate: '', reason: '' };
 
-export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
-  const { can } = usePermissions();
-  const mayDelete = can('personnel.rosters', 'void_archive');
-  const mayPrint = can('personnel.rosters', 'print');
-  const [sups, setSups] = useState<UnitSupervisors | null>(null);
-  const [appts, setAppts] = useState<ActingUnitHead[]>([]);
-  const [form, setForm] = useState(emptyActing);
-  const [showForm, setShowForm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  function load() {
-    api<UnitSupervisors>('/scheduling/unit-supervisors').then(setSups).catch(e => setError(errorText(e)));
-    api<ActingUnitHead[]>('/scheduling/acting-unit-heads').then(setAppts).catch(e => setError(errorText(e)));
-  }
-  useEffect(() => { load(); }, []);
-
-  async function create(e: FormEvent) {
-    e.preventDefault(); setError(null); setMsg(null);
-    try {
-      await api('/scheduling/acting-unit-heads', { method: 'POST', body: JSON.stringify(form) });
-      setForm(emptyActing); setShowForm(false); setMsg('Acting unit supervisor appointed.'); load();
-    } catch (err) { setError(errorText(err)); }
-  }
-  async function endNow(id: number) {
-    setError(null); setMsg(null);
-    try { await api(`/scheduling/acting-unit-heads/${id}/end`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Acting period ended; the substantive supervisor resumes.'); load(); }
-    catch (err) { setError(errorText(err)); }
-  }
-  async function remove(id: number) {
-    if (!confirm('Delete this acting appointment for good?')) return;
-    setError(null);
-    try { await api(`/scheduling/acting-unit-heads/${id}`, { method: 'DELETE' }); load(); }
-    catch (err) { setError(errorText(err)); }
-  }
-
-  const startForSection = (sectionId: number | null | undefined) => {
-    setForm({ ...emptyActing, sectionId: sectionId ? String(sectionId) : '' });
-    setShowForm(true); setMsg(null); setError(null);
-  };
-
-  return <div>
-    {error && <Notice kind="error">{error}</Notice>}
-    {msg && <Notice kind="success">{msg}</Notice>}
-
-    <div className="card">
-      <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <h3 style={{ margin: 0 }}>Unit supervisors</h3>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {mayPrint && <button className="secondary" onClick={() => openPrintPage('/scheduling/unit-supervisors/print', setError)}>Print</button>}
-          {canEdit && <button onClick={() => startForSection(null)}>+ Appoint acting supervisor</button>}
-        </div>
-      </div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Who is effectively in charge of each unit today{sups ? ` (as at ${sups.onDate})` : ''}. The substantive supervisor is set under
-        Settings → Sections; an acting supervisor stands in for a fixed period and reverts on its own once it ends.
-      </p>
-      <table className="data-table"><thead><tr><th>Unit</th><th>Substantive supervisor</th><th>In charge today</th>{canEdit && <th></th>}</tr></thead><tbody>
-        {(sups?.units ?? []).map(u => <tr key={u.section_id}>
-          <td>{u.section_name}{u.department_name ? <><br /><small className="muted">{u.department_name}</small></> : null}</td>
-          <td>{u.substantive_head_name || <span className="muted">—</span>}</td>
-          <td>
-            {u.effective_name || <span className="muted">—</span>}
-            {u.acting && <span className="badge acting" style={{ marginLeft: 6 }}>Acting</span>}
-            {u.acting && u.acting_until && <><br /><small className="muted">until {u.acting_until}{u.reason ? ` · ${u.reason}` : ''}</small></>}
-          </td>
-          {canEdit && <td>{!u.acting && <button className="secondary" onClick={() => startForSection(u.section_id)}>Appoint acting</button>}</td>}
-        </tr>)}
-        {(sups?.units ?? []).length === 0 && <tr><td colSpan={canEdit ? 4 : 3} className="muted">No active units.</td></tr>}
-      </tbody></table>
-    </div>
-
-    {canEdit && showForm && <div className="card" style={{ marginTop: 16 }}>
-      <h3 style={{ marginTop: 0 }}>Appoint an acting unit supervisor</h3>
-      <form className="form-grid" onSubmit={create}>
-        <label>Unit
-          <select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })} required>
-            <option value="">—</option>
-            {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        </label>
-        <label>Acting unit supervisor
-          <select value={form.actingStaffId} onChange={e => setForm({ ...form, actingStaffId: e.target.value })} required>
-            <option value="">—</option>
-            {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}{s.employeeNo ? ` (${s.employeeNo})` : ''}</option>)}
-          </select>
-        </label>
-        <label>From<input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} required /></label>
-        <label>Until<input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} required /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Reason (optional)<TextField value={form.reason} onValue={nextValue => setForm({ ...form, reason: nextValue })} placeholder="e.g. Substantive supervisor on annual leave" /></label>
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
-          <button type="submit">Appoint</button>
-          <button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancel</button>
-        </div>
-      </form>
-    </div>}
-
-    <div className="card" style={{ marginTop: 16 }}>
-      <h3 style={{ marginTop: 0 }}>Acting appointments</h3>
-      <table className="data-table"><thead><tr><th>Unit</th><th>Acting supervisor</th><th>Standing in for</th><th>Period</th><th>Status</th>{canEdit && <th></th>}</tr></thead><tbody>
-        {appts.map(a => <tr key={a.id}>
-          <td>{a.section_name}</td>
-          <td>{a.acting_name}</td>
-          <td>{a.substantive_head_name || <span className="muted">—</span>}</td>
-          <td>{a.start_date} → {a.end_date}</td>
-          <td>{a.in_force ? <span className="badge acting">In force</span> : <span className="badge">{a.status}</span>}</td>
-          {canEdit && <td>
-            {a.status === 'active' && a.in_force && <button className="secondary" onClick={() => endNow(a.id)}>End now</button>}
-            {mayDelete && <> <button className="secondary" onClick={() => remove(a.id)}>Delete</button></>}
-          </td>}
-        </tr>)}
-        {appts.length === 0 && <tr><td colSpan={canEdit ? 6 : 5} className="muted">No acting appointments recorded.</td></tr>}
-      </tbody></table>
-    </div>
-  </div>;
-}
+/* The acting-supervisor board that stood here has moved.
+ *
+ * It answered "who runs each unit today" and appointed stand-ins, which made
+ * it one of six places a unit's supervisor could be set — none of them aware
+ * of the others. Both questions are answered together in the appointment
+ * register: Settings → People & Access → Positions & Organogram →
+ * Appointments. What remains here are the rosters and schedules that READ who
+ * runs a unit; none of them decides it.
+ */
