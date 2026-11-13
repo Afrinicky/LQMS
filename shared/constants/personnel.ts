@@ -90,7 +90,16 @@ export type ExitReason = typeof EXIT_REASONS[number];
 /** The shape of the staff add/edit form, and its empty value. */
 export type StaffFormValues = {
   employeeNo: string; surname: string; middleName: string; firstName: string; initials: string;
-  dateOfBirth: string; gender: string; designation: string; jobTitle: string;
+  dateOfBirth: string; gender: string;
+  /**
+   * The one classification a person carries.
+   *
+   * `designation` is no longer typed: it is the primary role's name, written
+   * by the server whenever the role is set, so the register, the login and
+   * every personnel file say the same thing. It stays on the form only so an
+   * imported record can still be read back.
+   */
+  primaryRoleId: string; designation: string; jobTitle: string;
   professionalRegulator: string; professionalLicence: string; licenceExpiryDate: string;
   qualifications: string; sectionId: string; unit: string; personnelCategory: string;
   appointmentType: string; appointmentDate: string; placementEndDate: string;
@@ -101,7 +110,7 @@ export type StaffFormValues = {
 
 export const emptyStaffForm = (): StaffFormValues => ({
   employeeNo: '', surname: '', middleName: '', firstName: '', initials: '', dateOfBirth: '', gender: '',
-  designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
+  primaryRoleId: '', designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
   qualifications: '', sectionId: '', unit: '', personnelCategory: 'STAFF', appointmentType: 'FULL TIME',
   appointmentDate: '', placementEndDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '',
   emergencyContact: '', phone: '',
@@ -114,7 +123,8 @@ export function staffFormFrom(s: Record<string, unknown>): StaffFormValues {
   return {
     ...emptyStaffForm(),
     employeeNo: str('employeeNo'), surname: str('surname'), middleName: str('middleName'), firstName: str('firstName'),
-    initials: str('initials'), dateOfBirth: str('dateOfBirth'), gender: str('gender'), designation: str('designation'),
+    initials: str('initials'), dateOfBirth: str('dateOfBirth'), gender: str('gender'),
+    primaryRoleId: str('primaryRoleId'), designation: str('designation'),
     jobTitle: str('jobTitle'), professionalRegulator: str('professionalRegulator'), professionalLicence: str('professionalLicence'),
     licenceExpiryDate: str('licenceExpiryDate'), qualifications: str('qualifications'), sectionId: str('sectionId'),
     unit: str('unit'), personnelCategory: str('personnelCategory') || 'STAFF',

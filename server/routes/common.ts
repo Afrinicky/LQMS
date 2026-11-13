@@ -2120,6 +2120,22 @@ export function commonRoutes() {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
 
+  /**
+   * Staff who are short of the clinical unit their grade requires.
+   *
+   * Existing records are not blocked — somebody correcting a phone number
+   * should not be stopped by a field they may not know the answer to — so the
+   * register names them instead and the laboratory works through the list.
+   */
+  router.get('/staff/unit-gaps', requirePermission('personnel.register', 'view'), (_req, res) => {
+    const names = PRIMARY_ROLES.filter(r => r.bench).map(r => r.name);
+    const placeholders = names.map(() => '?').join(', ');
+    res.json(getDb().prepare(`SELECT s.id, s.full_name fullName, s.employee_no employeeNo, r.name primaryRole
+      FROM staff s JOIN roles r ON r.id = s.primary_role_id
+      WHERE s.is_active = 1 AND s.section_id IS NULL AND r.name IN (${placeholders})
+      ORDER BY s.full_name`).all(...names));
+  });
+
   // Registered before '/staff/:id' so the ":id" param route does not capture these.
   router.get('/staff/template', requirePermission('personnel.register', 'export'), (_req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -2320,22 +2336,6 @@ export function commonRoutes() {
     bumpAccessEpoch();
     audit(req, { action: 'delete', entity: 'staff_unit_grants', entityId: Number(req.params.id), oldValue: grant });
     res.json({ ok: true });
-  });
-
-  /**
-   * Staff who are short of the clinical unit their grade requires.
-   *
-   * Existing records are not blocked — somebody correcting a phone number
-   * should not be stopped by a field they may not know the answer to — so the
-   * register names them instead and the laboratory works through the list.
-   */
-  router.get('/staff/unit-gaps', requirePermission('personnel.register', 'view'), (_req, res) => {
-    const names = PRIMARY_ROLES.filter(r => r.bench).map(r => r.name);
-    const placeholders = names.map(() => '?').join(', ');
-    res.json(getDb().prepare(`SELECT s.id, s.full_name fullName, s.employee_no employeeNo, r.name primaryRole
-      FROM staff s JOIN roles r ON r.id = s.primary_role_id
-      WHERE s.is_active = 1 AND s.section_id IS NULL AND r.name IN (${placeholders})
-      ORDER BY s.full_name`).all(...names));
   });
 
   /** The laboratory's units for anything that counts them, pseudo units excluded. */
@@ -3134,7 +3134,11 @@ export function commonRoutes() {
    * user by `/sections/options` below, so the gate was protecting nothing and
    * costing the people who run the units the forms they run them with.
    */
-  router.get('/sections', requireAuth, (_req, res) => res.json(getDb().prepare('SELECT id, name, department_id FROM sections WHERE is_active = 1 ORDER BY name').all()));
+  // `unit_kind` travels with every unit list, because a form that asks for
+  // somebody's CLINICAL unit must not offer them the Quality Office.
+  router.get('/sections', requireAuth, (_req, res) => res.json(getDb().prepare(
+    `SELECT id, name, department_id, unit_kind AS unitKind, is_pseudo AS isPseudo
+     FROM sections WHERE is_active = 1 ORDER BY unit_kind, name`).all()));
 
   /**
    * The units, for anybody who has to name one.

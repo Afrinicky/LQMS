@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
-import { Search, ShieldCheck, User, Users, Briefcase, RotateCcw, Info, History, BadgeCheck, ChevronDown, ChevronRight } from 'lucide-react';
+import { Search, ShieldCheck, User, Users, Briefcase, RotateCcw, Info, History, BadgeCheck, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
 import { api, errorText } from '../services/api';
+import UnitGrants from './settings/UnitGrants';
 import { MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules';
 import {
   FEATURES, ACCESS_LEVELS, LEVEL_LABELS, LEVEL_HINTS, LEVEL_ACTIONS,
@@ -47,7 +48,7 @@ import { Notice } from '../components/ui/Feedback';
    with a refusal after the click.
    ========================================================================= */
 
-type Tab = 'profiles' | 'individuals';
+type Tab = 'profiles' | 'individuals' | 'units';
 
 const MODULE_LABEL = new Map(MODULES.map(m => [m.key, m.label]));
 
@@ -639,11 +640,15 @@ export function AccessControl() {
           title="One person, overriding their profile">
           <User size={15} /> Individuals
         </button>
+        <button type="button" className={tab === 'units' ? 'active' : ''} onClick={() => setTab('units')}
+          title="Permission to work in a unit somebody does not belong to">
+          <Building2 size={15} /> Cross-unit working
+        </button>
       </div>
 
-      {tab === 'profiles'
-        ? <ProfilesTab catalogue={catalogue} reload={reload} />
-        : <IndividualsTab catalogue={catalogue} reload={reload} />}
+      {tab === 'profiles' && <ProfilesTab catalogue={catalogue} reload={reload} />}
+      {tab === 'individuals' && <IndividualsTab catalogue={catalogue} reload={reload} />}
+      {tab === 'units' && <UnitGrants />}
     </div>
   );
 }

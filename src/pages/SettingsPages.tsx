@@ -33,7 +33,7 @@ import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
-  SectionConfigRow, SectionConfigDetail, SectionTestRow,
+  SectionConfigRow, SectionConfigDetail, SectionTestRow, UnitModuleServices,
   LaboratoryDocument, QualityPolicy, QualityObjective, OrgChartModel,
   EquipmentPattern, EquipmentSegment,
   SystemConnectivity, AppMode, SyncStatus, SyncResult, RemoteCloudUser,
@@ -41,6 +41,8 @@ import type {
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 import RiskCriteriaSettings from './settings/RiskCriteriaSettings';
+import { UNIT_KINDS, UNIT_KIND_LABELS, ADMIN_UNIT_SERVICES } from '../../shared/constants/labUnits';
+import PeopleAccessTabs from './settings/PeopleAccess';
 import Appointments, { AppointmentPointer } from '../components/settings/Appointments';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -65,291 +67,14 @@ function effectiveRoleNames(title: string): string[] {
 // ---------------------------------------------------------------------------
 // Register New Staff
 // ---------------------------------------------------------------------------
-// Single onboarding workflow that wires a new person into every linked area:
-// the staff/personnel record, Positions & Organogram, an optional login account
-// (Users & Access), and optional starting Technical Authorizations (Permission
-// Matrix → Section Scope). Everything is created in one transaction server-side.
-
-export function RegisterStaff() {
-  const { can } = usePermissions();
-  const [roles, setRoles] = useState<{ id: number; name: string }[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [profile, setProfile] = useState<StaffProfile | null>(null);
-
-  const blank = { firstName: '', surname: '', otherNames: '', employeeNo: '', email: '', phone: '', sectionId: '', primaryPositionId: '' };
-  const [form, setForm] = useState(blank);
-  const [positionIds, setPositionIds] = useState<number[]>([]);
-  const [createUser, setCreateUser] = useState(false);
-  const [account, setAccount] = useState({ username: '', password: '', roleId: '' });
-
-  function loadLookups() {
-    api<{ id: number; name: string }[]>('/roles').then(setRoles).catch(() => setRoles([]));
-    api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
-    api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
-    api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
-  }
-  useEffect(() => { loadLookups(); }, []);
-
-  function togglePosition(id: number) {
-    setPositionIds(prev => {
-      const next = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
-      setForm(f => ({ ...f, primaryPositionId: next.includes(Number(f.primaryPositionId)) ? f.primaryPositionId : (next[0] ? String(next[0]) : '') }));
-      return next;
-    });
-  }
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setError(null); setSuccess(null);
-    try {
-      const payload = {
-        firstName: form.firstName,
-        surname: form.surname,
-        otherNames: form.otherNames || null,
-        employeeNo: form.employeeNo || null,
-        email: form.email || null,
-        phone: form.phone || null,
-        sectionId: form.sectionId || null,
-        positionIds,
-        primaryPositionId: form.primaryPositionId || null,
-        createUser,
-        username: createUser ? account.username : undefined,
-        password: createUser ? account.password : undefined,
-        roleId: createUser ? account.roleId : undefined,
-      };
-      const res = await api<{ staffId: number; userId: number | null }>('/staff/register', { method: 'POST', body: JSON.stringify(payload) });
-      setSuccess(`Staff record created (#${res.staffId})${res.userId ? ` with linked login account (user #${res.userId})` : ''}. Positions, permissions and personnel records are now linked.`);
-      setForm(blank); setPositionIds([]); setCreateUser(false); setAccount({ username: '', password: '', roleId: '' });
-      loadLookups();
-    } catch (err) { setError(errorText(err)); }
-  }
-
-  async function openProfile(id: number) {
-    setError(null);
-    try { setProfile(await api<StaffProfile>(`/staff/${id}`)); }
-    catch (err) { setError(errorText(err)); }
-  }
-
-  const moduleLabel = (key: string) => MODULES.find(m => m.key === key)?.label ?? key;
-
-  return <div className="reg-staff">
-    <div className="card">
-      <h3>Register New Staff</h3>
-      {error && <Notice kind="error">{error}</Notice>}
-      {success && <Notice kind="success">{success}</Notice>}
-
-      {/* POST /staff/register — the register's own create right, which is what
-          the server asks for and what Personnel Management grants. */}
-      {can('personnel.register', 'create') && <form className="form" onSubmit={submit}>
-        <fieldset className="reg-section">
-          <legend>Personal &amp; role details</legend>
-          <div className="form-grid">
-            <label>First name<TextField value={form.firstName} onValue={nextValue => setForm({ ...form, firstName: nextValue })} required /></label>
-            <label>Surname<TextField value={form.surname} onValue={nextValue => setForm({ ...form, surname: nextValue })} required /></label>
-            <label>Other names<TextField value={form.otherNames} onValue={nextValue => setForm({ ...form, otherNames: nextValue })} placeholder="Optional" /></label>
-            <label>Employee no<TextField value={form.employeeNo} onValue={nextValue => setForm({ ...form, employeeNo: nextValue })} placeholder="Optional" /></label>
-            <label>Email<TextField type="email" value={form.email} onValue={nextValue => setForm({ ...form, email: nextValue })} placeholder="Used for self-link to login" /></label>
-            <label>Phone<TextField value={form.phone} onValue={nextValue => setForm({ ...form, phone: nextValue })} /></label>
-            <label>Section / Unit<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">Unassigned</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-          </div>
-        </fieldset>
-
-        <fieldset className="reg-section">
-          <legend>Positions &amp; organogram</legend>
-          <div className="chip-select">
-            {positions.filter(p => !!p.isActive).map(p => (
-              <label key={p.id} className={`pick ${positionIds.includes(p.id) ? 'on' : ''}`}>
-                <input type="checkbox" checked={positionIds.includes(p.id)} onChange={() => togglePosition(p.id)} />{p.title}
-              </label>
-            ))}
-            {positions.length === 0 && <span className="hint">No positions yet.</span>}
-          </div>
-          {positionIds.length > 1 && <label className="primary-pick">Primary position<select value={form.primaryPositionId} onChange={e => setForm({ ...form, primaryPositionId: e.target.value })}>{positionIds.map(id => <option key={id} value={id}>{positions.find(p => p.id === id)?.title ?? `#${id}`}</option>)}</select></label>}
-        </fieldset>
-
-        <fieldset className="reg-section">
-          <legend>Login account (Users &amp; Access)</legend>
-          <label className="toggle"><input type="checkbox" checked={createUser} onChange={e => setCreateUser(e.target.checked)} /> Create a system login account linked to this staff member</label>
-          {createUser && <div className="form-grid">
-            <label>Username<TextField value={account.username} onValue={nextValue => setAccount({ ...account, username: nextValue })} required={createUser} /></label>
-            <label>Password<TextField type="password" minLength={8} value={account.password} onValue={nextValue => setAccount({ ...account, password: nextValue })} required={createUser} placeholder="Min 8 characters" /></label>
-            <label>Role<select value={account.roleId} onChange={e => setAccount({ ...account, roleId: e.target.value })} required={createUser}><option value="">Select role…</option>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
-          </div>}
-        </fieldset>
-
-        <fieldset className="reg-section">
-          <legend>Access</legend>
-          {createUser && account.roleId && (
-            <p className="hint">
-              This account will work under the <strong>{roles.find(r => r.id === Number(account.roleId))?.name ?? 'selected'}</strong> access profile.
-              If one of the positions selected above is mapped to a profile of its own, that mapping applies instead.
-            </p>
-          )}
-        </fieldset>
-
-        <button type="submit">Register staff member</button>
-      </form>}
-    </div>
-
-    <div className="card">
-      <h3>Staff directory &amp; linkages</h3>
-      <table className="data-table"><thead><tr><th>Name</th><th>Employee no</th><th>Section</th><th>Primary position</th><th>Login account</th><th>Status</th><th></th></tr></thead><tbody>
-        {staff.map(s => <tr key={s.id}>
-          <td>{s.fullName}</td>
-          <td>{s.employeeNo || '—'}</td>
-          <td>{s.sectionName || '—'}</td>
-          <td>{s.primaryPosition || '—'}</td>
-          <td>{s.username ? <>{s.username} <span className="badge">{s.roleName}</span></> : <span className="hint">No account</span>}</td>
-          <td>{s.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
-          <td><button onClick={() => openProfile(s.id)}>View linkages</button></td>
-        </tr>)}
-        {staff.length === 0 && <tr><td colSpan={7} className="hint">No staff registered yet.</td></tr>}
-      </tbody></table>
-    </div>
-
-    {profile && <div className="card profile-panel">
-      <div className="panel-head">
-        <h3>{profile.staff.full_name}</h3>
-        <button className="secondary" onClick={() => setProfile(null)}>Close</button>
-      </div>
-      <p>Employee no: {profile.staff.employee_no || '—'} · Section: {profile.staff.section_name || '—'} · {profile.staff.is_active ? 'Active' : 'Inactive'}</p>
-
-      <h4>Login account (Users &amp; Access)</h4>
-      {profile.account
-        ? <p>{profile.account.username} — role <span className="badge">{profile.account.role_name}</span> {profile.account.is_active ? '' : '(disabled)'} · <Link to="/settings/people">Manage in Users &amp; Access</Link></p>
-        : <p className="hint">No login account linked. <Link to="/settings/people">Create one in Users &amp; Access</Link>.</p>}
-
-      <h4>Positions &amp; organogram</h4>
-      {profile.positions.length > 0
-        ? <ul className="link-list">{profile.positions.map(p => <li key={p.id}><strong>{p.title}</strong> <span className="badge">{p.assignment_type}</span>{p.reports_to_title ? ` → reports to ${p.reports_to_title}` : ''}{p.is_active ? '' : ' (inactive)'}</li>)}</ul>
-        : <p className="hint">No positions assigned. <Link to="/settings/people">Assign in Positions &amp; Organogram</Link>.</p>}
-
-      <h4>Technical authorizations &amp; section scope (Permission Matrix)</h4>
-      {profile.authorizations.length > 0
-        ? <table className="data-table"><thead><tr><th>Module</th><th>Section</th><th>Level</th><th>Status</th><th>Expires</th></tr></thead><tbody>
-            {profile.authorizations.map(a => <tr key={a.id}><td>{moduleLabel(a.module_key)}</td><td>{a.section_name || 'All sections'}</td><td><span className="badge">{a.level}</span></td><td>{a.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td><td>{a.expires_at || '—'}</td></tr>)}
-          </tbody></table>
-        : <p className="hint">No technical authorizations. <Link to="/settings/people">Add in Permission Matrix → Section Scope</Link>.</p>}
-
-      <h4>Personnel activity</h4>
-      <div className="cards">
-        <div className="card mini"><h4>Documents</h4><p className="metric">{profile.activity.documents}</p></div>
-        <div className="card mini"><h4>Declarations</h4><p className="metric">{profile.activity.declarations}</p></div>
-        <div className="card mini"><h4>Competency</h4><p className="metric">{profile.activity.competency}</p></div>
-        {/* The tile counts sessions in the personnel register; the file below
-            counts everything, including the training given on an instrument and
-            recorded in Equipment Management. The two differ on purpose, and the
-            file is the honest number. */}
-        <div className="card mini"><h4>Training sessions</h4><p className="metric">{profile.training?.summary?.total ?? profile.activity.training}</p></div>
-        <div className="card mini"><h4>Open actions</h4><p className="metric">{profile.activity.openActions}</p></div>
-      </div>
-
-      {/* Their whole training file, wherever each record was made. */}
-      <TrainingRecordPanel staffId={profile.staff.id} entries={profile.training?.entries}
-        title={`${profile.staff.full_name} — training file`} />
-
-      <p className="hint"><Link to="/personnel">Open in Personnel Management</Link></p>
-    </div>}
-  </div>;
-}
-
+// Register New Staff and Users & Access have moved.
 // ---------------------------------------------------------------------------
-// Users & Access
-// ---------------------------------------------------------------------------
-export function UsersAccess(){
-  const { can } = usePermissions();
-  const [users,setUsers]=useState<(ApiUser & {staffName?: string})[]>([]);
-  const [roles,setRoles]=useState<{id:number;name:string}[]>([]);
-  const [staff,setStaff]=useState<Staff[]>([]);
-  const [error,setError]=useState<string|null>(null);
-  const [success,setSuccess]=useState<string|null>(null);
-  const [openUser,setOpenUser]=useState<number|null>(null);
-  const [manageUser,setManageUser]=useState<number|null>(null);
-  const [linkSel,setLinkSel]=useState<string>('');
-  const load=()=>{api<(ApiUser & {staffName?: string})[]>('/users').then(setUsers); api<{id:number;name:string}[]>('/roles').then(setRoles); api<Staff[]>('/staff').then(setStaff).catch(()=>setStaff([]))};
-  useEffect(()=>{void load()},[]);
-  async function submit(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setError(null); setSuccess(null);
-    const form=e.currentTarget;                       // capture before await (React nulls currentTarget after yielding)
-    const fd=new FormData(form);
-    const staffId=fd.get('staffId')?Number(fd.get('staffId')):null;
-    try {
-      await api('/users',{method:'POST',body:JSON.stringify({username:fd.get('username'),password:fd.get('password'),fullName:fd.get('fullName'),roleId:Number(fd.get('roleId')),staffId})});
-      form.reset();
-      setSuccess('User account created.');
-      load();
-    } catch (err) { setError(errorText(err)); }
-  }
-  async function linkStaff(userId:number, staffId:number|null){
-    setError(null); setSuccess(null);
-    try {
-      await api(`/users/${userId}`,{method:'PUT',body:JSON.stringify({staffId})});
-      setSuccess(staffId?'Account linked to staff record.':'Account unlinked from staff.');
-      setOpenUser(null); setLinkSel(''); load();
-    } catch (err) { setError(errorText(err)); }
-  }
-  const unlinkedStaff = staff.filter(s => !s.userId);
-  return <><PasswordResetApprovals />
-  <div className="card"><h3>Users &amp; Access</h3>
-    {error && <Notice kind="error">{error}</Notice>}
-    {success && <Notice kind="success">{success}</Notice>}
-    {can('settings', 'create') && <form className="form" onSubmit={submit}>
-      <label>Full name<input name="fullName" required/></label>
-      <label>Username<input name="username" required/></label>
-      <label>Password<input name="password" type="password" minLength={8} required/></label>
-      <label>Role<select name="roleId" required><option value="">Select role…</option>{roles.map(r=><option value={r.id} key={r.id}>{r.name}</option>)}</select></label>
-      <label>Link to Staff Record (Optional)<select name="staffId"><option value="">Not linked</option>{unlinkedStaff.map(s=><option value={s.id} key={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}</select></label>
-      <button>Create user</button>
-    </form>}
-    {/* The account panel below opens inside a row, so the table is the widest
-        thing on this screen. Scroll it in its own box rather than letting it
-        push the whole page sideways. */}
-    <div className="table-scroll">
-    <table className="table users-table"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Linked Staff</th><th>Active</th><th></th></tr></thead><tbody>
-      {users.map(u=>{
-  const { can } = usePermissions();
-        const linkable = staff.filter(s => !s.userId || s.userId === u.id);
-        const open = openUser===u.id;
-        const manage = manageUser===u.id;
-        return <Fragment key={u.id}>
-          <tr className="row-click" onClick={()=>{ setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>
-            <td>{u.username}</td><td>{u.fullName}</td><td>{u.roleName}</td>
-            <td>{u.staffName || <span className="muted">Not linked</span>}</td>
-            <td>{u.isActive?'Yes':<span className="badge inactive">Deactivated</span>}</td>
-            <td style={{whiteSpace:'nowrap'}}>
-              <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>{open?'Close':(u.staffId?'Change link':'Link staff')}</button>{' '}
-              <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setManageUser(manage?null:u.id); setError(null); setSuccess(null); }}>{manage?'Close':'Manage account'}</button>
-            </td>
-          </tr>
-          {open && <tr className="link-editor-row"><td colSpan={6}>
-            <div className="user-link-editor">
-              <span className="lab">Link <strong>{u.username}</strong> to staff record</span>
-              <select value={linkSel} onChange={e=>setLinkSel(e.target.value)}>
-                <option value="">— none —</option>
-                {linkable.map(s=><option key={s.id} value={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}
-              </select>
-              {can('settings', 'edit') && <button type="button" onClick={()=>linkStaff(u.id, linkSel?Number(linkSel):null)}>Save link</button>}
-              {u.staffId && can('settings', 'edit') && <button type="button" className="secondary" onClick={()=>linkStaff(u.id,null)}>Unlink</button>}
-              {staff.length===0 && <span className="hint">No staff records yet — register staff first.</span>}
-            </div>
-          </td></tr>}
-          {manage && <tr className="link-editor-row"><td colSpan={6}>
-            <UserAccountActions user={u} onChanged={(m) => { if (m) setSuccess(m); load(); }} />
-          </td></tr>}
-        </Fragment>;
-      })}
-    </tbody></table>
-    </div>
-  </div></>;
-}
+// They asked the same question twice. Each created a person, each collected a
+// different half of their details, and each had its own idea of what a "role"
+// was, so one person could arrive with two records and two job titles. They
+// are now the Logins and Staff tabs of pages/settings/PeopleAccess.tsx, where
+// a login creates the personnel record it belongs to.
 
-// ---------------------------------------------------------------------------
-// Positions & Organogram
-// ---------------------------------------------------------------------------
 type OrgNodeData = { id: number; title: string; description?: string | null; reportsToPositionId: number | null; isActive: number; occupants: { staffId: number; staffName: string; assignmentType: string }[] };
 
 export function Positions(){
@@ -376,14 +101,6 @@ export function Positions(){
     const fd=new FormData(e.currentTarget);
     try {
       await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null,isCore:fd.get('isCore')==='on'})});
-      e.currentTarget.reset(); load();
-    } catch (err) { setError(errorText(err)); }
-  }
-  async function addStaff(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setError(null);
-    const fd=new FormData(e.currentTarget);
-    try {
-      await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),sectionId:fd.get('sectionId')||null})});
       e.currentTarget.reset(); load();
     } catch (err) { setError(errorText(err)); }
   }
@@ -416,14 +133,16 @@ export function Positions(){
     </div>
     {error && <Notice kind="error">{error}</Notice>}
 
-    {view==='list' && <div className="grid cols-2">
-      <div className="card"><h3>Positions &amp; Organogram</h3>
-        {can('settings', 'create') && <form className="form" onSubmit={addPosition}>
-          <label>Position title<input name="title" required/></label>
-          <label>Description<textarea name="description"/></label>
-          <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
+    {view==='list' && <div className="card">
+      <div><h3>Positions</h3>
+        {can('settings', 'create') && <form className="form positions-form" onSubmit={addPosition}>
+          <div className="form-grid">
+            <label>Position title<input name="title" required/></label>
+            <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
+            <label>Description<input name="description"/></label>
+          </div>
           <label className="toggle"><input type="checkbox" name="isCore" defaultChecked /> Core post — appears on the organogram and in leadership, and carries a deputy and a continuity plan</label>
-          <button>Create position</button>
+          <button type="submit">Create position</button>
         </form>}
         <table className="data-table"><thead><tr><th>Title</th><th>Reports to</th><th>Kind</th><th>Status</th><th></th></tr></thead><tbody>
           {positions.map(p => editing?.id===p.id
@@ -437,28 +156,12 @@ export function Positions(){
                   <button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancel</button>
                 </form>}
               </td></tr>
-            : <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isCore ? <span className="badge">Core post</span> : <span className="muted">Bench grade</span>}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
+            : <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isCore ? <span className="badge">Core post</span> : <span className="muted">Supporting post</span>}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
                 <td><button onClick={()=>startEdit(p)}>Edit</button> {can('settings', 'edit') && <button className="secondary" onClick={()=>toggleStatus(p)}>{p.isActive?'Deactivate':'Activate'}</button>} <button className="secondary" onClick={()=>removePosition(p)}>Remove</button></td>
               </tr>)}
         </tbody></table>
       </div>
-      <div className="card"><h3>Add a member of staff</h3>
-        {/* It used to appoint them to a post as well, which made this a second
-            place a post changed hands. It registers the person; the post is an
-            appointment, and appointments are made in one place. */}
-        {can('personnel.register', 'create') && <form className="form" onSubmit={addStaff}>
-          <label>Employee no<input name="employeeNo"/></label>
-          <label>Staff full name<input name="fullName" required/></label>
-          <label>Email<input name="email"/></label>
-          <label>Phone<input name="phone"/></label>
-          <label>Section<select name="sectionId"><option value="">Unassigned</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
-          <button>Create staff</button>
-        </form>}
-        <AppointmentPointer what="The post a person holds" />
-        <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Section</th></tr></thead><tbody>
-          {staff.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
-        </tbody></table>
-      </div>
+      <AppointmentPointer what="The post a person holds" />
     </div>}
 
     {view==='appointments' && <Appointments />}
@@ -756,6 +459,15 @@ export function ConfigListsPage() {
 const SECTION_SUBTABS = ['Profile', 'Services', 'Test Menu', 'Equipment', 'Stock & Inventory', 'Staff', 'Benches'] as const;
 type SectionSubtab = typeof SECTION_SUBTABS[number];
 
+/*
+ * An administrative unit performs no tests, so it is not offered a test menu
+ * or a bench list. What it does have is the work of one module, shown on its
+ * Services tab and drawn from that module rather than typed in again.
+ */
+const ADMIN_SECTION_SUBTABS: readonly SectionSubtab[] = ['Profile', 'Services', 'Equipment', 'Stock & Inventory', 'Staff'];
+const subtabsFor = (kind?: string): readonly SectionSubtab[] =>
+  kind === 'administrative' ? ADMIN_SECTION_SUBTABS : SECTION_SUBTABS;
+
 export function SectionConfig() {
   const [sections, setSections] = useState<SectionConfigRow[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -784,11 +496,17 @@ export function SectionConfig() {
   }
 
   // --- new unit ---
-  const [newForm, setNewForm] = useState({ name: '', departmentId: '', code: '', operatingHours: '', serviceSummary: '', description: '' });
+  const [newForm, setNewForm] = useState({
+    name: '', departmentId: '', code: '', operatingHours: '', serviceSummary: '', description: '',
+    unitKind: 'clinical', isPseudo: true, serviceModule: '',
+  });
   async function createSection(e: FormEvent) {
     e.preventDefault();
     const ok = await call('/section-config/sections', { method: 'POST', body: JSON.stringify(newForm) }, 'Unit created.');
-    if (ok) { setNewForm({ name: '', departmentId: '', code: '', operatingHours: '', serviceSummary: '', description: '' }); setShowNew(false); }
+    if (ok) {
+      setNewForm({ name: '', departmentId: '', code: '', operatingHours: '', serviceSummary: '', description: '', unitKind: 'clinical', isPseudo: true, serviceModule: '' });
+      setShowNew(false);
+    }
   }
   async function deleteSection() {
     if (selectedId == null) return;
@@ -816,32 +534,67 @@ export function SectionConfig() {
           <label>Department<select value={newForm.departmentId} onChange={e => setNewForm({ ...newForm, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
           <label>Unit code<TextField value={newForm.code} onValue={nextValue => setNewForm({ ...newForm, code: nextValue })} placeholder="e.g. MOL" /></label>
           <label>Operating hours<TextField value={newForm.operatingHours} onValue={nextValue => setNewForm({ ...newForm, operatingHours: nextValue })} placeholder="e.g. 24/7 or Mon–Fri 08:00–17:00" /></label>
+          <label>Unit type
+            <select value={newForm.unitKind} onChange={e => setNewForm({ ...newForm, unitKind: e.target.value })}>
+              {UNIT_KINDS.map(k => <option key={k} value={k}>{UNIT_KIND_LABELS[k]}</option>)}
+            </select>
+          </label>
+          {newForm.unitKind === 'administrative' && <label>Services drawn from
+            <select value={newForm.serviceModule} onChange={e => setNewForm({ ...newForm, serviceModule: e.target.value })}>
+              <option value="">None</option>
+              {ADMIN_UNIT_SERVICES.map(a => <option key={a.module} value={a.module}>{a.label}</option>)}
+            </select>
+          </label>}
           {/* A new unit has no supervisor until one is appointed to its
               supervising post. Choosing one here was the second place that
               decided who runs a unit, and the two could disagree. */}
         </div>
+        {newForm.unitKind === 'administrative' && <label className="toggle">
+          <input type="checkbox" checked={newForm.isPseudo} onChange={e => setNewForm({ ...newForm, isPseudo: e.target.checked })} />
+          Pseudo unit — an appointment rather than a place, and not counted among the laboratory's units
+        </label>}
         <label>Service summary<TextField value={newForm.serviceSummary} onValue={nextValue => setNewForm({ ...newForm, serviceSummary: nextValue })} placeholder="Short description of what this unit provides" /></label>
         <label>Description / scope<TextField as="textarea" value={newForm.description} onValue={nextValue => setNewForm({ ...newForm, description: nextValue })} /></label>
         <button type="submit">Create unit</button>
       </form>}
 
-      <div className="unit-grid">
-        {sections.map(s => <button key={s.id} type="button" className={`unit-card ${selectedId === s.id ? 'active' : ''} ${s.isActive ? '' : 'inactive'}`} onClick={() => setSelectedId(s.id)}>
+      <p className="hint">
+        {sections.filter(u => u.isActive && !u.isPseudo).length} unit(s) in the laboratory ·{' '}
+        {sections.filter(u => u.isActive && u.unitKind === 'administrative').length} administrative
+      </p>
+
+      {/* The benches first, then the offices. A laboratory reads its own
+          structure that way round, and the two kinds answer different
+          questions, so interleaving them helped nobody. */}
+      {([['clinical', 'Clinical units'], ['administrative', 'Administrative & support units']] as const).map(([kind, heading]) => {
+        const group = sections.filter(u => (u.unitKind ?? 'clinical') === kind);
+        if (group.length === 0) return null;
+        return <section key={kind} className="unit-group">
+          <h4>{heading}</h4>
+          <div className="unit-grid">
+        {group.map(s => <button key={s.id} type="button" className={`unit-card ${selectedId === s.id ? 'active' : ''} ${s.isActive ? '' : 'inactive'}`} onClick={() => setSelectedId(s.id)}>
           <div className="unit-card-top">
             <strong>{s.name}</strong>
             {s.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}
           </div>
-          <span className="hint">{s.code ? `${s.code} · ` : ''}{s.departmentName || 'Laboratory'}</span>
+          <span className="hint">
+            {s.code ? `${s.code} · ` : ''}
+            {s.unitKind === 'administrative' ? 'Administrative' : 'Clinical'}
+            {s.isPseudo ? ' · pseudo' : ''}
+            {s.headStaffName ? ` · ${s.headStaffName}` : ''}
+          </span>
           <div className="unit-stats">
             <span title="Services offered">🧪 {s.servicesOffered}</span>
-            <span title="Tests in menu">📋 {s.testCount}</span>
+            {s.unitKind !== 'administrative' && <span title="Tests in menu">📋 {s.testCount}</span>}
             <span title="Equipment">⚙️ {s.equipmentCount}</span>
             <span title="Stock items">📦 {s.inventoryCount}</span>
-            <span title="Active staff">👤 {s.staffCount}</span>
+            <span title="Staff in this unit">👤 {s.staffCount}{s.memberCount ? ` +${s.memberCount}` : ''}</span>
           </div>
         </button>)}
-        {sections.length === 0 && <p className="hint">No units configured yet.</p>}
-      </div>
+          </div>
+        </section>;
+      })}
+      {sections.length === 0 && <p className="hint">No units configured yet.</p>}
     </div>
 
     {detail && selectedId != null && <SectionDetailPanel
@@ -858,14 +611,55 @@ export function SectionConfig() {
   </div>;
 }
 
+/**
+ * What an administrative unit does.
+ *
+ * An office has no test menu, so offering it one is noise. The Stores shows
+ * stock, the Quality Office shows documents and nonconformities, the front
+ * desk shows complaints — counted live from the module that owns the work,
+ * with a way through to it. The unit page is a way in, not a second copy.
+ */
+function AdminUnitServices({ sectionId }: { sectionId: number }) {
+  const [data, setData] = useState<UnitModuleServices | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api<UnitModuleServices>(`/section-config/sections/${sectionId}/module-services`)
+      .then(setData).catch(e => setError(errorText(e)));
+  }, [sectionId]);
+
+  if (error) return <Notice kind="error">{error}</Notice>;
+  if (!data) return <p className="hint">Loading…</p>;
+  if (!data.module) {
+    return <Notice kind="info">No module is linked to this unit. Choose one on the Profile tab to show its work here.</Notice>;
+  }
+
+  return <div className="admin-unit-services">
+    <h4>{data.label}</h4>
+    {data.metrics.length > 0 && <div className="stat-row">
+      {data.metrics.map(m => <div key={m.label} className="stat-chip"><span>{m.label}</span><strong>{m.value}</strong></div>)}
+    </div>}
+    <ul className="link-list">
+      {data.links.map(l => <li key={l.path}><Link to={l.path}>{l.label}</Link></li>)}
+    </ul>
+  </div>;
+}
+
 function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onClose, onDelete, call, sectionId }: {
   detail: SectionConfigDetail; departments: Department[]; staff: Staff[]; subtab: SectionSubtab;
   onSubtab: (t: SectionSubtab) => void; onClose: () => void; onDelete: () => void;
   call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>; sectionId: number;
 }) {
   const s = detail.section;
-  const [profile, setProfile] = useState({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' });
-  useEffect(() => { setProfile({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' }); }, [s.id]);
+  const asProfile = () => ({
+    name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '',
+    operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '',
+    unitKind: (s as { unit_kind?: string }).unit_kind || 'clinical',
+    isPseudo: Number((s as { is_pseudo?: number }).is_pseudo ?? 0) === 1,
+    serviceModule: (s as { service_module?: string | null }).service_module || '',
+  });
+  const [profile, setProfile] = useState(asProfile);
+  useEffect(() => { setProfile(asProfile()); }, [s.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const isAdministrative = profile.unitKind === 'administrative';
 
   const [svc, setSvc] = useState({ name: '', category: '', isOffered: 'yes', notes: '' });
   const [equip, setEquip] = useState({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' });
@@ -883,7 +677,7 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </>}
   >
   <div className="card section-detail">
-    <div className="tabs">{SECTION_SUBTABS.map(t => <button key={t} className={subtab === t ? 'active' : ''} onClick={() => onSubtab(t)}>{t}</button>)}</div>
+    <div className="tabs">{subtabsFor((s as { unit_kind?: string }).unit_kind).map(t => <button key={t} className={subtab === t ? 'active' : ''} onClick={() => onSubtab(t)}>{t}</button>)}</div>
 
     {subtab === 'Profile' && <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}`, { method: 'PUT', body: JSON.stringify(profile) }, 'Unit profile updated.'); }}>
       <div className="form-grid">
@@ -899,14 +693,31 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
           </span>
         </label>
         <label>Operating hours<TextField value={profile.operatingHours} onValue={nextValue => setProfile({ ...profile, operatingHours: nextValue })} /></label>
+        <label>Unit type
+          <select value={profile.unitKind} onChange={e => setProfile({ ...profile, unitKind: e.target.value })}>
+            {UNIT_KINDS.map(k => <option key={k} value={k}>{UNIT_KIND_LABELS[k]}</option>)}
+          </select>
+        </label>
+        {isAdministrative && <label>Services drawn from
+          <select value={profile.serviceModule} onChange={e => setProfile({ ...profile, serviceModule: e.target.value })}>
+            <option value="">None</option>
+            {ADMIN_UNIT_SERVICES.map(a => <option key={a.module} value={a.module}>{a.label}</option>)}
+          </select>
+        </label>}
       </div>
+      {isAdministrative && <label className="toggle">
+        <input type="checkbox" checked={profile.isPseudo} onChange={e => setProfile({ ...profile, isPseudo: e.target.checked })} />
+        Pseudo unit — an appointment rather than a place, and not counted among the laboratory's units
+      </label>}
       <label>Service summary<TextField value={profile.serviceSummary} onValue={nextValue => setProfile({ ...profile, serviceSummary: nextValue })} /></label>
       <label>Description / scope<TextField as="textarea" value={profile.description} onValue={nextValue => setProfile({ ...profile, description: nextValue })} /></label>
       <AppointmentPointer what="Who supervises a unit" />
       <button type="submit">Save profile</button>
     </form>}
 
-    {subtab === 'Services' && <>
+    {subtab === 'Services' && isAdministrative && <AdminUnitServices sectionId={sectionId} />}
+
+    {subtab === 'Services' && !isAdministrative && <>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/services`, { method: 'POST', body: JSON.stringify({ ...svc, isOffered: svc.isOffered === 'yes' }) }, 'Service saved.').then(ok => { if (ok) setSvc({ name: '', category: '', isOffered: 'yes', notes: '' }); }); }}>
         <div className="form-grid">
           <label>Service / activity<TextField value={svc.name} onValue={nextValue => setSvc({ ...svc, name: nextValue })} required placeholder="e.g. Full Blood Count, Blood Culture" /></label>
@@ -976,9 +787,23 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </>}
 
     {subtab === 'Staff' && <>
+      <h4>{isAdministrative ? 'Based in this unit' : 'Clinical unit members'}</h4>
       <table className="data-table"><thead><tr><th>Name</th><th>Employee no</th><th>Status</th></tr></thead><tbody>
         {detail.staff.map(p => <tr key={p.id}><td>{p.full_name}</td><td>{p.employee_no || '—'}</td><td>{p.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td></tr>)}
-        {detail.staff.length === 0 && <tr><td colSpan={3} className="hint">No staff assigned to this unit yet.</td></tr>}
+        {detail.staff.length === 0 && <tr><td colSpan={3} className="hint">Nobody has this as their clinical unit.</td></tr>}
+      </tbody></table>
+
+      {/* People posted here in addition to their own unit — the Quality
+          Manager in the Quality Office, who is a haematologist by grade. */}
+      <h4>Additional postings</h4>
+      <table className="data-table"><thead><tr><th>Name</th><th>Own unit</th><th>Role here</th><th>Source</th></tr></thead><tbody>
+        {(detail.members ?? []).map(m => <tr key={m.id}>
+          <td>{m.full_name}</td>
+          <td>{m.home_unit_name || '—'}</td>
+          <td><span className="badge">{m.role}</span></td>
+          <td>{m.source === 'position' ? 'From a post held' : 'Assigned'}</td>
+        </tr>)}
+        {(detail.members ?? []).length === 0 && <tr><td colSpan={4} className="hint">Nobody is posted here in addition to their own unit.</td></tr>}
       </tbody></table>
     </>}
 
@@ -2200,30 +2025,20 @@ export function Devices(){
 }
 
 // ---------------------------------------------------------------------------
-// People & Access  (merged module: everything about staff, users, positions,
-// the organogram, access control, and staff Excel import/export)
+// People & Access
 // ---------------------------------------------------------------------------
-// The Advanced Matrix used to sit beside Access Control as a second, rawer
-// place to decide the same thing — and the two could disagree. It is folded
-// into Access Control now: every area row there expands to the exact actions
-// its level allows, and the technical-authorization register and change
-// history it carried are panels on the same screen.
-const PEOPLE_TABS = ['Register New Staff', 'Personnel Register', 'Users & Access', 'Positions & Organogram', 'Access Control'] as const;
-type PeopleTab = typeof PEOPLE_TABS[number];
+// Four questions, four tabs — Logins, Staff, Positions and Access Control —
+// each answered in exactly one place. The tabs themselves live in
+// pages/settings/PeopleAccess.tsx; the Positions view stays here, beside the
+// organogram and the rank order it shares code with.
 
 export function PeopleAccess() {
-  const [tab, setTab] = useState<PeopleTab>('Register New Staff');
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>People &amp; Access</h2>
     </div>
-    <div className="tabs">{PEOPLE_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
-      {tab === 'Register New Staff' && <RegisterStaff />}
-      {tab === 'Personnel Register' && <PersonnelRegisterAdmin />}
-      {tab === 'Users & Access' && <UsersAccess />}
-      {tab === 'Positions & Organogram' && <Positions />}
-      {tab === 'Access Control' && <AccessControl />}
+      <PeopleAccessTabs positionsView={<Positions />} />
     </div>
   </div>;
 }

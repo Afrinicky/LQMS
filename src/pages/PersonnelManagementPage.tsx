@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
+import { requiresClinicalUnit } from '../../shared/constants/roles';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import PermissionTabs from '../components/PermissionTabs';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
@@ -18,7 +19,7 @@ import TrainingWorkspace from './personnel/TrainingWorkspace';
 import type {
   Section, Department, Staff, Position,
   StaffDeclaration, DutyRoster, EquipmentItem,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank, Role,
 } from '../../shared/types/api';
 import { isTimeLimited, PLACEMENT_GRACE_DAYS } from '../../shared/constants/personnel';
 import TextField from '../components/ui/TextField';
@@ -38,11 +39,10 @@ const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
 const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'];
 const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'];
 const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS LICENCE', 'OTHER'];
-const CADRES = ['Scientist', 'Technician', 'Assistant', 'Other'];
 const AVAILABILITY_STATUSES = ['available', 'on_leave', 'transferred', 'inactive', 'unavailable'];
 const emptyStaffForm = {
   employeeNo: '', surname: '', middleName: '', firstName: '', initials: '', dateOfBirth: '', gender: '',
-  designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
+  primaryRoleId: '', designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
   qualifications: '', sectionId: '', unit: '', personnelCategory: 'STAFF', appointmentType: 'FULL TIME',
   appointmentDate: '', placementEndDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '', emergencyContact: '', phone: '',
   email: '', staffFileLocation: '', positionId: '', cadre: '', professionalRank: '', availabilityStatus: 'available',
@@ -60,14 +60,16 @@ function useLookups() {
   const [sections, setSections] = useState<Section[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [primaryRoles, setPrimaryRoles] = useState<Role[]>([]);
   const reloadStaff = () => api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
   useEffect(() => {
     void reloadStaff();
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
     api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
+    api<Role[]>('/roles?kind=primary').then(setPrimaryRoles).catch(() => setPrimaryRoles([]));
   }, []);
-  return { staff, sections, departments, positions, reloadStaff };
+  return { staff, sections, departments, positions, primaryRoles, reloadStaff };
 }
 
 function staffName(staffList: Staff[], id?: number | null) {
@@ -84,7 +86,7 @@ export function PersonnelManagementPage() {
   // "manager", "head", "administrator" or "supervisor", so a custom role such
   // as "Bench Head" silently gained roster editing nobody had granted it.
   const canEditRosters = can('personnel.rosters', 'edit');
-  const { staff, sections, departments, positions, reloadStaff } = useLookups();
+  const { staff, sections, departments, positions, primaryRoles, reloadStaff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
 
@@ -146,6 +148,7 @@ export function PersonnelManagementPage() {
     setStaffForm({
       employeeNo: s.employeeNo ?? '', surname: s.surname ?? '', middleName: s.middleName ?? '', firstName: s.firstName ?? '',
       initials: s.initials ?? '', dateOfBirth: s.dateOfBirth ?? '', gender: s.gender ?? '', designation: s.designation ?? '',
+      primaryRoleId: s.primaryRoleId ? String(s.primaryRoleId) : '',
       jobTitle: s.jobTitle ?? '', professionalRegulator: s.professionalRegulator ?? '', professionalLicence: s.professionalLicence ?? '',
       licenceExpiryDate: s.licenceExpiryDate ?? '', qualifications: s.qualifications ?? '', sectionId: s.sectionId ? String(s.sectionId) : '',
       unit: s.unit ?? '', personnelCategory: s.personnelCategory ?? 'STAFF', appointmentType: s.appointmentType ?? 'FULL TIME',
@@ -313,14 +316,14 @@ export function PersonnelManagementPage() {
           </div>
         </div>
         {regResult && <Notice kind="success" style={{ marginTop: 4, marginBottom: 12 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated{typeof regResult.skipped === 'number' ? <>, <strong>{regResult.skipped}</strong> skipped</> : null}.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</Notice>}
-        <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Designation</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
-          {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit].some(v => v?.toLowerCase().includes(q)); }).map(s => {
+        <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Primary role</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
+          {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.primaryRole, s.primaryPosition, s.sectionName].some(v => v?.toLowerCase().includes(q)); }).map(s => {
             const today = new Date().toISOString().slice(0, 10);
             const licExpiringSoon = s.licenceExpiryDate && s.licenceExpiryDate <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && s.licenceExpiryDate >= today;
             const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
             return <tr key={s.id} {...focusAttr('staff', s.id)}>
               <td>{s.employeeNo || '—'}</td><td>{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</td>
-              <td>{s.designation || '—'}</td><td>{s.jobTitle || '—'}</td><td>{s.unit || (s.sectionId ? sections.find(x => x.id === s.sectionId)?.name : '') || '—'}</td>
+              <td>{s.primaryRole || s.designation || '—'}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || (s.sectionId ? sections.find(x => x.id === s.sectionId)?.name : '') || '—'}</td>
               <td>{s.personnelCategory ? <span className="badge">{s.personnelCategory}</span> : '—'}</td>
               <td>{s.professionalLicence || '—'}{licExpired && <span className="badge danger">expired</span>}{licExpiringSoon && <span className="badge warning">expiring</span>}</td>
               <td>{yearsBetween(s.appointmentDate)}</td>
@@ -344,9 +347,22 @@ export function PersonnelManagementPage() {
           <label>Initials<TextField value={staffForm.initials} onValue={nextValue => setStaffForm({ ...staffForm, initials: nextValue })} placeholder="auto" /></label>
           <label>Date of birth<input type="date" value={staffForm.dateOfBirth} onChange={e => setStaffForm({ ...staffForm, dateOfBirth: e.target.value })} /></label>
           <label>Gender<select value={staffForm.gender} onChange={e => setStaffForm({ ...staffForm, gender: e.target.value })}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
-          <label>Designation (grade)<TextField value={staffForm.designation} onValue={nextValue => setStaffForm({ ...staffForm, designation: nextValue })} placeholder="e.g. Principal Medical Lab Scientist" /></label>
-          <label>Position / role<TextField value={staffForm.jobTitle} onValue={nextValue => setStaffForm({ ...staffForm, jobTitle: nextValue })} placeholder="e.g. Biochemistry Unit Supervisor" /></label>
-          <label>Unit / Section<select value={staffForm.sectionId} onChange={e => setStaffForm({ ...staffForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          {/* The grade and the designation were two fields holding one fact.
+              One field now, from the fixed list, and the designation printed
+              on every personnel record follows it. */}
+          <label>Primary role
+            <select value={staffForm.primaryRoleId} onChange={e => setStaffForm({ ...staffForm, primaryRoleId: e.target.value })} required>
+              <option value="">—</option>
+              {primaryRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+          <label>Clinical unit
+            <select value={staffForm.sectionId} onChange={e => setStaffForm({ ...staffForm, sectionId: e.target.value })}
+              required={requiresClinicalUnit(primaryRoles.find(r => String(r.id) === staffForm.primaryRoleId)?.name)}>
+              <option value="">—</option>
+              {sections.filter(x => x.unitKind !== 'administrative').map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </label>
           <label>Professional regulator<TextField value={staffForm.professionalRegulator} onValue={nextValue => setStaffForm({ ...staffForm, professionalRegulator: nextValue })} placeholder="e.g. AHPC" /></label>
           <label>Professional licence no.<TextField value={staffForm.professionalLicence} onValue={nextValue => setStaffForm({ ...staffForm, professionalLicence: nextValue })} /></label>
           <label>Licence expiry<input type="date" value={staffForm.licenceExpiryDate} onChange={e => setStaffForm({ ...staffForm, licenceExpiryDate: e.target.value })} /></label>
@@ -368,8 +384,7 @@ export function PersonnelManagementPage() {
           <label>Contact phone<TextField value={staffForm.phone} onValue={nextValue => setStaffForm({ ...staffForm, phone: nextValue })} /></label>
           <label>Email<TextField type="email" value={staffForm.email} onValue={nextValue => setStaffForm({ ...staffForm, email: nextValue })} /></label>
           <label>Emergency contact<TextField value={staffForm.emergencyContact} onValue={nextValue => setStaffForm({ ...staffForm, emergencyContact: nextValue })} placeholder="e.g. Spouse - 0200000000" /></label>
-          <label>Cadre<select value={staffForm.cadre} onChange={e => setStaffForm({ ...staffForm, cadre: e.target.value })}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-          <label>Professional rank<select value={staffForm.professionalRank} onChange={e => setStaffForm({ ...staffForm, professionalRank: e.target.value })}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
+          <label>Professional rank<select value={staffForm.professionalRank} onChange={e => setStaffForm({ ...staffForm, professionalRank: e.target.value })}><option value="">Auto (from primary role)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
           <label>Availability<select value={staffForm.availabilityStatus} onChange={e => setStaffForm({ ...staffForm, availabilityStatus: e.target.value })}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Assign position<select value={staffForm.positionId} onChange={e => setStaffForm({ ...staffForm, positionId: e.target.value })}><option value="">— keep current —</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
           <label>Staff file location<TextField value={staffForm.staffFileLocation} onValue={nextValue => setStaffForm({ ...staffForm, staffFileLocation: nextValue })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>

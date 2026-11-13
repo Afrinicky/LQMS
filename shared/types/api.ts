@@ -109,6 +109,31 @@ export type SystemModule = { id: number; key: string; label: string; path: strin
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; isCore?: number; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null };
 
 /**
+ * A row in `roles`, in one of its two kinds.
+ *
+ * `primary` classifies a person — their grade, which is also their
+ * designation. `position` backs an appointment and is reached by mapping an
+ * organogram position to it; it is never offered as somebody's grade.
+ */
+export type RoleKind = 'primary' | 'position';
+export type Role = { id: number; name: string; description?: string | null; kind: RoleKind; isSystem?: number; isAdministrator?: number };
+
+/** Every unit one person belongs to, plus any they have been let into. */
+export type StaffUnits = {
+  clinical: { id: number; name: string } | null;
+  additional: Array<{ id: number; name: string; kind: 'clinical' | 'administrative'; role: string; source: string; isPseudo: number }>;
+  grants: Array<{ id: number; sectionId: number; sectionName: string; level: string; expiresAt: string | null; reason: string | null }>;
+};
+
+/** Permission for somebody to work in a unit that is not theirs. */
+export type UnitGrant = {
+  id: number; staffId: number; staffName: string;
+  sectionId: number; sectionName: string; unitKind: 'clinical' | 'administrative';
+  homeUnitName: string | null; level: string; reason: string | null;
+  startsAt: string; expiresAt: string | null; isActive: number; createdAt: string; grantedBy: string | null;
+};
+
+/**
  * ACCESS CONTROL — one model, two layers.
  *
  * An access profile is the single cohort decision: every user resolves to
@@ -154,7 +179,7 @@ export type EffectiveAccess = {
  * compiled `isActive === false` happily while matching nothing at runtime — a
  * retired person then kept every action a serving one has. Test it for truth.
  */
-export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: 0 | 1; sectionId?: number | null; sectionName?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null;
+export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: 0 | 1; sectionId?: number | null; sectionName?: string | null; unitKind?: 'clinical' | 'administrative' | null; primaryRoleId?: number | null; primaryRole?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null;
   surname?: string; middleName?: string; firstName?: string; initials?: string;
   dateOfBirth?: string; gender?: string; designation?: string; jobTitle?: string;
   professionalRegulator?: string; professionalLicence?: string; licenceExpiryDate?: string;
@@ -237,15 +262,25 @@ export type StaffProfile = { staff: { id: number; employee_no?: string; full_nam
 export type DashboardSummary = { documents: number; actionsOpen: number; staff: number; modulesEnabled: number; equipmentItems?: number; inventoryItems?: number; monitoringRecords?: number; safetyIncidents?: number; latestBackup?: string | null };
 export type QmsSummary = { openNCs: { count: number }; openCAPAs: { count: number }; pendingComplaints: { count: number }; highRisks: { count: number }; myAssignedActions: { count: number }; overdueActions: { count: number } };
 export type Permission = { id: number; module_key: string; action: string; label: string };
-export type Section = { id: number; name: string; department_id?: number };
+export type Section = { id: number; name: string; department_id?: number; unitKind?: 'clinical' | 'administrative'; isPseudo?: number };
 export type Location = { id: number; name: string; description?: string; is_active?: number };
-export type SectionConfigRow = { id: number; name: string; code?: string | null; description?: string | null; serviceSummary?: string | null; operatingHours?: string | null; departmentId?: number | null; departmentName?: string | null; headStaffId?: number | null; headStaffName?: string | null; isActive: number; servicesOffered: number; servicesNotOffered: number; testCount: number; equipmentCount: number; inventoryCount: number; staffCount: number };
+export type SectionConfigRow = { id: number; name: string; code?: string | null; description?: string | null; serviceSummary?: string | null; operatingHours?: string | null; departmentId?: number | null; departmentName?: string | null; headStaffId?: number | null; headStaffName?: string | null; isActive: number; servicesOffered: number; servicesNotOffered: number; testCount: number; equipmentCount: number; inventoryCount: number; staffCount: number;
+  unitKind?: 'clinical' | 'administrative'; isPseudo?: number; serviceModule?: string | null; headPositionId?: number | null; headPositionTitle?: string | null; memberCount?: number };
+
+/** What an administrative unit does, drawn from the module it belongs to. */
+export type UnitModuleServices = {
+  module: string | null; label: string | null; headPosition?: string;
+  links: Array<{ label: string; path: string }>;
+  metrics: Array<{ label: string; value: number }>;
+};
 export type SectionServiceRow = { id: number; name: string; category?: string | null; is_offered: number; notes?: string | null };
 export type SectionTestRow = { id: number; test_code?: string | null; test_name: string; sample_type?: string | null; method_name?: string | null; tat_target_minutes?: number | null; status: string; is_panel?: number; parent_test_id?: number | null; automation?: string | null; equipment_id?: number | null; equipment_name?: string | null };
 export type SectionEquipmentRow = { id: number; equipment_number: string; name: string; category?: string | null; equipment_class?: string | null; equipment_category?: string | null; equipment_archetype?: string | null; manufacturer?: string | null; model?: string | null; serial_number?: string | null; status: string };
 export type SectionInventoryRow = { id: number; item_code: string; name: string; category?: string | null; quantity: number; unit?: string | null; reorder_level: number; expiry_date?: string | null; status: string };
 export type SectionStaffRow = { id: number; full_name: string; employee_no?: string | null; is_active: number };
-export type SectionConfigDetail = { section: { id: number; name: string; code?: string | null; description?: string | null; service_summary?: string | null; operating_hours?: string | null; department_id?: number | null; department_name?: string | null; head_staff_id?: number | null; head_staff_name?: string | null; is_active: number }; services: SectionServiceRow[]; tests: SectionTestRow[]; equipment: SectionEquipmentRow[]; inventory: SectionInventoryRow[]; staff: SectionStaffRow[] };
+export type SectionConfigDetail = { section: { id: number; name: string; code?: string | null; description?: string | null; service_summary?: string | null; operating_hours?: string | null; department_id?: number | null; department_name?: string | null; head_staff_id?: number | null; head_staff_name?: string | null; is_active: number }; services: SectionServiceRow[]; tests: SectionTestRow[]; equipment: SectionEquipmentRow[]; inventory: SectionInventoryRow[]; staff: SectionStaffRow[];
+  /** People posted here in addition to their own unit. */
+  members?: Array<{ id: number; full_name: string; employee_no?: string | null; role: string; source: string; home_unit_name?: string | null }> };
 export type Department = { id: number; name: string; is_active?: number };
 export type Device = { id: number; device_code: string; name: string; type: string; status: string; paired_user_id?: number | null; last_seen_at?: string | null; created_at: string };
 export type NonconformingEvent = { id: number; nc_number: string; event_date: string; time_of_event?: string; detected_by_staff_id?: number; detected_by_name?: string; department_id?: number; section_id?: number; source_module?: string; source_record_id?: string; title: string; description?: string; category?: string; nc_type?: string; nc_type_other?: string; severity?: string; impact_level?: string; immediate_correction?: string; remedial_action?: string; patient_or_service_impact?: string; occurrence_score?: number; severity_score?: number; risk_score?: number; risk_level?: string; investigation_team?: string; root_cause?: string; rca_method?: string; corrective_action?: string; preventive_action?: string; capa_responsible_staff_id?: number; capa_timeline_date?: string; effectiveness_reviewed_by_staff_id?: number; effectiveness_review_date?: string; corrective_effective?: number; effectiveness_comments?: string; approved_by_staff_id?: number; approved_at?: string; approval_comments?: string; status: string; workflow_stage?: string; rca_required?: number; rca_evidence_file_id?: number; risk_assessed_by_staff_id?: number; risk_assessed_at?: string; risk_assessment_notes?: string; rca_completed_at?: string; reviewer_staff_id?: number; reviewed_at?: string; closure_notes?: string; closed_by_staff_id?: number; closed_at?: string; created_by:number; created_at:string; updated_at?:string };
