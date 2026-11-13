@@ -14,9 +14,11 @@ import type { Section, Staff, UnitGrant } from '../../../shared/types/api';
  * Permission to work in a unit that is not yours.
  *
  * The one control that reaches past "one person, one clinical unit", so it is
- * deliberate, attributable and listed in full. A grant widens WHERE somebody
- * works and never WHAT they may do: the level is capped at what their own
- * primary role already allows.
+ * deliberate, attributable and listed in full. The LEVEL decides what the
+ * holder may do in that unit — it is not capped at what their own grade
+ * allows elsewhere, because a grade is laboratory-wide and a grant that could
+ * not exceed it would grant nothing. They must still be able to view the
+ * area, and a right withdrawn from them individually stays withdrawn.
  */
 export default function UnitGrants() {
   const { can } = usePermissions();
@@ -30,7 +32,7 @@ export default function UnitGrants() {
   const load = () => {
     api<UnitGrant[]>('/unit-grants').then(setGrants).catch(e => setError(errorText(e)));
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
-    api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
+    api<Section[]>('/sections?kind=all').then(setSections).catch(() => setSections([]));
   };
   useEffect(() => { load(); }, []);
 
@@ -63,6 +65,7 @@ export default function UnitGrants() {
   return (
     <div className="card">
       <h3>Working in another unit</h3>
+      <p className="hint">The level decides what the holder may do in that unit. Full carries approval.</p>
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
 

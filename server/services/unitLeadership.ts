@@ -142,11 +142,30 @@ export function mayActOnUnit(
  * A deliberate exception: permission to work in a unit that is not theirs.
  *
  * A haematology scientist covering a biochemistry bench, granted by the
- * administrator or the Laboratory Manager under Access Control. The grant
- * widens WHERE somebody may work; it never widens WHAT they may do, because
- * the action still has to be one their own profile allows at the level the
- * grant names. A grant can therefore let a scientist run controls in another
- * unit, and can never let a technician do something a technician may not do.
+ * administrator or the Laboratory Manager under Access Control.
+ *
+ * WHAT THE LEVEL MEANS, exactly, because it is worth being blunt about. The
+ * grant's level decides what the holder may do IN THAT UNIT, read from the
+ * same level→action table the access profiles use. It is not capped at what
+ * their own profile allows, and it cannot be: a profile is laboratory-wide,
+ * so anything it already allows has been allowed by the first line of
+ * mayActOnUnit before this function is ever reached. A grant that could not
+ * exceed the profile would grant nothing at all.
+ *
+ * So a `manage` grant really does let its holder manage that area in that
+ * unit, whatever their grade — which is the point of granting it, and is the
+ * same shape as the leadership fallback below, where running a unit confers
+ * the work of running it. Two things still bound it, and neither can be
+ * undone from here:
+ *
+ *   · they must be able to VIEW the area at all. A grant cannot open a
+ *     workspace their profile closes;
+ *   · a right withdrawn from them individually in Access Control stays
+ *     withdrawn. That screen outranks everything.
+ *
+ * Grant `full` advisedly: it carries approval, and approving work is a
+ * statement about competence rather than about which bench somebody is
+ * standing at.
  */
 export function grantedInUnit(
   req: any,

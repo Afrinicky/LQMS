@@ -3155,11 +3155,27 @@ export function commonRoutes() {
    * user by `/sections/options` below, so the gate was protecting nothing and
    * costing the people who run the units the forms they run them with.
    */
-  // `unit_kind` travels with every unit list, because a form that asks for
-  // somebody's CLINICAL unit must not offer them the Quality Office.
-  router.get('/sections', requireAuth, (_req, res) => res.json(getDb().prepare(
-    `SELECT id, name, department_id, unit_kind AS unitKind, is_pseudo AS isPseudo
-     FROM sections WHERE is_active = 1 ORDER BY unit_kind, name`).all()));
+  /**
+   * The units, for anybody who has to name one.
+   *
+   * CLINICAL BY DEFAULT, and that default is the careful part. Every caller
+   * of this route is a clinical workflow — a test's section, a control's
+   * unit, a rejection, a piece of equipment — and until administrative units
+   * existed every section was a bench, so clinical-only is exactly the list
+   * all of them have always received. Returning the Quality Office here
+   * would let somebody file a test against an office that has no test menu.
+   *
+   * `?kind=all` is for the three screens that administer units themselves,
+   * and `?kind=administrative` for the offices alone.
+   */
+  router.get('/sections', requireAuth, (req, res) => {
+    const kind = String(req.query.kind ?? 'clinical');
+    const where = kind === 'all' ? '' : "AND IFNULL(unit_kind, 'clinical') = ?";
+    const sql = `SELECT id, name, department_id, unit_kind AS unitKind, is_pseudo AS isPseudo
+       FROM sections WHERE is_active = 1 ${where} ORDER BY unit_kind, name`;
+    const stmt = getDb().prepare(sql);
+    res.json(kind === 'all' ? stmt.all() : stmt.all(kind === 'administrative' ? 'administrative' : 'clinical'));
+  });
 
   /**
    * The units, for anybody who has to name one.
@@ -3186,9 +3202,17 @@ export function commonRoutes() {
     const staffId = getCurrentStaffId(req);
     const mine = staffId === null ? null
       : (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null;
-    const rows = db.prepare(`SELECT s.id, s.name, s.department_id, d.name AS department_name, s.head_staff_id
-        FROM sections s LEFT JOIN departments d ON d.id = s.department_id
-        WHERE s.is_active = 1 ORDER BY s.name`).all() as any[];
+    // Clinical by default, for the same reason as `/sections` above: every
+    // caller of this is bench work, and an office is not a bench.
+    const kind = String(req.query.kind ?? 'clinical');
+    const rows = (kind === 'all'
+      ? db.prepare(`SELECT s.id, s.name, s.department_id, d.name AS department_name, s.head_staff_id, s.unit_kind
+          FROM sections s LEFT JOIN departments d ON d.id = s.department_id
+          WHERE s.is_active = 1 ORDER BY s.unit_kind, s.name`).all()
+      : db.prepare(`SELECT s.id, s.name, s.department_id, d.name AS department_name, s.head_staff_id, s.unit_kind
+          FROM sections s LEFT JOIN departments d ON d.id = s.department_id
+          WHERE s.is_active = 1 AND IFNULL(s.unit_kind, 'clinical') = ? ORDER BY s.name`)
+        .all(kind === 'administrative' ? 'administrative' : 'clinical')) as any[];
     res.json({
       mine: mine === null ? null : Number(mine),
       // Whether the reader is accountable for their unit, which is what
@@ -3203,6 +3227,7 @@ export function commonRoutes() {
       sections: rows.map(r => ({
         id: r.id, name: r.name, department_id: r.department_id,
         departmentName: r.department_name ?? null,
+        unitKind: r.unit_kind ?? 'clinical',
         isMine: mine !== null && Number(r.id) === Number(mine),
       })),
     });

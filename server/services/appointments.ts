@@ -216,6 +216,19 @@ export function appoint(db: DB, input: {
           syncMemo: true,
         });
       } else {
+        /*
+         * The office changes hands too.
+         *
+         * The predecessor's APPOINTMENT ended above, but the membership that
+         * appointment created is a separate row, and leaving it behind is the
+         * same fault in a new place: the Quality Office would go on listing
+         * somebody who stopped running it, and their own record would go on
+         * saying they sat there. Only the membership the POST created is
+         * removed — anything the laboratory added by hand is its own
+         * decision and stays.
+         */
+        db.prepare(`DELETE FROM staff_unit_memberships
+            WHERE section_id = ? AND source = 'position' AND staff_id <> ?`).run(sectionId, staffId);
         addUnitMembership(db, { staffId, sectionId, role: 'head', source: 'position' });
       }
     }

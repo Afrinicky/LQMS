@@ -90,6 +90,26 @@ check('administrative membership removed', um.unitsForStaff(db, staffId).additio
 check('the office is vacant again', (db.prepare('SELECT head_staff_id AS h FROM sections WHERE id = ?').get(qualityOffice) as any).h, 'null');
 check('clinical unit still Microbiology', (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any).section_id, micro);
 
+console.log('\n— An office changes hands cleanly —');
+{
+  const successor = Number(db.prepare(
+    "INSERT INTO staff (full_name, designation, primary_role_id, section_id, is_active) VALUES ('KOJO ANNAN', 'Medical Laboratory Scientist', ?, ?, 1)",
+  ).run(mls, haem).lastInsertRowid);
+  const qmPost2 = (db.prepare("SELECT id FROM positions WHERE title = 'Quality Manager'").get() as any).id;
+  appt.appoint(db, { positionId: qmPost2, staffId, kind: 'holder' });
+  appt.appoint(db, { positionId: qmPost2, staffId: successor, kind: 'holder' });
+  const members = db.prepare('SELECT staff_id AS s FROM staff_unit_memberships WHERE section_id = ?').all(qualityOffice) as Array<{ s: number }>;
+  check('only the new holder sits in the office', members.map(m => m.s).join(','), String(successor));
+  check('and the office names them', (db.prepare('SELECT head_staff_id AS h FROM sections WHERE id = ?').get(qualityOffice) as any).h, successor);
+  appt.vacate(db, { positionId: qmPost2, staffId: successor });
+}
+
+console.log('\n— Clinical lookups do not offer the offices —');
+{
+  const clinical = db.prepare("SELECT COUNT(*) c FROM sections WHERE is_active = 1 AND IFNULL(unit_kind,'clinical') = 'clinical' AND name = 'Quality Office'").get() as any;
+  check('the Quality Office is not a clinical unit', clinical.c, 0);
+}
+
 console.log('\n— Cross-unit grant —');
 db.prepare("INSERT INTO staff_unit_grants (staff_id, section_id, level) VALUES (?, ?, 'contribute')").run(staffId, haem);
 check('grant level read back', um.unitGrantLevel(db, staffId, haem), 'contribute');

@@ -140,7 +140,7 @@ function CreateLogin({ onCreated }: { onCreated: () => void }) {
 
   useEffect(() => {
     api<Role[]>('/roles?kind=primary').then(setRoles).catch(() => setRoles([]));
-    api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
+    api<Section[]>('/sections?kind=all').then(setSections).catch(() => setSections([]));
     api<Staff[]>('/staff').then(all => setUnlinked(all.filter(s => !s.userId))).catch(() => setUnlinked([]));
   }, []);
 
@@ -373,7 +373,7 @@ function RegisterStaffForm({ onRegistered }: { onRegistered: () => void }) {
 
   useEffect(() => {
     api<Role[]>('/roles?kind=primary').then(setRoles).catch(() => setRoles([]));
-    api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
+    api<Section[]>('/sections?kind=all').then(setSections).catch(() => setSections([]));
     api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
   }, []);
 
