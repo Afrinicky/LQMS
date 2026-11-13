@@ -10,7 +10,7 @@ import UserAccountActions from '../../components/UserAccountActions';
 import PasswordResetApprovals from '../../components/PasswordResetApprovals';
 import TrainingRecordPanel from '../../components/training/TrainingRecordPanel';
 import { AccessControl } from '../AccessControl';
-import { MODULES } from '../../../shared/constants/modules';
+import { MODULES, PERMISSION_ACTIONS } from '../../../shared/constants/modules';
 import { requiresClinicalUnit } from '../../../shared/constants/roles';
 import { UNIT_GRANT_LEVEL_LABELS } from '../../../shared/constants/labUnits';
 import type {
@@ -36,21 +36,48 @@ import type {
  */
 
 type PeopleTab = 'Logins' | 'Staff' | 'Positions & Organogram' | 'Access Control';
-const PEOPLE_TABS: PeopleTab[] = ['Logins', 'Staff', 'Positions & Organogram', 'Access Control'];
+
+/**
+ * What each tab needs before it is drawn.
+ *
+ * A tab somebody cannot use is a tab they should not be offered: the API
+ * refuses the work either way, and a dead end is worse than an absence.
+ * Access Control takes `edit` rather than `view` because reading who can do
+ * what is itself a decision about the laboratory's access.
+ */
+type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
+const PEOPLE_TAB_RIGHTS: Array<{ tab: PeopleTab; key: string; action: PermissionAction }> = [
+  { tab: 'Logins', key: 'settings', action: 'view' },
+  { tab: 'Staff', key: 'personnel.register', action: 'view' },
+  { tab: 'Positions & Organogram', key: 'settings', action: 'view' },
+  { tab: 'Access Control', key: 'settings', action: 'edit' },
+];
 
 export default function PeopleAccess({ positionsView }: { positionsView: React.ReactNode }) {
+  const { can } = usePermissions();
+  const tabs = useMemo(
+    () => PEOPLE_TAB_RIGHTS.filter(t => can(t.key, t.action)).map(t => t.tab),
+    [can],
+  );
   const [tab, setTab] = useState<PeopleTab>('Logins');
+  // Whatever they may actually open, rather than whatever was open last.
+  const active = tabs.includes(tab) ? tab : tabs[0];
+
+  if (tabs.length === 0) {
+    return <div className="card"><p className="hint">You do not have permission to administer people or access.</p></div>;
+  }
+
   return (
     <div className="people-access">
       <div className="tabs" role="tablist" aria-label="People and access">
-        {PEOPLE_TABS.map(t => (
-          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>
+        {tabs.map(t => (
+          <button key={t} role="tab" aria-selected={active === t} className={active === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
-      {tab === 'Logins' && <LoginsTab />}
-      {tab === 'Staff' && <StaffTab />}
-      {tab === 'Positions & Organogram' && positionsView}
-      {tab === 'Access Control' && <AccessControl />}
+      {active === 'Logins' && <LoginsTab />}
+      {active === 'Staff' && <StaffTab />}
+      {active === 'Positions & Organogram' && positionsView}
+      {active === 'Access Control' && <AccessControl />}
     </div>
   );
 }
