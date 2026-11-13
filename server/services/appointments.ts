@@ -42,6 +42,7 @@
  * remains the authority on what that is worth.
  */
 import { parseIntNullable } from '../routes/routeHelpers.js';
+import { addUnitMembership, isClinicalUnit, removeUnitMembership, setClinicalUnit } from './unitMembership.js';
 
 type DB = any;
 
@@ -197,14 +198,25 @@ export function appoint(db: DB, input: {
       db.prepare('UPDATE sections SET head_staff_id = ? WHERE id = ?').run(staffId, sectionId);
 
       /*
-       * And the supervisor belongs to the unit they supervise.
+       * Where the post supervises a CLINICAL unit, the supervisor belongs to
+       * the unit they supervise. This is the other half of the rotation that
+       * went wrong: a supervisor moved to another unit kept her old unit on
+       * her staff record, which is what every unit-scoped screen reads to
+       * decide whose work she sees. Appointment is the authority here —
+       * nobody should have to go and edit the register afterwards.
        *
-       * This is the other half of the rotation that went wrong: a supervisor
-       * moved to another unit kept her old unit on her staff record, which is
-       * what every unit-scoped screen reads to decide whose work she sees.
+       * An ADMINISTRATIVE unit is different, and deliberately so. Heading the
+       * Quality Office does not stop somebody being a haematologist, so it
+       * adds a membership and leaves their clinical unit exactly where it is.
        */
-      if (Number(staff.section_id ?? 0) !== Number(sectionId)) {
-        db.prepare('UPDATE staff SET section_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(sectionId, staffId);
+      if (isClinicalUnit(db, sectionId)) {
+        setClinicalUnit(db, {
+          staffId, sectionId,
+          source: `appointment: ${position.title}`,
+          syncMemo: true,
+        });
+      } else {
+        addUnitMembership(db, { staffId, sectionId, role: 'head', source: 'position' });
       }
     }
   })();
@@ -251,6 +263,12 @@ export function vacate(db: DB, input: { positionId: unknown; staffId: unknown })
       if (Number(unit?.head_staff_id ?? 0) === Number(staffId)) {
         db.prepare('UPDATE sections SET head_staff_id = NULL WHERE id = ?').run(sectionId);
       }
+      // The membership an administrative appointment created goes with it.
+      // Their clinical unit is untouched, because it never moved in the first
+      // place; leaving the Quality Office on their record after they have
+      // stopped running it is exactly the kind of stale affiliation this
+      // whole module exists to prevent.
+      if (!isClinicalUnit(db, sectionId)) removeUnitMembership(db, staffId, sectionId);
     }
   })();
 

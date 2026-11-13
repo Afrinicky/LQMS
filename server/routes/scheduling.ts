@@ -10,6 +10,7 @@ import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { unitsLedByRequest, individuallyDenied, mayActOnUnit } from '../services/unitLeadership.js';
 import { recordModuleCommunication, recordDispatch, findModuleCommunication } from '../services/communicationService.js';
+import { applyMemoToRegister, activeMemo, currentMonth } from '../services/unitMembership.js';
 
 // ==========================================================================
 // Duty Roster & Scheduling
@@ -530,18 +531,27 @@ export function schedulingRoutes() {
   // member named on a row that is linked to a real unit/section (supervisor,
   // deputy and members) is moved to that section, so the rest of the system
   // reflects the new unit assignment.
-  function applyReassignmentToRegister(db: any, scheduleId: unknown) {
-    const rows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ? AND section_id IS NOT NULL').all(scheduleId) as any[];
-    const moved: number[] = [];
-    const setSection = db.prepare('UPDATE staff SET section_id = ?, unit = COALESCE((SELECT name FROM sections WHERE id = ?), unit), updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-    for (const r of rows) {
-      const ids = new Set<number>();
-      if (r.supervisor_staff_id) ids.add(Number(r.supervisor_staff_id));
-      if (r.deputy_staff_id) ids.add(Number(r.deputy_staff_id));
-      try { for (const m of JSON.parse(r.member_ids || '[]')) { const n = Number(m); if (Number.isFinite(n)) ids.add(n); } } catch { /* ignore */ }
-      for (const id of ids) { setSection.run(r.section_id, r.section_id, id); moved.push(id); }
-    }
-    return moved.length;
+  // The memo acting as the source of truth. It goes through the one writer in
+  // unitMembership, so moving somebody here also corrects the derived unit
+  // text on their record and leaves an audit entry saying where they came
+  // from — which is what was missing when a published memo moved people and
+  // their personnel files went on printing the unit they had left.
+  function applyReassignmentToRegister(db: any, scheduleId: unknown, actorUserId?: number | null) {
+    return applyMemoToRegister(db, scheduleId, actorUserId ?? null);
+  }
+
+  /**
+   * Edit the memo that is in force and the register follows at once.
+   *
+   * Only the CURRENT month's memo. A memo for a month that has passed is the
+   * record of what happened and must not rewrite where people are today; a
+   * memo for a month still to come is a plan, and takes effect when it is
+   * published or when its month arrives.
+   */
+  function applyMemoIfInForce(db: any, scheduleId: unknown, actorUserId: number | null) {
+    const inForce = activeMemo(db, currentMonth());
+    if (!inForce || Number(inForce.id) !== Number(scheduleId)) return;
+    applyMemoToRegister(db, scheduleId, actorUserId);
   }
   /**
    * The reassignment memo's dispatch, in both senses.
@@ -561,7 +571,7 @@ export function schedulingRoutes() {
     const schedule = db.prepare('SELECT * FROM reassignment_schedules WHERE id = ?').get(req.params.id) as any;
     if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
     db.prepare("UPDATE reassignment_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
-    const moved = applyReassignmentToRegister(db, req.params.id);
+    const moved = applyReassignmentToRegister(db, req.params.id, req.user?.id ?? null);
 
     const rows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ? ORDER BY display_order, id').all(req.params.id) as any[];
     const unitLines = rows.map(r => r.is_span
@@ -603,7 +613,7 @@ export function schedulingRoutes() {
   router.post('/reassignments/:id/apply-to-register', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
-    const moved = applyReassignmentToRegister(db, req.params.id);
+    const moved = applyReassignmentToRegister(db, req.params.id, req.user?.id ?? null);
     audit(req, { action: 'edit', entity: 'reassignment_schedules', entityId: req.params.id, newValue: { staffReassigned: moved } });
     res.json({ ok: true, staffReassigned: moved });
   });
@@ -624,6 +634,7 @@ export function schedulingRoutes() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(req.params.id, req.body.unitLabel, req.body.isSpan ? 1 : 0, sectionId, supervisorStaffId, supervisorText,
         parseIntNullable(req.body.deputyStaffId), req.body.deputyText || null, req.body.membersText || null, memberIds ? JSON.stringify(memberIds) : null, req.body.spanText || null, order);
+    applyMemoIfInForce(db, req.params.id, req.user?.id ?? null);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
   router.put('/reassignment-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
@@ -645,6 +656,7 @@ export function schedulingRoutes() {
         b.deputyStaffId !== undefined ? parseIntNullable(b.deputyStaffId) : ex.deputy_staff_id, b.deputyText !== undefined ? b.deputyText : ex.deputy_text,
         b.membersText !== undefined ? b.membersText : ex.members_text, memberIds, b.spanText !== undefined ? b.spanText : ex.span_text,
         parseIntNullable(b.displayOrder) ?? ex.display_order, req.params.rowId);
+    applyMemoIfInForce(db, ex.schedule_id, req.user?.id ?? null);
     res.json({ ok: true });
   });
   router.delete('/reassignment-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {

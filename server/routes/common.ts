@@ -4,7 +4,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
+import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, dbPath, configRoot, dataRoot, bumpAccessEpoch } from '../db/database.js';
 import { backupFolder } from '../services/backupDestinations.js';
 import { config, type AppMode } from '../config/index.js';
 import {
@@ -25,6 +25,14 @@ import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '..
 import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
 import { audit } from '../services/auditService.js';
 import { appoint, vacate } from '../services/appointments.js';
+import {
+  setClinicalUnit, addUnitMembership, removeUnitMembership, unitsForStaff,
+  countableUnits, UNIT_GRANT_LEVELS,
+} from '../services/unitMembership.js';
+import {
+  PRIMARY_ROLES, requiresClinicalUnit, cadreForPrimaryRole,
+} from '../../shared/constants/roles.js';
+import { adminUnitService } from '../../shared/constants/labUnits.js';
 import { mintViewTicket, VIEW_TICKET_MS } from '../services/viewTickets.js';
 import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
@@ -136,6 +144,14 @@ const STAFF_COLUMN_MAP: Array<[string, string]> = [
   ['email', 'email'], ['phone', 'phone'], ['staffFileLocation', 'staff_file_location'],
   ['cadre', 'cadre'], ['professionalRank', 'professional_rank'], ['availabilityStatus', 'availability_status'],
 ];
+// `unit` is deliberately NOT in that map, and neither is `section_id`.
+//
+// Both used to be writable from any request body, which is how a personnel
+// file came to print the unit somebody had left: the free-text `unit` was set
+// once at import and never updated, while `section_id` moved. The unit a
+// person belongs to is now set in exactly one place — setClinicalUnit() in
+// services/unitMembership.ts — and `unit` is derived from it.
+const DERIVED_STAFF_COLUMNS = ['unit', 'section_id'] as const;
 function cleanVal(v: unknown): string | null {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
@@ -160,9 +176,54 @@ function buildStaffColumns(body: Record<string, unknown>): Record<string, string
   if (!cols.initials) { const d = deriveInitials(first, middle, surname); if (d) cols.initials = d; }
   // Keep the other branch's `other_names` column in sync with middle names.
   if (middle) cols.other_names = middle;
-  if ('sectionId' in body) cols.section_id = idOrNull(body.sectionId);
   if ('isActive' in body) cols.is_active = body.isActive ? 1 : 0;
+  // The unit is applied separately, through the one writer, so that the memo,
+  // the derived unit text and the audit trail all move with it.
+  for (const derived of DERIVED_STAFF_COLUMNS) delete cols[derived];
   return cols;
+}
+
+/**
+ * The primary role a request is asking for, and whether the record may be
+ * saved without a clinical unit.
+ *
+ * A laboratory professional belongs to exactly one clinical unit; that is the
+ * rule the laboratory asked for and it is enforced on the way in rather than
+ * reported afterwards. Records that were already short of one are left alone
+ * and counted on the register instead, so nobody is locked out of correcting
+ * the rest of a record in order to fix a field they may not know yet.
+ */
+function resolvePrimaryRole(db: any, body: Record<string, unknown>, existingId?: number | null):
+  { id: number | null; name: string | null } {
+  if ('primaryRoleId' in body) {
+    const id = idOrNull(body.primaryRoleId);
+    if (!id) return { id: null, name: null };
+    const row = db.prepare("SELECT id, name FROM roles WHERE id = ? AND kind = 'primary'").get(id) as
+      { id: number; name: string } | undefined;
+    return row ? { id: row.id, name: row.name } : { id: null, name: null };
+  }
+  if (existingId) {
+    const row = db.prepare('SELECT r.id, r.name FROM staff s JOIN roles r ON r.id = s.primary_role_id WHERE s.id = ?')
+      .get(existingId) as { id: number; name: string } | undefined;
+    if (row) return { id: row.id, name: row.name };
+  }
+  return { id: null, name: null };
+}
+
+/**
+ * Apply the unit a request carries, through the one writer.
+ *
+ * Returns an error message when the unit cannot be given, so the caller can
+ * answer with it rather than saving half of what was asked for.
+ */
+function applyUnitFromBody(
+  db: any, staffId: number, body: Record<string, unknown>, actorUserId: number | null, source: string,
+): string | null {
+  if (!('sectionId' in body)) return null;
+  const outcome = setClinicalUnit(db, {
+    staffId, sectionId: idOrNull(body.sectionId), actorUserId, source,
+  });
+  return outcome.ok ? null : (outcome.error ?? 'That unit could not be applied.');
 }
 
 /**
@@ -631,7 +692,22 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem, is_administrator isAdministrator FROM roles ORDER BY name').all()));
+  /**
+   * The roles, in their two kinds.
+   *
+   * `?kind=primary` is what a staff record or a login offers: the short list
+   * of grades a person can BE. `?kind=position` is the profiles that back an
+   * appointment and are reached by mapping a position to one. Without the
+   * parameter the whole list comes back, which is what Access Control wants.
+   */
+  router.get('/roles', requirePermission('settings', 'view'), (req, res) => {
+    const kind = String(req.query.kind ?? '');
+    const where = kind === 'primary' || kind === 'position' ? 'WHERE kind = ?' : '';
+    const sql = `SELECT id, name, description, kind, is_system isSystem, is_administrator isAdministrator
+        FROM roles ${where} ORDER BY is_administrator DESC, name`;
+    const stmt = getDb().prepare(sql);
+    res.json(where ? stmt.all(kind) : stmt.all());
+  });
 
   // ── Access profiles ──────────────────────────────────────────────────────
   // A profile IS a role: one row, one cohort, the single thing that decides
@@ -646,8 +722,13 @@ export function commonRoutes() {
     if (db.prepare('SELECT id FROM roles WHERE LOWER(name) = LOWER(?)').get(name)) {
       return res.status(400).json({ error: 'An access profile with that name already exists.' });
     }
-    const r = db.prepare('INSERT INTO roles (name, description, is_system) VALUES (?, ?, 0)')
-      .run(name, String(req.body?.description ?? '').trim() || null);
+    // A new profile is a position profile unless it is explicitly a grade:
+    // the laboratory adds far more posts than it adds grades, and a grade
+    // appears in the primary-role picker, which is not somewhere to end up by
+    // accident.
+    const kind = req.body?.kind === 'primary' ? 'primary' : 'position';
+    const r = db.prepare('INSERT INTO roles (name, description, is_system, kind) VALUES (?, ?, 0, ?)')
+      .run(name, String(req.body?.description ?? '').trim() || null, kind);
     // A new profile starts with nothing granted, stated explicitly rather than
     // left blank, so it reads as "no access" everywhere until somebody decides
     // otherwise. Least privilege is the default, not an omission.
@@ -655,8 +736,8 @@ export function commonRoutes() {
     for (const p of db.prepare('SELECT id FROM permissions').all() as { id: number }[]) {
       db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 0, ?)').run(id, p.id, 'Access profile');
     }
-    audit(req, { action: 'create', entity: 'roles', entityId: id, newValue: { name } });
-    res.status(201).json({ id, name });
+    audit(req, { action: 'create', entity: 'roles', entityId: id, newValue: { name, kind } });
+    res.status(201).json({ id, name, kind });
   });
 
   router.put('/roles/:id', requirePermission('settings', 'edit'), (req, res) => {
@@ -667,8 +748,15 @@ export function commonRoutes() {
     if (!name) return res.status(400).json({ error: 'A name is required.' });
     const clash = db.prepare('SELECT id FROM roles WHERE LOWER(name) = LOWER(?) AND id != ?').get(name, existing.id);
     if (clash) return res.status(400).json({ error: 'Another access profile already has that name.' });
-    db.prepare('UPDATE roles SET name = ?, description = ? WHERE id = ?')
-      .run(name, req.body?.description ?? null, existing.id);
+    const row = existing as { id: number; name: string; kind?: string; is_administrator?: number };
+    let kind = row.kind ?? 'position';
+    if (req.body?.kind === 'primary' || req.body?.kind === 'position') {
+      // The administrator is a grade and stays one: demoting it to a position
+      // profile would take it out of the picker that assigns it.
+      kind = Number(row.is_administrator ?? 0) === 1 ? 'primary' : req.body.kind;
+    }
+    db.prepare('UPDATE roles SET name = ?, description = ?, kind = ? WHERE id = ?')
+      .run(name, req.body?.description ?? null, kind, existing.id);
     audit(req, { action: 'edit', entity: 'roles', entityId: existing.id, oldValue: existing, newValue: { name, description: req.body?.description ?? null } });
     res.json({ ok: true });
   });
@@ -684,6 +772,8 @@ export function commonRoutes() {
     if (accounts.n > 0) return res.status(400).json({ error: `${accounts.n} account(s) still work under this profile. Move them to another one first.` });
     const positions = db.prepare('SELECT COUNT(*) AS n FROM positions WHERE access_profile_role_id = ?').get(existing.id) as { n: number };
     if (positions.n > 0) return res.status(400).json({ error: `${positions.n} organogram position(s) are mapped to this profile. Unmap them first.` });
+    const classified = db.prepare('SELECT COUNT(*) AS n FROM staff WHERE primary_role_id = ?').get(existing.id) as { n: number };
+    if (classified.n > 0) return res.status(400).json({ error: `${classified.n} staff member(s) hold this primary role. Move them to another one first.` });
     db.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(existing.id);
     db.prepare('DELETE FROM roles WHERE id = ?').run(existing.id);
     audit(req, { action: 'delete', entity: 'roles', entityId: existing.id, oldValue: existing });
@@ -691,19 +781,89 @@ export function commonRoutes() {
   });
 
   router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, s.full_name staffName, r.name roleName, u.is_active isActive, u.must_change_password mustChangePassword FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
+  /**
+   * Create a login — and the person it belongs to.
+   *
+   * A login and a staff record are two views of one person, so this makes
+   * both. Either an existing record is named and linked, or the details given
+   * here open one: the same name, employee number, contact details, primary
+   * role and unit that the personnel register asks for, so nobody has to type
+   * them twice and the two cannot disagree from the first day.
+   *
+   * The role on the account IS the person's primary role. That is the merge
+   * the laboratory asked for: one field, one value, on the register and on
+   * the login alike.
+   */
   router.post('/users', requirePermission('settings', 'create'), (req, res) => {
-    const { username, password, fullName, roleId } = req.body;
     const db = getDb();
-    const staffId = idOrNull(req.body.staffId);
-    if (!username || !String(username).trim()) return res.status(400).json({ error: 'A username is required.' });
-    if (!password || String(password).length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required.' });
-    if (!roleId) return res.status(400).json({ error: 'A role is required.' });
-    if (db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username)) return res.status(400).json({ error: 'That username is already in use.' });
-    if (staffId && db.prepare('SELECT id, username FROM users WHERE staff_id = ?').get(staffId)) return res.status(400).json({ error: 'That staff record is already linked to another user.' });
-    const oldValue = null;
-    const result = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, Number(roleId), staffId);
-    audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, oldValue, newValue: { username, fullName, roleId, staffId } });
-    res.status(201).json({ id: result.lastInsertRowid });
+    const body = req.body ?? {};
+    const username = String(body.username ?? '').trim();
+    const password = String(body.password ?? '');
+    const fullName = String(body.fullName ?? '').trim();
+    const roleId = idOrNull(body.roleId);
+    let staffId = idOrNull(body.staffId);
+
+    if (!username) return res.status(400).json({ error: 'A username is required.' });
+    if (password.length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required.' });
+    if (!fullName) return res.status(400).json({ error: 'A full name is required.' });
+    if (!roleId) return res.status(400).json({ error: 'A primary role is required.' });
+    if (db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username)) {
+      return res.status(400).json({ error: 'That username is already in use.' });
+    }
+    const role = db.prepare('SELECT id, name, kind FROM roles WHERE id = ?').get(roleId) as
+      { id: number; name: string; kind: string } | undefined;
+    if (!role) return res.status(400).json({ error: 'That primary role no longer exists.' });
+    if (role.kind !== 'primary') {
+      return res.status(400).json({ error: `${role.name} is a position profile, not a primary role. It is given by appointing somebody to the post.` });
+    }
+    if (staffId) {
+      if (!db.prepare('SELECT id FROM staff WHERE id = ?').get(staffId)) return res.status(400).json({ error: 'That staff record is not on the register.' });
+      if (db.prepare('SELECT id FROM users WHERE staff_id = ?').get(staffId)) return res.status(400).json({ error: 'That staff record is already linked to another login.' });
+    }
+
+    const sectionId = idOrNull(body.sectionId);
+    if (!staffId && requiresClinicalUnit(role.name) && !sectionId) {
+      return res.status(400).json({ error: `A ${role.name} must belong to a clinical unit.` });
+    }
+
+    try {
+      const out = db.transaction(() => {
+        // No record named: this login opens one. Everything the register needs
+        // is collected here, so the personnel file is complete from the start.
+        if (!staffId) {
+          const employeeNo = String(body.employeeNo ?? '').trim() || null;
+          if (employeeNo && db.prepare('SELECT id FROM staff WHERE employee_no = ?').get(employeeNo)) {
+            throw new Error('That employee number is already on the register.');
+          }
+          const created = db.prepare(`INSERT INTO staff
+              (employee_no, full_name, first_name, surname, email, phone, designation, primary_role_id, cadre)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(employeeNo, fullName,
+              String(body.firstName ?? '').trim() || null, String(body.surname ?? '').trim() || null,
+              String(body.email ?? '').trim() || null, String(body.phone ?? '').trim() || null,
+              role.name, role.id, cadreForPrimaryRole(role.name));
+          staffId = Number(created.lastInsertRowid);
+          const placed = setClinicalUnit(db, { staffId, sectionId, actorUserId: req.user?.id ?? null, source: 'login creation' });
+          if (!placed.ok) throw new Error(placed.error ?? 'That unit could not be applied.');
+          audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { fullName, employeeNo, primaryRole: role.name, sectionId } });
+        } else {
+          // An existing record keeps its own details; only the grade is
+          // brought into line, because the account and the record must not
+          // disagree about what somebody is.
+          db.prepare('UPDATE staff SET primary_role_id = ?, designation = ?, cadre = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(role.id, role.name, cadreForPrimaryRole(role.name), staffId);
+        }
+
+        const result = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)')
+          .run(username, bcrypt.hashSync(password, 12), fullName, role.id, staffId);
+        const userId = Number(result.lastInsertRowid);
+        audit(req, { action: 'create', entity: 'users', entityId: userId, newValue: { username, fullName, roleId: role.id, staffId } });
+        return { id: userId, staffId };
+      })();
+      res.status(201).json(out);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'That login could not be created.' });
+    }
   });
   // Edits an account: which staff record it belongs to, the name it signs with,
   // and the role it holds. The role is the one that moves someone between
@@ -743,8 +903,14 @@ export function commonRoutes() {
     if ('roleId' in body) {
       const roleId = idOrNull(body.roleId);
       if (!roleId) return res.status(400).json({ error: 'A role is required.' });
-      const role = db.prepare('SELECT id, name FROM roles WHERE id = ?').get(roleId) as { id: number; name: string } | undefined;
+      const role = db.prepare('SELECT id, name, kind FROM roles WHERE id = ?').get(roleId) as { id: number; name: string; kind: string } | undefined;
       if (!role) return res.status(400).json({ error: 'That role no longer exists.' });
+      // Only a grade can be given to an account. A position profile is held by
+      // being appointed to the post, which is the whole point of separating
+      // the two — handing one out here would put the old confusion straight back.
+      if (role.kind !== 'primary') {
+        return res.status(400).json({ error: `${role.name} is a position profile, not a primary role. Appoint them to the post instead.` });
+      }
       if (roleId !== current.roleId) {
         // A laboratory that has locked itself out of its own settings cannot be
         // repaired from inside the application, so the last administrator is
@@ -766,6 +932,15 @@ export function commonRoutes() {
     // rather than at some unpredictable point mid-shift.
     if (changed.roleId !== undefined) {
       db.prepare('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(current.id);
+      // The grade on the account and the grade on the register are one value.
+      const staffId = ('staffId' in changed ? changed.staffId : current.staffId) as number | null;
+      if (staffId) {
+        const grade = db.prepare('SELECT name FROM roles WHERE id = ?').get(changed.roleId) as { name: string } | undefined;
+        if (grade) {
+          db.prepare('UPDATE staff SET primary_role_id = ?, designation = ?, cadre = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(changed.roleId, grade.name, cadreForPrimaryRole(grade.name), staffId);
+        }
+      }
     }
     audit(req, {
       action: changed.roleId !== undefined ? 'change_role' : 'link_staff',
@@ -1631,12 +1806,16 @@ export function commonRoutes() {
     if (!resolvePermission(req.user!.id, 'personnel.register', 'view').allowed) {
       return res.json(getDb().prepare(`
         SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.section_id sectionId,
-          sec.name sectionName, s.job_title jobTitle, s.designation, s.is_active isActive
-        FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id
+          sec.name sectionName, sec.unit_kind unitKind, s.job_title jobTitle, s.designation,
+          s.primary_role_id primaryRoleId, pr.name primaryRole, s.is_active isActive
+        FROM staff s
+        LEFT JOIN sections sec ON sec.id = s.section_id
+        LEFT JOIN roles pr ON pr.id = s.primary_role_id
         WHERE s.is_active = 1 ORDER BY s.full_name`).all());
     }
     return res.json(getDb().prepare(`
-    SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.email, s.phone, s.section_id sectionId, sec.name sectionName, s.is_active isActive,
+    SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.email, s.phone, s.section_id sectionId, sec.name sectionName,
+      sec.unit_kind unitKind, s.primary_role_id primaryRoleId, pr.name primaryRole, s.is_active isActive,
       s.surname, s.middle_name middleName, s.first_name firstName, s.initials, s.date_of_birth dateOfBirth, s.gender,
       s.designation, s.job_title jobTitle, s.professional_regulator professionalRegulator, s.professional_licence professionalLicence,
       s.licence_expiry_date licenceExpiryDate, s.qualifications, s.unit, s.personnel_category personnelCategory,
@@ -1650,6 +1829,7 @@ export function commonRoutes() {
       u.id userId, u.username, r.name roleName, u.is_active userActive
     FROM staff s
     LEFT JOIN sections sec ON sec.id = s.section_id
+    LEFT JOIN roles pr ON pr.id = s.primary_role_id
     LEFT JOIN users u ON u.staff_id = s.id
     LEFT JOIN roles r ON r.id = u.role_id
     WHERE ${activeFilter}
@@ -1674,16 +1854,36 @@ export function commonRoutes() {
   });
 
   router.post('/staff', requirePermission('personnel.register', 'create'), (req, res) => {
+    const db = getDb();
     const cols = buildStaffColumns(req.body);
     clearEndDateWhenPermanent(cols);
     if (!cols.full_name) return res.status(400).json({ error: 'A full name (or first name + surname) is required.' });
+
+    // One mandatory classification, and — for a laboratory professional — one
+    // clinical unit. Both are checked before anything is written, so a refusal
+    // never leaves a half-made record behind.
+    const primaryRole = resolvePrimaryRole(db, req.body);
+    if (!primaryRole.id) return res.status(400).json({ error: 'A primary role is required.' });
+    if (requiresClinicalUnit(primaryRole.name) && !idOrNull(req.body.sectionId)) {
+      return res.status(400).json({ error: `A ${primaryRole.name} must belong to a clinical unit.` });
+    }
+    cols.primary_role_id = primaryRole.id;
+    cols.designation = primaryRole.name;
+    const cadre = cadreForPrimaryRole(primaryRole.name);
+    if (cadre) cols.cadre = cadre;
+
     const keys = Object.keys(cols);
-    const r = getDb().prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
+    const r = db.prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
+    const unitError = applyUnitFromBody(db, Number(r.lastInsertRowid), req.body, req.user?.id ?? null, 'staff registration');
+    if (unitError) {
+      db.prepare('DELETE FROM staff WHERE id = ?').run(r.lastInsertRowid);
+      return res.status(400).json({ error: unitError });
+    }
     // An initial post is an appointment like any other, so it is made the same
     // way — the post's existing holder stands down, and a unit it supervises
     // changes hands with it.
     if (idOrNull(req.body.positionId)) {
-      appoint(getDb(), { positionId: idOrNull(req.body.positionId), staffId: Number(r.lastInsertRowid), kind: 'holder' });
+      appoint(db, { positionId: idOrNull(req.body.positionId), staffId: Number(r.lastInsertRowid), kind: 'holder' });
     }
     audit(req, { action: 'create', entity: 'staff', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
@@ -1718,9 +1918,50 @@ export function commonRoutes() {
       cols.placement_notice_at = null;
       cols.placement_closed_at = null;
     }
+    /*
+     * The primary role, and the clinical unit that must go with it.
+     *
+     * Changing somebody's grade changes their designation and their cadre
+     * too, because those are now the same fact written three ways rather than
+     * three facts that could disagree. A grade that requires a clinical unit
+     * cannot be set on a record that has none and is not being given one.
+     */
+    const db = getDb();
+    if (mayEditRegister && 'primaryRoleId' in req.body) {
+      const primaryRole = resolvePrimaryRole(db, req.body, Number(req.params.id));
+      if (!primaryRole.id) return res.status(400).json({ error: 'A primary role is required.' });
+      const unitAfter = 'sectionId' in req.body ? idOrNull(req.body.sectionId) : ((existing as any).section_id ?? null);
+      if (requiresClinicalUnit(primaryRole.name) && !unitAfter) {
+        return res.status(400).json({ error: `A ${primaryRole.name} must belong to a clinical unit.` });
+      }
+      cols.primary_role_id = primaryRole.id;
+      cols.designation = primaryRole.name;
+      const cadre = cadreForPrimaryRole(primaryRole.name);
+      if (cadre) cols.cadre = cadre;
+    }
+
     const keys = Object.keys(cols);
     if (keys.length) {
-      getDb().prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), req.params.id);
+      db.prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), req.params.id);
+    }
+
+    // The unit goes through the one writer, which also corrects the derived
+    // unit text and keeps this month's reassignment memo in step.
+    if (mayEditRegister) {
+      const unitError = applyUnitFromBody(db, Number(req.params.id), req.body, req.user?.id ?? null, 'personnel register');
+      if (unitError) return res.status(400).json({ error: unitError });
+    }
+
+    // An account linked to this person works under their grade, so a change of
+    // grade carries to the login and ends the sessions it was granted under.
+    if (cols.primary_role_id) {
+      const account = db.prepare(`SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+          WHERE u.staff_id = ? AND r.is_administrator = 0 AND r.kind = 'primary' AND u.role_id <> ?`)
+        .get(req.params.id, cols.primary_role_id) as { id: number } | undefined;
+      if (account) {
+        db.prepare('UPDATE users SET role_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(cols.primary_role_id, account.id);
+        db.prepare('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(account.id);
+      }
     }
     /*
      * A post is NOT changed here.
@@ -1748,28 +1989,48 @@ export function commonRoutes() {
   // Access, Positions & Organogram, the Permission Matrix and Personnel Management.
   router.post('/staff/register', requirePermission('personnel.register', 'create'), (req, res) => {
     const db = getDb();
-    const { firstName, surname, otherNames, employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations } = req.body as {
+    const { firstName, surname, otherNames, employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, primaryRoleId, authorizations } = req.body as {
       firstName?: string; surname?: string; otherNames?: string;
       employeeNo?: string; fullName?: string; email?: string; phone?: string; sectionId?: number | string | null;
       positionIds?: Array<number | string>; primaryPositionId?: number | string | null;
-      createUser?: boolean; username?: string; password?: string; roleId?: number | string;
+      createUser?: boolean; username?: string; password?: string; primaryRoleId?: number | string;
       authorizations?: Array<{ moduleKey: string; sectionId?: number | string | null; level: string }>;
     };
     const composedName = composeFullName(firstName, surname, otherNames, fullName);
     if (!composedName) return res.status(400).json({ error: 'A staff name is required (first name and surname, or full name).' });
+
+    // One mandatory grade, and the clinical unit it requires. The login, if
+    // one is asked for, works under the same grade — they are one value.
+    const gradeId = idOrNull(primaryRoleId);
+    if (!gradeId) return res.status(400).json({ error: 'A primary role is required.' });
+    const grade = db.prepare("SELECT id, name FROM roles WHERE id = ? AND kind = 'primary'").get(gradeId) as
+      { id: number; name: string } | undefined;
+    if (!grade) return res.status(400).json({ error: 'That primary role no longer exists.' });
+    if (requiresClinicalUnit(grade.name) && !idOrNull(sectionId)) {
+      return res.status(400).json({ error: `A ${grade.name} must belong to a clinical unit.` });
+    }
     if (createUser) {
       if (!username || !String(username).trim()) return res.status(400).json({ error: 'A username is required to create a login account.' });
       if (!password || String(password).length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required to create a login account.' });
-      if (!roleId) return res.status(400).json({ error: 'A role is required to create a login account.' });
       const taken = db.prepare('SELECT id FROM users WHERE username = ?').get(String(username));
       if (taken) return res.status(400).json({ error: 'That username is already in use.' });
     }
     try {
       const out = db.transaction(() => {
-        const staffResult = db.prepare('INSERT INTO staff (employee_no, full_name, first_name, surname, other_names, email, phone, section_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(employeeNo || null, composedName, (firstName || '').trim() || null, (surname || '').trim() || null, (otherNames || '').trim() || null, email || null, phone || null, idOrNull(sectionId));
+        const staffResult = db.prepare(`INSERT INTO staff
+            (employee_no, full_name, first_name, surname, other_names, email, phone, designation, primary_role_id, cadre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(employeeNo || null, composedName, (firstName || '').trim() || null, (surname || '').trim() || null,
+            (otherNames || '').trim() || null, email || null, phone || null,
+            grade.name, grade.id, cadreForPrimaryRole(grade.name));
         const staffId = Number(staffResult.lastInsertRowid);
-        audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { employeeNo, fullName: composedName, email, phone, sectionId } });
+        // The unit goes through the one writer, so the derived unit text and
+        // this month's reassignment memo move with it.
+        const placed = setClinicalUnit(db, {
+          staffId, sectionId: idOrNull(sectionId), actorUserId: req.user?.id ?? null, source: 'staff registration',
+        });
+        if (!placed.ok) throw new Error(placed.error ?? 'That unit could not be applied.');
+        audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { employeeNo, fullName: composedName, email, phone, sectionId, primaryRole: grade.name } });
 
         /*
          * The posts this person is being appointed to.
@@ -1791,11 +2052,11 @@ export function commonRoutes() {
         let userId: number | null = null;
         if (createUser) {
           const userResult = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)')
-            .run(String(username), bcrypt.hashSync(String(password), 12), String(fullName).trim(), Number(roleId), staffId);
+            .run(String(username), bcrypt.hashSync(String(password), 12), composedName, grade.id, staffId);
           userId = Number(userResult.lastInsertRowid);
           db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .run('settings', 'users', String(userId), 'personnel', 'staff', String(staffId), 'Login account linked to staff record at registration');
-          audit(req, { action: 'create', entity: 'users', entityId: userId, newValue: { username, fullName, roleId, staffId } });
+          audit(req, { action: 'create', entity: 'users', entityId: userId, newValue: { username, fullName: composedName, roleId: grade.id, staffId } });
 
           // Registration no longer sets raw permission flags. It used to carry
           // its own action grid, which was a third place access could be
@@ -1918,6 +2179,170 @@ export function commonRoutes() {
    * holder into a post somebody already holds, which is why it goes through
    * the register like everything else.
    */
+  /* ======================================================================
+     Unit membership — the clinical unit, the administrative ones, and the
+     deliberate exceptions.
+     ====================================================================== */
+
+  /** Every unit one person belongs to or may work in. */
+  router.get('/staff/:id/units', requirePermission('personnel.self', 'view'), (req, res) => {
+    if (Number(req.params.id) !== Number(req.user?.staffId ?? -1)
+      && !resolvePermission(req.user!.id, 'personnel.register', 'view').allowed) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    res.json(unitsForStaff(getDb(), req.params.id));
+  });
+
+  /**
+   * Move somebody to a clinical unit.
+   *
+   * The register, Settings and the reassignment memo all end up here, which
+   * is what stops the three of them disagreeing.
+   */
+  router.put('/staff/:id/unit', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const outcome = setClinicalUnit(getDb(), {
+      staffId: req.params.id,
+      sectionId: req.body?.sectionId ?? null,
+      actorUserId: req.user?.id ?? null,
+      reason: req.body?.reason ?? null,
+      source: 'unit change',
+    });
+    if (!outcome.ok) return res.status(outcome.status ?? 400).json({ error: outcome.error });
+    res.json({
+      ok: true, changed: outcome.changed,
+      note: outcome.changed && outcome.previousSectionName
+        ? `Moved from ${outcome.previousSectionName} to ${outcome.sectionName ?? 'no unit'}.`
+        : undefined,
+    });
+  });
+
+  /** An additional unit — in practice an administrative one. */
+  router.post('/staff/:id/units', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const outcome = addUnitMembership(getDb(), {
+      staffId: req.params.id, sectionId: req.body?.sectionId,
+      role: req.body?.role, source: 'manual', actorUserId: req.user?.id ?? null,
+    });
+    if (!outcome.ok) return res.status(outcome.status ?? 400).json({ error: outcome.error });
+    audit(req, { action: 'edit', entity: 'staff_unit_memberships', entityId: Number(req.params.id), newValue: req.body });
+    res.status(201).json({ ok: true });
+  });
+
+  router.delete('/staff/:id/units/:sectionId', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const db = getDb();
+    // A membership the appointment created is ended by ending the
+    // appointment, not by deleting it here — otherwise the Quality Manager
+    // stops being in the Quality Office while still being the Quality Manager.
+    const row = db.prepare('SELECT source FROM staff_unit_memberships WHERE staff_id = ? AND section_id = ?')
+      .get(req.params.id, req.params.sectionId) as { source: string } | undefined;
+    if (!row) return res.status(404).json({ error: 'They are not a member of that unit.' });
+    if (row.source === 'position') {
+      return res.status(400).json({ error: 'This membership comes from the post they hold. End the appointment to remove it.' });
+    }
+    removeUnitMembership(db, req.params.id, req.params.sectionId);
+    audit(req, { action: 'delete', entity: 'staff_unit_memberships', entityId: Number(req.params.id), oldValue: { sectionId: req.params.sectionId } });
+    res.json({ ok: true });
+  });
+
+  /* ======================================================================
+     Working in a unit you do not belong to
+     ====================================================================== */
+
+  /**
+   * Every cross-unit permission in force, for the Access Control screen.
+   *
+   * These are deliberate exceptions and are meant to be read at a glance:
+   * who, where, at what level, until when, and who granted it.
+   */
+  router.get('/unit-grants', requirePermission('settings', 'view'), (_req, res) => {
+    res.json(getDb().prepare(`SELECT g.id, g.staff_id staffId, s.full_name staffName,
+        g.section_id sectionId, sec.name sectionName, sec.unit_kind unitKind,
+        own.name homeUnitName, g.level, g.reason, g.starts_at startsAt, g.expires_at expiresAt,
+        g.is_active isActive, g.created_at createdAt, u.username grantedBy
+      FROM staff_unit_grants g
+      JOIN staff s ON s.id = g.staff_id
+      JOIN sections sec ON sec.id = g.section_id
+      LEFT JOIN sections own ON own.id = s.section_id
+      LEFT JOIN users u ON u.id = g.granted_by
+      WHERE g.is_active = 1 AND g.revoked_at IS NULL
+      ORDER BY s.full_name, sec.name`).all());
+  });
+
+  /**
+   * Grant somebody permission to work in another unit.
+   *
+   * Reserved to the administrator and the Laboratory Manager: this is the one
+   * control that reaches past the "one person, one unit" rule, so it is not
+   * something a unit supervisor can do for their own unit.
+   *
+   * It widens WHERE a person may work, never WHAT they may do — the resolver
+   * caps the grant at their own profile, so nobody acquires a right here that
+   * their grade does not already carry.
+   */
+  router.post('/unit-grants', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const staffId = idOrNull(req.body?.staffId);
+    const sectionId = idOrNull(req.body?.sectionId);
+    const level = String(req.body?.level ?? 'contribute');
+    if (!staffId || !sectionId) return res.status(400).json({ error: 'Say who may work in which unit.' });
+    if (!(UNIT_GRANT_LEVELS as readonly string[]).includes(level)) {
+      return res.status(400).json({ error: 'Choose an access level for the grant.' });
+    }
+    const staff = db.prepare('SELECT id, full_name fullName, section_id sectionId FROM staff WHERE id = ?').get(staffId) as
+      { id: number; fullName: string; sectionId: number | null } | undefined;
+    if (!staff) return res.status(404).json({ error: 'That member of staff is not on the register.' });
+    const section = db.prepare('SELECT id, name FROM sections WHERE id = ?').get(sectionId) as { id: number; name: string } | undefined;
+    if (!section) return res.status(404).json({ error: 'That unit is not on the register.' });
+    if (Number(staff.sectionId ?? 0) === sectionId) {
+      return res.status(400).json({ error: `${section.name} is already their own unit.` });
+    }
+    const member = db.prepare('SELECT id FROM staff_unit_memberships WHERE staff_id = ? AND section_id = ?').get(staffId, sectionId);
+    if (member) return res.status(400).json({ error: `They already belong to ${section.name}.` });
+
+    db.prepare(`INSERT INTO staff_unit_grants (staff_id, section_id, level, reason, expires_at, granted_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(staff_id, section_id) DO UPDATE SET
+          level = excluded.level, reason = excluded.reason, expires_at = excluded.expires_at,
+          granted_by = excluded.granted_by, is_active = 1, revoked_at = NULL, revoked_by = NULL,
+          starts_at = CURRENT_TIMESTAMP`)
+      .run(staffId, sectionId, level, String(req.body?.reason ?? '').trim() || null,
+        String(req.body?.expiresAt ?? '').trim() || null, req.user?.id ?? null);
+    bumpAccessEpoch();
+    audit(req, { action: 'create', entity: 'staff_unit_grants', entityId: staffId, newValue: { sectionId, level, expiresAt: req.body?.expiresAt ?? null } });
+    res.status(201).json({ ok: true });
+  });
+
+  router.delete('/unit-grants/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const grant = db.prepare('SELECT * FROM staff_unit_grants WHERE id = ?').get(req.params.id);
+    if (!grant) return res.status(404).json({ error: 'That grant is not in force.' });
+    db.prepare('UPDATE staff_unit_grants SET is_active = 0, revoked_at = CURRENT_TIMESTAMP, revoked_by = ? WHERE id = ?')
+      .run(req.user?.id ?? null, req.params.id);
+    bumpAccessEpoch();
+    audit(req, { action: 'delete', entity: 'staff_unit_grants', entityId: Number(req.params.id), oldValue: grant });
+    res.json({ ok: true });
+  });
+
+  /**
+   * Staff who are short of the clinical unit their grade requires.
+   *
+   * Existing records are not blocked — somebody correcting a phone number
+   * should not be stopped by a field they may not know the answer to — so the
+   * register names them instead and the laboratory works through the list.
+   */
+  router.get('/staff/unit-gaps', requirePermission('personnel.register', 'view'), (_req, res) => {
+    const names = PRIMARY_ROLES.filter(r => r.bench).map(r => r.name);
+    const placeholders = names.map(() => '?').join(', ');
+    res.json(getDb().prepare(`SELECT s.id, s.full_name fullName, s.employee_no employeeNo, r.name primaryRole
+      FROM staff s JOIN roles r ON r.id = s.primary_role_id
+      WHERE s.is_active = 1 AND s.section_id IS NULL AND r.name IN (${placeholders})
+      ORDER BY s.full_name`).all(...names));
+  });
+
+  /** The laboratory's units for anything that counts them, pseudo units excluded. */
+  router.get('/units/countable', requirePermission('settings', 'view'), (_req, res) => {
+    res.json(countableUnits(getDb()));
+  });
+
   router.post('/staff/:id/positions', requirePermission('personnel.register', 'edit'), (req, res) => {
     const outcome = appoint(getDb(), {
       positionId: req.body?.positionId,
@@ -2771,6 +3196,9 @@ export function commonRoutes() {
     res.json(getDb().prepare(`
       SELECT s.id, s.name, s.code, s.description, s.service_summary AS serviceSummary, s.operating_hours AS operatingHours,
         s.department_id AS departmentId, d.name AS departmentName, s.head_staff_id AS headStaffId, hs.full_name AS headStaffName, s.is_active AS isActive,
+        s.unit_kind AS unitKind, s.is_pseudo AS isPseudo, s.service_module AS serviceModule,
+        s.head_position_id AS headPositionId, hp.title AS headPositionTitle,
+        (SELECT COUNT(*) FROM staff_unit_memberships m WHERE m.section_id = s.id) AS memberCount,
         (SELECT COUNT(*) FROM section_services ss WHERE ss.section_id = s.id AND ss.is_offered = 1) AS servicesOffered,
         (SELECT COUNT(*) FROM section_services ss WHERE ss.section_id = s.id AND ss.is_offered = 0) AS servicesNotOffered,
         (SELECT COUNT(*) FROM lab_test_catalog t WHERE t.section_id = s.id) AS testCount,
@@ -2780,7 +3208,8 @@ export function commonRoutes() {
       FROM sections s
       LEFT JOIN departments d ON d.id = s.department_id
       LEFT JOIN staff hs ON hs.id = s.head_staff_id
-      ORDER BY s.is_active DESC, s.name`).all());
+      LEFT JOIN positions hp ON hp.id = s.head_position_id
+      ORDER BY s.is_active DESC, s.unit_kind, s.name`).all());
   });
 
   router.post('/section-config/sections', requirePermission('settings', 'create'), (req, res) => {
@@ -2793,8 +3222,17 @@ export function commonRoutes() {
       // post, in the appointment register. Accepting one here would be a
       // second place that decides who runs a unit, which is the fault being
       // removed.
-      const r = db.prepare('INSERT INTO sections (department_id, name, code, description, service_summary, operating_hours, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)')
-        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null);
+      // A unit is clinical unless it is said to be otherwise, and an
+      // administrative unit is a pseudo unit unless the laboratory says it has
+      // a real one — which is the common case either way.
+      const unitKind = req.body.unitKind === 'administrative' ? 'administrative' : 'clinical';
+      const isPseudo = unitKind === 'administrative' ? (req.body.isPseudo === false ? 0 : 1) : 0;
+      const serviceModule = unitKind === 'administrative' ? (String(req.body.serviceModule ?? '').trim() || null) : null;
+      const r = db.prepare(`INSERT INTO sections
+          (department_id, name, code, description, service_summary, operating_hours, unit_kind, is_pseudo, service_module, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null,
+          unitKind, isPseudo, serviceModule);
       audit(req, { action: 'create', entity: 'sections', entityId: Number(r.lastInsertRowid), newValue: req.body });
       res.status(201).json({
         id: Number(r.lastInsertRowid),
@@ -2821,14 +3259,54 @@ export function commonRoutes() {
      * the register last wrote.
      */
     const headIgnored = req.body.headStaffId !== undefined;
-    db.prepare('UPDATE sections SET name = ?, code = ?, description = ?, service_summary = ?, operating_hours = ?, department_id = ?, head_staff_id = head_staff_id WHERE id = ?')
-      .run(req.body.name ?? (oldValue as any).name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null, req.body.operatingHours ?? null, idOrNull(req.body.departmentId) ?? (oldValue as any).department_id, req.params.id);
+    const prev = oldValue as any;
+
+    /*
+     * What kind of unit this is.
+     *
+     * An administrative unit has no test menu and no clinical services: it
+     * draws what it shows from the module it belongs to, so the Stores shows
+     * stock and the Quality Office shows documents. Re-classifying a unit that
+     * already holds clinical content does not delete any of it — the rows stay
+     * exactly where they are and come back if the unit is made clinical again.
+     * Nothing a laboratory recorded is ever thrown away by a change of label.
+     */
+    const unitKind = req.body.unitKind === 'administrative' ? 'administrative'
+      : req.body.unitKind === 'clinical' ? 'clinical' : (prev.unit_kind ?? 'clinical');
+    const isPseudo = unitKind === 'clinical' ? 0
+      : req.body.isPseudo === undefined ? (prev.is_pseudo ?? 1) : (req.body.isPseudo ? 1 : 0);
+    const serviceModule = unitKind === 'clinical' ? null
+      : req.body.serviceModule === undefined ? (prev.service_module ?? null) : (String(req.body.serviceModule ?? '').trim() || null);
+
+    // Somebody's clinical unit cannot become an administrative one underneath
+    // them: that would leave laboratory professionals with no clinical unit at
+    // all, which is the rule this release exists to hold.
+    if (unitKind === 'administrative' && prev.unit_kind !== 'administrative') {
+      const held = db.prepare('SELECT COUNT(*) AS n FROM staff WHERE section_id = ? AND is_active = 1').get(req.params.id) as { n: number };
+      if (held.n > 0) {
+        return res.status(400).json({
+          error: `${held.n} member(s) of staff have this as their clinical unit. Move them to another clinical unit first.`,
+        });
+      }
+    }
+
+    db.prepare(`UPDATE sections SET name = ?, code = ?, description = ?, service_summary = ?, operating_hours = ?,
+        department_id = ?, unit_kind = ?, is_pseudo = ?, service_module = ?, head_staff_id = head_staff_id WHERE id = ?`)
+      .run(req.body.name ?? prev.name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null,
+        req.body.operatingHours ?? null, idOrNull(req.body.departmentId) ?? prev.department_id,
+        unitKind, isPseudo, serviceModule, req.params.id);
     audit(req, { action: 'edit', entity: 'sections', entityId: req.params.id, oldValue, newValue: req.body });
+
+    const hidden = unitKind === 'administrative' && prev.unit_kind !== 'administrative'
+      ? (db.prepare('SELECT COUNT(*) AS n FROM lab_test_catalog WHERE section_id = ?').get(req.params.id) as { n: number }).n
+      : 0;
     res.json({
       ok: true,
       note: headIgnored
         ? 'The unit was saved. Who runs it follows the appointment to its supervising post — change that under Settings → People & Access → Positions & Organogram → Appointments.'
-        : undefined,
+        : hidden > 0
+          ? `The unit was saved. Its ${hidden} test(s) are kept but no longer shown, and return if it is made clinical again.`
+          : undefined,
     });
   });
 
@@ -2877,7 +3355,79 @@ export function commonRoutes() {
     const equipment = db.prepare('SELECT id, equipment_number, name, category, equipment_class, equipment_category, equipment_archetype, manufacturer, model, serial_number, status FROM equipment_items WHERE section_id = ? ORDER BY name').all(req.params.id);
     const inventory = db.prepare('SELECT id, item_code, name, category, quantity, unit, reorder_level, expiry_date, status FROM inventory_items WHERE section_id = ? ORDER BY name').all(req.params.id);
     const staff = db.prepare('SELECT id, full_name, employee_no, is_active FROM staff WHERE section_id = ? ORDER BY is_active DESC, full_name').all(req.params.id);
-    res.json({ section, services, tests, equipment, inventory, staff });
+    // The people who sit in this unit as an additional posting — the Quality
+    // Manager in the Quality Office, who is a haematologist by grade.
+    const members = db.prepare(`SELECT s.id, s.full_name, s.employee_no, m.role, m.source,
+        own.name AS home_unit_name
+      FROM staff_unit_memberships m
+      JOIN staff s ON s.id = m.staff_id
+      LEFT JOIN sections own ON own.id = s.section_id
+      WHERE m.section_id = ? AND s.is_active = 1 ORDER BY s.full_name`).all(req.params.id);
+    const isAdministrative = (section as any).unit_kind === 'administrative';
+    res.json({
+      section, services,
+      // An administrative unit has no test menu. The rows are not deleted —
+      // they are simply not part of what this kind of unit is.
+      tests: isAdministrative ? [] : tests,
+      equipment, inventory, staff, members,
+    });
+  });
+
+  /**
+   * What an administrative unit actually does, drawn from its module.
+   *
+   * An office has no test menu, so showing it one is noise. The Stores shows
+   * stock, the Quality Office shows documents and nonconformities, the front
+   * desk shows complaints and feedback — counted live, with a way through to
+   * the module where the work is done. One unit, one place to look.
+   */
+  router.get('/section-config/sections/:id/module-services', requirePermission('settings', 'view'), (req, res) => {
+    const db = getDb();
+    const section = db.prepare('SELECT id, name, unit_kind AS unitKind, service_module AS serviceModule FROM sections WHERE id = ?')
+      .get(req.params.id) as { id: number; name: string; unitKind: string; serviceModule: string | null } | undefined;
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    if (section.unitKind !== 'administrative') return res.json({ module: null, label: null, links: [], metrics: [] });
+
+    const service = adminUnitService(section.serviceModule);
+    if (!service) return res.json({ module: section.serviceModule, label: null, links: [], metrics: [] });
+
+    // Each count is wrapped: a module a laboratory has never switched on has
+    // no tables to count, and one missing figure must not take the page down.
+    const count = (sql: string, ...params: unknown[]): number | null => {
+      try { return Number((db.prepare(sql).get(...params) as { c: number }).c); } catch { return null; }
+    };
+    const metricsByModule: Record<string, Array<{ label: string; value: number | null }>> = {
+      documents: [
+        { label: 'Controlled documents', value: count('SELECT COUNT(*) c FROM laboratory_documents') },
+        { label: 'Open nonconformities', value: count("SELECT COUNT(*) c FROM nonconforming_events WHERE status <> 'Closed'") },
+        { label: 'Open CAPAs', value: count("SELECT COUNT(*) c FROM capa_records WHERE status <> 'Closed'") },
+      ],
+      supplier_inventory: [
+        { label: 'Stock items', value: count('SELECT COUNT(*) c FROM inventory_items') },
+        { label: 'At or below reorder level', value: count('SELECT COUNT(*) c FROM inventory_items WHERE quantity <= reorder_level') },
+        { label: 'Suppliers', value: count('SELECT COUNT(*) c FROM suppliers') },
+      ],
+      customer_focus: [
+        { label: 'Open complaints', value: count("SELECT COUNT(*) c FROM complaints WHERE status <> 'Closed'") },
+        { label: 'Feedback received', value: count('SELECT COUNT(*) c FROM customer_feedback') },
+      ],
+      facilities_safety: [
+        { label: 'Open safety incidents', value: count("SELECT COUNT(*) c FROM safety_incidents WHERE status <> 'Closed'") },
+        { label: 'Risks on the register', value: count('SELECT COUNT(*) c FROM risks') },
+      ],
+      poct: [
+        { label: 'POCT devices', value: count('SELECT COUNT(*) c FROM poct_devices') },
+        { label: 'POCT sites', value: count('SELECT COUNT(*) c FROM poct_sites') },
+      ],
+    };
+
+    res.json({
+      module: service.module,
+      label: service.label,
+      headPosition: service.headPosition,
+      links: service.links,
+      metrics: (metricsByModule[service.module] ?? []).filter(m => m.value !== null),
+    });
   });
 
   // --- Services (what the unit does / does not do) ---

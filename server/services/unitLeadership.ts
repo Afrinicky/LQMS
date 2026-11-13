@@ -24,9 +24,10 @@
  *     here may quietly outrank it.
  */
 import { getDb } from '../db/database.js';
-import { getFeature } from '../../shared/constants/features.js';
+import { getFeature, LEVEL_ACTIONS } from '../../shared/constants/features.js';
 import { resolvePermission, BASE_ACTION } from './permissionResolver.js';
 import { parseIntNullable } from '../routes/routeHelpers.js';
+import { unitGrantLevel } from './unitMembership.js';
 
 export type LedUnit = { id: number; name: string; acting: boolean };
 
@@ -129,7 +130,36 @@ export function mayActOnUnit(
   const userId = req?.user?.id;
   if (!userId) return false;
   if (resolvePermission(userId, permKey, action).allowed) return true;
+  if (!individuallyDenied(userId, permKey, action)
+    && resolvePermission(userId, permKey, BASE_ACTION).allowed
+    && grantedInUnit(req, permKey, action, sectionId)) return true;
   if (!leadsUnit(req, sectionId)) return false;
   if (!resolvePermission(userId, permKey, BASE_ACTION).allowed) return false;
   return !individuallyDenied(userId, permKey, action);
+}
+
+/**
+ * A deliberate exception: permission to work in a unit that is not theirs.
+ *
+ * A haematology scientist covering a biochemistry bench, granted by the
+ * administrator or the Laboratory Manager under Access Control. The grant
+ * widens WHERE somebody may work; it never widens WHAT they may do, because
+ * the action still has to be one their own profile allows at the level the
+ * grant names. A grant can therefore let a scientist run controls in another
+ * unit, and can never let a technician do something a technician may not do.
+ */
+export function grantedInUnit(
+  req: any,
+  permKey: string,
+  action: string,
+  sectionId: number | null | undefined,
+): boolean {
+  const staffId = req?.user?.staffId;
+  if (!staffId || !sectionId) return false;
+  const level = unitGrantLevel(getDb(), staffId, sectionId);
+  if (!level) return false;
+  // The grant's level says which actions it carries, read from the same
+  // level→action table the access profiles use, so "contribute" means the
+  // same thing here as it does everywhere else.
+  return (LEVEL_ACTIONS[level] ?? []).includes(action);
 }
