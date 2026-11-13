@@ -43,6 +43,7 @@ import { SignatureRequiredError } from '../../server/services/signatureService.j
 import { PRODUCT, PRODUCT_LONG } from './brand.js';
 import { translisRoutes } from './routes.js';
 import { seedTransLis, setupComplete } from './seed.js';
+import { listenHost, listenPort } from './network.js';
 import { startTransLisServices } from './services.js';
 
 /** Where the built TransLis renderer lives, when there is one. */
@@ -102,28 +103,13 @@ export function createTransLisServer() {
   return app;
 }
 
-/**
- * Where this host listens.
- *
- * In direct mode the software is standing on the analyser's own PC and nobody
- * else has any business reaching it, so loopback is right and is the default.
- * A laboratory running it on the network sets the address deliberately.
- */
-export function listenHost(): string {
-  return process.env.TRANSLIS_HOST ?? '127.0.0.1';
-}
-
-export function listenPort(): number {
-  const port = Number(process.env.TRANSLIS_PORT);
-  return Number.isFinite(port) && port > 0 ? port : 4330;
-}
-
 if (import.meta.url === `file://${process.argv[1]}`) {
   const host = listenHost();
   const port = listenPort();
   createTransLisServer().listen(port, host, () => {
     console.log(`[translis] ${PRODUCT_LONG}`);
-    console.log(`[translis] listening on http://${host}:${port}`);
+    console.log(`[translis] listening on http://${host}:${port}`
+      + (host === '127.0.0.1' ? ' (this computer only)' : ' (reachable from the network)'));
     startTransLisServices(getDb);
   });
 }

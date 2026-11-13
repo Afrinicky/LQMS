@@ -19,7 +19,7 @@ import {
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
 import LiveTransmission from '../components/instruments/LiveTransmission';
-import { PRODUCT } from '../constants/product';
+import { IS_STANDALONE_MIDDLEWARE, PRODUCT } from '../constants/product';
 import { withProduct } from '../../shared/constants/product';
 
 /**
@@ -310,8 +310,14 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
           {overview.failing > 0 && <OverviewStat label="Failing" value={overview.failing} tone="crit" />}
           <OverviewStat label="Messages today" value={overview.messagesToday}
             note={overview.lastMessageAt ? `last at ${String(overview.lastMessageAt).slice(11, 16)}` : 'nothing yet today'} />
-          <OverviewStat label="Controls on the bench" value={overview.controlsWaiting}
-            tone={overview.controlsWaiting ? 'warn' : undefined} note="waiting to be accepted in IQC" />
+          {/* Controls waiting on the IQC bench. Only where there IS an IQC
+              bench: the standalone middleware receives control runs but has no
+              quality control module to accept them into, and a count pointing
+              at a screen that does not exist is worse than no count. */}
+          {!IS_STANDALONE_MIDDLEWARE && (
+            <OverviewStat label="Controls on the bench" value={overview.controlsWaiting}
+              tone={overview.controlsWaiting ? 'warn' : undefined} note="waiting to be accepted in IQC" />
+          )}
           {overview.forwardPending > 0 && <OverviewStat label="Waiting for LHIMS" value={overview.forwardPending} tone="warn" />}
           {overview.forwardFailed > 0 && <OverviewStat label="LHIMS refused" value={overview.forwardFailed} tone="crit" />}
         </div>

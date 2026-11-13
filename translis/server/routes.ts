@@ -17,6 +17,7 @@ import { isAdministrator } from '../../server/middleware/administrator.js';
 import { ADMIN_PROFILE, MODE_BLURB, MODE_LABEL, PRODUCT, PRODUCT_LONG, STAFF_PROFILE } from './brand.js';
 import { createFirstAdministrator, seedTransLis, setupComplete } from './seed.js';
 import { getSettings, purgeDue, purgeExpired, saveSettings } from './settings.js';
+import { listenHost, listenPort } from './network.js';
 
 /** Only an administrator configures this installation. */
 const admin = requirePermission('settings', 'edit');
@@ -36,7 +37,7 @@ function checkUsername(username: unknown): string {
   return value;
 }
 
-export function translisRoutes(): Router {
+export function translisRoutes() {
   const router = Router();
 
   /* ----------------------------------------------------------------- setup */
@@ -87,10 +88,23 @@ export function translisRoutes(): Router {
    */
   router.get('/settings', requireAuth, (_req, res) => {
     const db = getDb();
+    const settings = getSettings(db);
+    // What the host is bound to NOW, against what the stored mode asks for.
+    // They differ between changing the mode and restarting, and a screen that
+    // showed only the setting would be telling somebody the analysers can
+    // reach this computer when they cannot yet.
+    const boundTo = listenHost();
     res.json({
-      ...getSettings(db),
+      ...settings,
       modes: (['lan', 'direct'] as const).map(key => ({ key, label: MODE_LABEL[key], blurb: MODE_BLURB[key] })),
       retention: purgeDue(db),
+      network: {
+        boundTo,
+        port: listenPort(),
+        reachableFromNetwork: boundTo !== '127.0.0.1',
+        /** True when the mode has been changed and the host has not restarted. */
+        restartNeeded: (settings.mode === 'lan') !== (boundTo !== '127.0.0.1'),
+      },
     });
   });
 

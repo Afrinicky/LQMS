@@ -43,5 +43,7 @@ local-data/
 # committed by a `git add -A` that happened to run while it was mid-flight.
 .tmp-access-cache-check/
 
-# TransLis renderer build output
+# TransLis build output
 dist-translis/
+dist-translis-electron/
+release-translis/

@@ -229,6 +229,25 @@ function Mode() {
         Changing this changes what Analyser Sync &amp; Interfacing offers. It does not alter a link
         that is already configured, and it stops nothing that is running.
       </p>
+
+      {/* The mode also decides what this computer answers on, and that part
+          cannot change until it restarts. Saying so is the difference between
+          a site that works and a site whose analysers quietly reach nothing. */}
+      <div className="cx-rows" style={{ marginTop: 10 }}>
+        <Row label="Answering on">
+          <code>{installation.network.boundTo}:{installation.network.port}</code>
+          {' '}
+          {installation.network.reachableFromNetwork
+            ? '— reachable from the laboratory network'
+            : '— this computer only'}
+        </Row>
+      </div>
+      {installation.network.restartNeeded && (
+        <Notice kind="warn">
+          Close and reopen TransLis for this to take effect. Until then it is still answering on{' '}
+          <code>{installation.network.boundTo}</code>.
+        </Notice>
+      )}
     </div>
 
     <div className="card">

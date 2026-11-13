@@ -20,6 +20,13 @@ export type Installation = {
   lisName: string;
   modes: ModeOption[];
   retention: { overdue: number; retentionDays: number; oldest: string | null };
+  network: {
+    boundTo: string;
+    port: number;
+    reachableFromNetwork: boolean;
+    /** The mode has been changed and the host has not been restarted yet. */
+    restartNeeded: boolean;
+  };
 };
 
 type Value = {

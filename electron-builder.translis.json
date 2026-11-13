@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.nickland.translis",
+  "productName": "TransLis",
+  "copyright": "Nickland",
+  "directories": {
+    "output": "release-translis",
+    "buildResources": "build-resources/translis"
+  },
+  "files": [
+    "dist-translis/**/*",
+    "dist-translis-electron/**/*",
+    "server/**/*.{js,ts,json}",
+    "shared/**/*.{js,ts,json}",
+    "translis/extension/**/*",
+    "package.json",
+    "!**/*.test.*",
+    "!**/__tests__/**"
+  ],
+  "extraMetadata": {
+    "name": "translis",
+    "productName": "TransLis",
+    "main": "dist-translis-electron/translis/electron/main.js"
+  },
+  "npmRebuild": true,
+  "publish": null,
+  "asarUnpack": [
+    "node_modules/better-sqlite3/**/*",
+    "dist-translis/**/*"
+  ],
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "artifactName": "TransLis-${version}-Setup.exe"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "TransLis"
+  }
+}
