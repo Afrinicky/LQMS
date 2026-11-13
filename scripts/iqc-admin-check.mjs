@@ -1,3 +1,4 @@
+import { makePostHolder } from './lib/people.mjs';
 /**
  * Correcting the control record.
  *
@@ -42,7 +43,10 @@ const REASON = 'Corrected against the analyser printout during the monthly QC re
 const roles = (await j('/roles', { token: A })).json;
 const qmRole = roles.find(r => /quality manager/i.test(r.name));
 const qmName = `qm_${stamp}`;
-await j('/users', { token: A, method: 'POST', body: { username: qmName, password: PW, fullName: 'Akosua Boateng', roleId: qmRole.id } });
+// Quality Manager is a POSITION profile: an account cannot simply be given
+// it, so the profile is conferred the way the laboratory confers it — by
+// appointing the person to the post.
+await makePostHolder(j, A, { username: qmName, password: PW, fullName: 'Akosua Boateng', titleMatch: /^quality manager$/i });
 await j('/permissions/level', { token: A, method: 'POST', body: { scope: 'role', subjectId: qmRole.id, permKey: 'iqc', level: 'full' } });
 const Q = (await j('/auth/login', { method: 'POST', body: { username: qmName, password: PW } })).json?.token;
 

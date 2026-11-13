@@ -10,6 +10,7 @@
  *   node scripts/iqc-io-check.mjs
  */
 import * as XLSX from 'xlsx';
+import { benchRole, makeUser } from './lib/people.mjs';
 
 const BASE = process.env.API || 'http://127.0.0.1:4430/api';
 const PW = 'Passw0rd!test';
@@ -307,12 +308,11 @@ check('the printed record states the period it covers',
 /* ------------------------------------------------------- 10. who may do this */
 console.log('\n[10] Import and export obey the same rights as the screen');
 
-const roles = (await j('/roles', { token: A })).json;
-const bioRole = roles.find(r => /biomedical/i.test(r.name)) ?? roles.find(r => /technician/i.test(r.name));
+const bioRole = await benchRole(j, A, /scientist/i);
 const bio = `iqcio_bio_${stamp}`;
-const made = await j('/users', { token: A, method: 'POST', body: {
+const made = await makeUser(j, A, {
   username: bio, password: PW, fullName: 'Kofi Mensah', roleId: bioRole.id, email: `${bio}@lab.test`,
-} });
+});
 check('a bench account is created for the test', made.status === 201 || made.status === 200, JSON.stringify(made.json));
 const B = (await j('/auth/login', { method: 'POST', body: { username: bio, password: PW } })).json?.token;
 

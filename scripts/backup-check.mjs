@@ -18,6 +18,7 @@
  *   npx tsx scripts/backup-check.mjs
  */
 import { nextRunAfter, backupsToKeep, normaliseSchedule, describeSchedule, mostRecentDue } from '../shared/constants/backup.ts';
+import { makeUser, makePostHolder } from './lib/people.mjs';
 
 const BASE = process.env.API || 'http://127.0.0.1:4433/api';
 const PW = 'Passw0rd!test';
@@ -273,9 +274,8 @@ check('and the folder is unchanged', (await j('/backup/folder', { token: A })).j
 console.log('\n[8] Backups are the whole database, so the rights match');
 
 const roles = (await j('/roles', { token: A })).json;
-const techRole = roles.find(r => /technician/i.test(r.name));
 const tech = `bk_tech_${stamp}`;
-await j('/users', { token: A, method: 'POST', body: { username: tech, password: PW, fullName: 'Kwesi Owusu', roleId: techRole.id } });
+await makeUser(j, A, { username: tech, password: PW, fullName: 'Kwesi Owusu' });
 const T = (await j('/auth/login', { method: 'POST', body: { username: tech, password: PW } })).json?.token;
 
 const perm = async (p, token, method = 'GET', body) => (await j(p, { token, method, body })).status;
@@ -292,7 +292,8 @@ check('and cannot download a backup', await perm(`/backup/download/${encodeURICo
 // laboratory's data somewhere new or destroy backups.
 const qmRole = roles.find(r => /quality manager/i.test(r.name));
 const qm = `bk_qm_${stamp}`;
-await j('/users', { token: A, method: 'POST', body: { username: qm, password: PW, fullName: 'Ama Darko', roleId: qmRole.id } });
+// The manager's profile comes from the post they hold, not from the account.
+await makePostHolder(j, A, { username: qm, password: PW, fullName: 'Ama Darko', titleMatch: /^quality manager$/i });
 await j('/permissions/level', { token: A, method: 'POST', body: { scope: 'role', subjectId: qmRole.id, permKey: 'settings', level: 'manage' } });
 const Q = (await j('/auth/login', { method: 'POST', body: { username: qm, password: PW } })).json?.token;
 check('a manager with settings rights can read the status', await perm('/backup/status', Q) === 200);

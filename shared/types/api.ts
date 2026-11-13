@@ -106,7 +106,7 @@ export type PermissionMap = Record<string, string[]>;
  */
 export type LedUnit = { id: number; name: string; acting: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
-export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; isCore?: number; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null };
+export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; isCore?: number; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null; supervisesSectionId?: number | null };
 
 /**
  * A row in `roles`, in one of its two kinds.

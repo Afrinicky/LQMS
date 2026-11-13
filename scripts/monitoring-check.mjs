@@ -22,6 +22,8 @@
  * The checks that need an entry to be a day old age the row directly, so they
  * run only when DB points at the database the API is using.
  */
+import { benchRole } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4490/api';
 const DB_PATH = process.env.DB || null;
 const PW = 'Passw0rd!test';
@@ -71,12 +73,11 @@ const unit = (await j('/section-config/sections', { token: A, method: 'POST', bo
   ?? (await j('/sections', { token: A })).json?.find(x => x.name === `Haematology ${stamp}`)?.id;
 check('the unit exists', !!unit);
 
-const roles = (await j('/roles', { token: A })).json;
-const roleId = n => roles.find(r => r.name === n)?.id;
+const grade = await benchRole(j, A);
 const bench = (await j('/staff', { token: A, method: 'POST',
-  body: { employeeNo: `BN-${stamp}`, firstName: 'Bella', surname: 'Bench', sectionId: unit } })).json;
+  body: { employeeNo: `BN-${stamp}`, firstName: 'Bella', surname: 'Bench', sectionId: unit, primaryRoleId: grade.id } })).json;
 await j('/users', { token: A, method: 'POST',
-  body: { username: `bn${stamp}`, password: PW, fullName: 'Bella Bench', roleId: roleId('Technician'), staffId: bench.id } });
+  body: { username: `bn${stamp}`, password: PW, fullName: 'Bella Bench', roleId: grade.id, staffId: bench.id } });
 const B = await login(`bn${stamp}`);
 check('a technician can sign in', !!B);
 

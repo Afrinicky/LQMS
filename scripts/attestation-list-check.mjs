@@ -13,6 +13,8 @@
  *      out of the counts that drive the register and the tab badge;
  *   4. somebody who signed before leaving stays on it, signature and all.
  */
+import { benchRole, clinicalUnit } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4425/api';
 const PW = 'Passw0rd!test';
 
@@ -50,13 +52,14 @@ async function uploadSignatureFor(token) {
 
 console.log('\n[setup] three people and a controlled document');
 const roles = (await j('/roles', { token: A })).json || [];
-const roleId = (roles.find(r => /staff|technician|scientist/i.test(r.name)) || roles[roles.length - 1])?.id;
+const roleId = (await benchRole(j, A, /scientist/i)).id;
+const unitId = (await clinicalUnit(j, A))?.id ?? null;
 check('a role to give the test accounts', !!roleId, JSON.stringify(roles.map(r => r.name)));
 const people = {};
 for (const [key, name] of [['stays', 'Ama Stays'], ['leftUnsigned', 'Kofi Never-Signed'], ['leftSigned', 'Efua Signed-Then-Left']]) {
-  const s = await j('/staff', { token: A, method: 'POST', body: {
+  const s = await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: roleId, sectionId: unitId,
     fullName: `${name} ${stamp}`, employeeNo: `E${stamp}${Object.keys(people).length}`,
-    designation: 'Medical Laboratory Scientist', email: `${key}${stamp}@lab.test`,
+    email: `${key}${stamp}@lab.test`,
   } });
   people[key] = s.json;
   check(`staff created: ${key}`, !!s.json?.id, JSON.stringify(s.json));

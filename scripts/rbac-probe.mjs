@@ -34,7 +34,7 @@ const PROBES = [
   ['GET  /notifications/rules', '/notifications/rules', 'GET', null],
 ];
 
-for (const role of ['Technician', 'Biomedical Scientist', 'POCT Officer', 'Data Officer']) {
+for (const role of ['Medical Laboratory Technician', 'Medical Laboratory Scientist', 'POCT Officer', 'Data Officer']) {
   const u = `probe_${role.toLowerCase().replace(/\W+/g, '_')}`;
   const s = await login(u);
   if (!s?.token) { console.log(`\n### ${role}: could not log in`); continue; }

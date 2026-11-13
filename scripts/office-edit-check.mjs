@@ -13,6 +13,8 @@
  *
  * Assumes a host is already listening (npm run api) with a writable data dir.
  */
+import { benchRole, clinicalUnit, makeUser } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4420/api';
 const ORIGIN = BASE.replace(/\/api$/, '');
 const PW = 'Passw0rd!test';
@@ -36,12 +38,14 @@ if (!st.json?.setupComplete) {
   await j('/setup/initialize', { method: 'POST', body: { facilityName: 'Office Lab', username: 'admin', password: PW, fullName: 'Admin User' } });
 }
 const A = (await j('/auth/login', { method: 'POST', body: { username: 'admin', password: PW } })).json.token;
+const grade = await benchRole(j, A);
+const unitId = (await clinicalUnit(j, A))?.id ?? null;
 if (!A) { console.error('Could not sign in as admin — is the host running?'); process.exit(1); }
 const roles = (await j('/roles', { token: A })).json;
 const stamp = Date.now();
 
 console.log('\n[1] A demonstration staff record can be erased outright');
-await j('/staff', { token: A, method: 'POST', body: { firstName: 'Demo', surname: `Row${stamp}`, employeeNo: `DEMO-${stamp}` } });
+await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: grade.id, sectionId: unitId, firstName: 'Demo', surname: `Row${stamp}`, employeeNo: `DEMO-${stamp}` } });
 const demo = (await j('/staff', { token: A })).json.find(s => s.employeeNo === `DEMO-${stamp}`);
 check('the demo record was created', !!demo);
 const demoImpact = await j(`/staff/${demo.id}/deletion-impact`, { token: A });
@@ -51,7 +55,7 @@ check('erasing succeeds', erased.status === 200 && erased.json.mode === 'delete'
 check('it is gone from the register', !(await j('/staff', { token: A })).json.some(s => s.id === demo.id));
 
 console.log('\n[1b] Alerts routed to a demo record do not make it un-erasable');
-await j('/staff', { token: A, method: 'POST', body: { firstName: 'Noisy', surname: `Demo${stamp}`, employeeNo: `NOISY-${stamp}` } });
+await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: grade.id, sectionId: unitId, firstName: 'Noisy', surname: `Demo${stamp}`, employeeNo: `NOISY-${stamp}` } });
 const noisy = (await j('/staff', { token: A })).json.find(s => s.employeeNo === `NOISY-${stamp}`);
 // A routed notification and an unsigned attestation are delivery, not record.
 await j('/notifications', { token: A, method: 'POST', body: { assignedToStaffId: noisy.id, moduleKey: 'personnel', title: 'Routed alert', message: 'Demo record was alerted', notificationType: 'info', severity: 'low' } });
@@ -60,7 +64,7 @@ check('a notified demo record is still erasable', noisyImpact.json?.canDelete ==
 check('erasing it succeeds', (await j(`/staff/${noisy.id}?mode=delete`, { token: A, method: 'DELETE' })).status === 200);
 
 console.log('\n[2] Somebody who has worked is retired, never erased');
-await j('/staff', { token: A, method: 'POST', body: { firstName: 'Real', surname: `Scientist${stamp}`, employeeNo: `REAL-${stamp}` } });
+await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: grade.id, sectionId: unitId, firstName: 'Real', surname: `Scientist${stamp}`, employeeNo: `REAL-${stamp}` } });
 const real = (await j('/staff', { token: A })).json.find(s => s.employeeNo === `REAL-${stamp}`);
 await j('/actions', { token: A, method: 'POST', body: { title: 'Check the fridge log', moduleKey: 'personnel', assignedToStaffId: real.id } });
 const realImpact = await j(`/staff/${real.id}/deletion-impact`, { token: A });
@@ -128,7 +132,7 @@ check('restoring brings them back into the register', restored.status === 200
 check('and clears the departure', !(await j('/staff', { token: A })).json.find(s => s.id === real.id)?.exitReason);
 
 console.log('\n[2c] A demonstration record the live system grew around can be force-erased');
-await j('/staff', { token: A, method: 'POST', body: { firstName: 'Demo', surname: `Legacy${stamp}`, employeeNo: `LEG-${stamp}` } });
+await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: grade.id, sectionId: unitId, firstName: 'Demo', surname: `Legacy${stamp}`, employeeNo: `LEG-${stamp}` } });
 const legacy = (await j('/staff', { token: A })).json.find(s => s.employeeNo === `LEG-${stamp}`);
 await j('/actions', { token: A, method: 'POST', body: { title: 'Demo-era action', moduleKey: 'personnel', assignedToStaffId: legacy.id } });
 const legacyAction = (await j('/actions', { token: A })).json.find(a => a.assigned_to_staff_id === legacy.id);
@@ -150,9 +154,11 @@ check('the audit trail records the purge and its reason',
 check('and who was erased', (purgeTrail?.old_value || '').includes(`LEG-${stamp}`));
 
 console.log('\n[3] A role can be changed on an existing account');
-const qm = roles.find(r => /quality manager/i.test(r.name)) || roles.find(r => r.name !== 'System Administrator');
+// A bench grade, because moving an account between roles means moving it
+// between PRIMARY roles: a position profile is held by appointment.
+const qm = await benchRole(j, A);
 const admin = roles.find(r => r.name === 'System Administrator');
-await j('/users', { token: A, method: 'POST', body: { username: `qm${stamp}`, password: PW, fullName: 'Quality Manager', roleId: qm.id } });
+await makeUser(j, A, { username: `qm${stamp}`, password: PW, fullName: 'Quality Manager', roleId: qm.id });
 const account = (await j('/users', { token: A })).json.find(u => u.username === `qm${stamp}`);
 check('the account starts in its original role', account.roleId === qm.id);
 const promoted = await j(`/users/${account.id}`, { token: A, method: 'PUT', body: { roleId: admin.id } });
@@ -164,7 +170,7 @@ check('linking a staff record still works alongside it',
   (await j(`/users/${account.id}`, { token: A, method: 'PUT', body: { staffId: real.id } })).status === 200);
 
 console.log('\n[3b] A demonstration login account can be force-erased too');
-await j('/users', { token: A, method: 'POST', body: { username: `demo${stamp}`, password: PW, fullName: 'Demo Account', roleId: qm.id } });
+await makeUser(j, A, { username: `demo${stamp}`, password: PW, fullName: 'Demo Account', roleId: qm.id });
 const demoAcct = (await j('/users', { token: A })).json.find(u => u.username === `demo${stamp}`);
 // Give it laboratory history of the kind that blocks an ordinary erase.
 const demoNotif = await j('/notifications', { token: A, method: 'POST', body: { assignedToUserId: demoAcct.id, moduleKey: 'personnel', title: 'For the demo account', message: 'Assigned while the system was being set up', notificationType: 'task_assigned', severity: 'low' } });

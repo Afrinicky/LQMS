@@ -1,3 +1,4 @@
+import { makeUser } from './lib/people.mjs';
 /**
  * Account management: administrator-approved password reset, and removing a
  * user. Exercises the security properties, not just the happy path.
@@ -25,11 +26,8 @@ const login = (u, p = PW) => j('/auth/login', { method: 'POST', body: { username
 const st = await j('/setup/status');
 if (!st.json?.setupComplete) await j('/setup/initialize', { method: 'POST', body: { facilityName: 'Account Lab', username: 'admin', password: PW, fullName: 'Admin User' } });
 const A = (await login('admin')).json.token;
-const roles = (await j('/roles', { token: A })).json;
-const techRole = roles.find(r => r.name === 'Technician');
-
 const mk = async (username, fullName) => {
-  await j('/users', { token: A, method: 'POST', body: { username, password: PW, fullName, roleId: techRole.id } });
+  await makeUser(j, A, { username, password: PW, fullName });
   return (await j('/users', { token: A })).json.find(u => u.username === username);
 };
 

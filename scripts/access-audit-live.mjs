@@ -226,7 +226,7 @@ async function main() {
      ====================================================================== */
   console.log('\n[4] An individual decision overrides the profile, to grant and to withdraw');
   {
-    const acc = accounts.find(a => a.profile.name === 'Technician');
+    const acc = accounts.find(a => a.profile.name === 'Medical Laboratory Technician');
     if (!acc) {
       console.log('   (skipped: no Technician profile in this database)');
     } else {
@@ -282,7 +282,7 @@ async function main() {
      ====================================================================== */
   console.log('\n[6] Bench profiles: notified, able to work, and nothing else');
   {
-    const BENCH = ['Technician', 'Biomedical Scientist', 'Stores Officer', 'Customer Service Officer'];
+    const BENCH = ['Medical Laboratory Technician', 'Medical Laboratory Scientist', 'Stores Officer', 'Customer Service Officer'];
     const MANAGEMENT = ['System Administrator', 'Laboratory Manager', 'Quality Manager', 'Unit Supervisor'];
 
     // Settings is administration. Only the administrator profile holds the key.
@@ -444,7 +444,7 @@ async function main() {
      ====================================================================== */
   console.log('\n[8] An inbox shows one person their own work');
   {
-    const bench = accounts.find(a => a.profile.name === 'Technician');
+    const bench = accounts.find(a => a.profile.name === 'Medical Laboratory Technician');
     if (!bench) {
       console.log('   (skipped: no Technician profile in this database)');
     } else {

@@ -1152,7 +1152,17 @@ export function commonRoutes() {
     next();
   };
 
-  router.get('/positions', canReadOrganogram, (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, is_core isCore, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
+  // The access profile a post carries travels with it. The shared Position
+  // type has always declared it and this route never sent it, so anything
+  // asking "what would holding this post be worth?" had to go and look
+  // somewhere else.
+  router.get('/positions', canReadOrganogram, (_req, res) => res.json(getDb().prepare(`
+    SELECT p.id, p.title, p.description, p.reports_to_position_id reportsToPositionId,
+      p.is_active isActive, p.is_core isCore, p.archived_at archivedAt,
+      p.access_profile_role_id accessProfileId, r.name accessProfileName,
+      p.supervises_section_id supervisesSectionId
+    FROM positions p LEFT JOIN roles r ON r.id = p.access_profile_role_id
+    ORDER BY p.is_active DESC, p.title`).all()));
   router.post('/positions', requirePermission('settings', 'create'), (req, res) => {
     const { title, description, reportsToPositionId } = req.body;
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'A position title is required.' });

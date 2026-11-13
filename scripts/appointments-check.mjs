@@ -26,6 +26,8 @@
  *   npm run api          (in one terminal)
  *   node scripts/appointments-check.mjs
  */
+import { benchRole, clinicalUnit } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4430/api';
 const PW = 'Passw0rd!test';
 
@@ -54,6 +56,8 @@ if (!status.json?.setupComplete) {
   });
 }
 const A = (await j('/auth/login', { method: 'POST', body: { username: 'admin', password: PW } })).json?.token;
+const benchGrade = await benchRole(j, A);
+const homeUnitId = (await clinicalUnit(j, A))?.id ?? null;
 if (!A) { console.error(`Could not sign in — is the API running on ${BASE}?`); process.exit(1); }
 const stamp = Date.now().toString(36).toUpperCase().slice(-5);
 
@@ -91,7 +95,7 @@ const gradeId = grade.json?.id;
 
 const people = {};
 for (const name of ['Ama', 'Kofi', 'Yaa', 'Kwesi']) {
-  const made = await j('/staff', { token: A, method: 'POST', body: { fullName: `${name} ${stamp}` } });
+  const made = await j('/staff', { token: A, method: 'POST', body: { fullName: `${name} ${stamp}`, primaryRoleId: benchGrade.id, sectionId: homeUnitId } });
   people[name] = made.json?.id;
 }
 check('four people are on the staff register', Object.values(people).every(Boolean), JSON.stringify(people));
@@ -214,7 +218,8 @@ check('the person it was taken from holds only what is left',
 
 const registered = await j('/staff/register', {
   token: A, method: 'POST',
-  body: { fullName: `Esi ${stamp}`, firstName: 'Esi', surname: stamp, positionIds: [postId] },
+  body: { fullName: `Esi ${stamp}`, firstName: 'Esi', surname: stamp, positionIds: [postId],
+    primaryRoleId: benchGrade.id, sectionId: homeUnitId },
 });
 check('registering somebody into an occupied post is allowed', registered.status === 201, JSON.stringify(registered.json)?.slice(0, 140));
 reg = await register();

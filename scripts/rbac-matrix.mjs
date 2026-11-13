@@ -1,3 +1,4 @@
+import { benchRole, makeUser, probeUsername } from './lib/people.mjs';
 /**
  * Verifies the redesigned access-control screen actually controls access:
  * setting a level for a cohort or a person must change what the API allows,
@@ -26,7 +27,10 @@ const perms = async token => (await j('/auth/permissions', { token })).json.perm
 
 const A = (await login('admin')).token;
 const roles = (await j('/roles', { token: A })).json;
-const techRole = roles.find(r => r.name === 'Technician');
+// The bench grade the probe account works under, found by what it is rather
+// than by a name that has already changed once.
+const techRole = await benchRole(j, A);
+const TECH_PROBE = probeUsername(techRole.name);
 
 const setLevel = (scope, subjectId, permKey, level) =>
   j('/permissions/level', { token: A, method: 'POST', body: { scope, subjectId, permKey, level } });
@@ -37,7 +41,7 @@ check('catalogue returns role grants', !!cat?.roles && Object.keys(cat.roles).le
 check('catalogue returns per-user overrides', Array.isArray(cat?.userOverrideKeys));
 
 console.log('\n[Granting a cohort a level opens exactly that much]');
-const tech = () => login('probe_technician');
+const tech = () => login(TECH_PROBE);
 let before = await perms((await tech()).token);
 check('Technician starts with no access to appraisals', !before['personnel.appraisals'], JSON.stringify(before['personnel.appraisals']));
 
@@ -70,7 +74,7 @@ let mine = await perms((await tech()).token);
 check('an individual override opens it for that person', (mine['personnel.appraisals'] || []).includes('view'), JSON.stringify(mine['personnel.appraisals']));
 
 // A second Technician must be unaffected by the first one's override.
-await j('/users', { token: A, method: 'POST', body: { username: 'probe_tech_peer', password: PW, fullName: 'Peer Tech', roleId: techRole.id } });
+await makeUser(j, A, { username: 'probe_tech_peer', password: PW, fullName: 'Peer Tech', roleId: techRole.id });
 const peer = await perms((await login('probe_tech_peer')).token);
 check('their colleagues on the same role are unaffected', !peer['personnel.appraisals'], JSON.stringify(peer['personnel.appraisals']));
 
