@@ -68,6 +68,12 @@ jobs:
         run: npm run validate:pq
 
       # Checks that start no host of their own.
+      # One middleware, two products. TransLis imports the engine rather than
+      # copying it, and this is what keeps that true: it fails when a section,
+      # a route or a component exists in one product and not the other.
+      - name: TransLis parity
+        run: npm run check:translis-parity
+
       - name: In-process checks
         run: |
           set -e

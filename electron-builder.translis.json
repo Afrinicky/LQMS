@@ -12,10 +12,17 @@
     "dist-translis-electron/**/*",
     "server/**/*.{js,ts,json}",
     "shared/**/*.{js,ts,json}",
-    "translis/extension/**/*",
+    "extension/**/*",
     "package.json",
     "!**/*.test.*",
-    "!**/__tests__/**"
+    "!**/__tests__/**",
+    "!node_modules/lucide-react/**/*",
+    "!node_modules/react/**/*",
+    "!node_modules/react-dom/**/*",
+    "!node_modules/react-router/**/*",
+    "!node_modules/react-router-dom/**/*",
+    "!node_modules/@capacitor/**/*",
+    "!node_modules/scheduler/**/*"
   ],
   "extraMetadata": {
     "name": "translis",
@@ -29,7 +36,14 @@
     "dist-translis/**/*"
   ],
   "win": {
-    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
     "artifactName": "TransLis-${version}-Setup.exe"
   },
   "nsis": {

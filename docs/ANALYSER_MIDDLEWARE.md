@@ -365,3 +365,77 @@ The bridge is reached through one observer seam
 (`observeMessages` in `server/services/instrumentBridge/index.ts`), registered
 at startup and wrapped so that nothing the middleware does can affect the
 transmission that produced the message.
+
+---
+
+## 10. This module serves two products
+
+Everything in §9 is also the whole of **TransLis**, the standalone analyser
+middleware and Result Filler, which goes to facilities that run a laboratory
+information system and no quality management system. It is a second build
+target out of this repository (`translis/`, `npm run dist:translis`), with its
+own installer, its own database, its own two accounts and its own retention
+policy.
+
+**It is not a fork.** Every file in the table above is *imported* by TransLis,
+not copied — the engine, the transports, the safety rules, the diagnostics, the
+discovery, the versioning, the Result Filler services, the four HTTP routers
+and all fourteen workspace sections. The schema is the same schema, in a data
+folder of its own.
+
+So the rule for anybody working in this module is one sentence:
+
+> An improvement here is an improvement to both products, and it is not
+> finished until it is true in both.
+
+What is deliberately **not** shared, and nothing else:
+
+| Not shared | Why |
+|---|---|
+| The Dennis Assistant | The laboratory's own assistant, reading the laboratory's own evidence. It belongs to a quality management system, not to a middleware dispatched to a facility without one. |
+| Each product's shell, navigation and settings | TransLis has two kinds of account and a retention policy; SECHLIMS has twenty access profiles and twelve quality essentials. Different screens, never meant to converge. |
+| The transmission master switch (§11) | TransLis exists to transmit. A switch that turned transmission off there would turn the product off. |
+| The product's own name | A build-time constant (`src/constants/product.ts`), so the components read it instead of writing one of the two names into their text. |
+
+`npm run check:translis-parity` enforces all of this against the source, and
+runs in the gate. It fails when a section, a route or a component exists in one
+product and not the other, when a shared module has been copied into
+`translis/`, and when a shared component names a product directly. A rule that
+is only written down is a rule that lasts until the next person is in a hurry.
+
+---
+
+## 11. Switching the module off
+
+A laboratory may run SECHLIMS for quality management alone, and until a
+facility holds clearance to handle patient results in this system, that is the
+configuration it is obliged to run. **Settings → System → Analyser
+Transmission** is where that is recorded. It is administrator-only, confirmed
+in words, and audited with a reason.
+
+It is a switch and nothing more: not one line of this module changes behaviour
+because of it. On, everything in §1–§9 runs exactly as described. Off:
+
+| Closed | Kept |
+|---|---|
+| Every link — no port bound, no address dialled, no folder watched | Every control run already on the IQC bench, with its charts, rules and records |
+| The engine — nothing routed, queued or delivered | The whole of quality management, and every other module |
+| This workspace, and the Result Filler inside it | The configuration — links, destinations, routes and mappings return as they were |
+| Analyser Sync & Interfacing, and the Analyser Sync tab under Equipment | |
+| Taking readings off an analyser in quality control, EQA and verification | |
+
+Reading endpoints inside modules that stay live answer empty rather than
+refusing, because they are panels inside pages about something else; the IQC
+analyser panel reports the switch as the reason it has nothing, in the place it
+already reports that no analyser is linked.
+
+The default is on, so an installation that transmits keeps transmitting across
+an upgrade. With it off, controls and patient results are populated by TransLis,
+which fills a result-entry form without this system holding anything — including
+SECHLIMS's own control run forms, which it recognises by the `data-rf-*`
+markers they carry.
+
+Implementation: `server/services/middlewareSwitch.ts` (the one source of
+truth, the guards, and the bridge/engine lifecycle),
+`src/hooks/useAnalyserTransmission.tsx` (what the screens ask), and the
+`AnalyserTransmissionSettings` panel in `src/pages/SettingsPages.tsx`.
