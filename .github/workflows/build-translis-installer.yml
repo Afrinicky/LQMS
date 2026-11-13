@@ -105,16 +105,18 @@ jobs:
       - name: Rebuild native modules for Electron
         run: npm run rebuild:native
 
-      # Through the wrapper, not electron-builder directly: applying
-      # `extraMetadata` rewrites package.json, and on a checkout where the
-      # native module still has to be rebuilt — which is every fresh runner —
-      # it is not put back. The wrapper restores it and says so.
+      # Through an npm script rather than `npx` directly: on a Windows runner
+      # that is the path the SECHLIMS installer job already proves, and it
+      # avoids Node refusing to spawn a .cmd shim.
       - name: Build Windows installer (electron-builder)
-        run: node scripts/package-translis.mjs --win
+        run: npm run pack:translis
 
-      # The build must not have left the checkout modified. Harmless on a
-      # runner, destructive on a developer's machine, and this is where it
-      # would be noticed.
+      # `extraMetadata` means electron-builder computes a package.json that
+      # differs from this project's own — a different name, and a main pointing
+      # at the TransLis bundle. It writes that copy into the application and
+      # leaves the real one alone. This is where we would find out if that ever
+      # stopped being true, because a project that silently lost its scripts
+      # would fail next at something unrelated.
       - name: The build left the repository alone
         shell: bash
         run: |
