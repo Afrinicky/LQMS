@@ -1930,8 +1930,19 @@ export function commonRoutes() {
     if (mayEditRegister && 'primaryRoleId' in req.body) {
       const primaryRole = resolvePrimaryRole(db, req.body, Number(req.params.id));
       if (!primaryRole.id) return res.status(400).json({ error: 'A primary role is required.' });
-      const unitAfter = 'sectionId' in req.body ? idOrNull(req.body.sectionId) : ((existing as any).section_id ?? null);
-      if (requiresClinicalUnit(primaryRole.name) && !unitAfter) {
+      const unitBefore = (existing as any).section_id ?? null;
+      const unitAfter = 'sectionId' in req.body ? idOrNull(req.body.sectionId) : unitBefore;
+      /*
+       * A record that already has no clinical unit is not blocked here.
+       *
+       * Somebody correcting a phone number should not be stopped by a field
+       * they may not know the answer to, so the register names those records
+       * on its own panel instead (GET /staff/unit-gaps) and the laboratory
+       * works through them deliberately. What IS refused is an edit that
+       * would TAKE AWAY a clinical unit somebody has — that is the rule going
+       * backwards, and nobody does it by accident.
+       */
+      if (requiresClinicalUnit(primaryRole.name) && !unitAfter && unitBefore) {
         return res.status(400).json({ error: `A ${primaryRole.name} must belong to a clinical unit.` });
       }
       cols.primary_role_id = primaryRole.id;

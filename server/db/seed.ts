@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS, isCorePositionTitle } from '../../shared/constants/modules.js';
 import { PRIMARY_ROLE_NAMES } from '../../shared/constants/roles.js';
 import { FEATURES, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
-import { getDb } from './database.js';
+import { getDb, linkAdministrativeUnitHeads } from './database.js';
 import { config } from '../config/index.js';
 
 export function seedDefaults() {
@@ -90,6 +90,10 @@ export function seedDefaults() {
     for (const section of ['Blood Bank', 'Microbiology', 'Biochemistry', 'Haematology']) {
       db.prepare('INSERT OR IGNORE INTO sections (department_id, name) VALUES (?, ?)').run(labDept.id, section);
     }
+    // The administrative units are created by the migration, which runs before
+    // any position exists on a brand-new database. Now that the default posts
+    // are in, tie each office to the one that heads it.
+    linkAdministrativeUnitHeads(db);
     db.prepare('INSERT OR IGNORE INTO locations (name, description) VALUES (?, ?)').run('Main Laboratory', 'Default local site location.');
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('setupComplete', 'false')").run();
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('hostMode', 'true')").run();

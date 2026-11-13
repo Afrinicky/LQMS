@@ -72,17 +72,22 @@ check('work routes to the unit they now run', duty.unitAssignments(db, month).ge
 
 console.log('\n— Appointment to an ADMINISTRATIVE unit head post —');
 const qmPost = (db.prepare("SELECT id FROM positions WHERE title = 'Quality Manager'").get() as any).id;
-db.prepare('UPDATE positions SET supervises_section_id = ? WHERE id = ?').run(qualityOffice, qmPost);
+// Deliberately NOT wired up here: the migration links the post to the unit,
+// which is what makes the head follow the appointment on its own.
+check('Quality Manager post supervises the Quality Office',
+  (db.prepare('SELECT supervises_section_id AS s FROM positions WHERE id = ?').get(qmPost) as any).s, qualityOffice);
 const r2 = appt.appoint(db, { positionId: qmPost, staffId, kind: 'holder' });
 check('appointment accepted', r2.ok, 'true');
 check('clinical unit UNCHANGED', (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any).section_id, micro);
 const units = um.unitsForStaff(db, staffId);
 check('clinical unit still Microbiology', units.clinical?.name, 'Microbiology');
 check('Quality Office added as additional', units.additional.map(u => u.name).join(','), 'Quality Office');
+check('and they head it', (db.prepare('SELECT head_staff_id AS h FROM sections WHERE id = ?').get(qualityOffice) as any).h, staffId);
 
 console.log('\n— Standing down from the administrative post —');
 appt.vacate(db, { positionId: qmPost, staffId });
 check('administrative membership removed', um.unitsForStaff(db, staffId).additional.length, 0);
+check('the office is vacant again', (db.prepare('SELECT head_staff_id AS h FROM sections WHERE id = ?').get(qualityOffice) as any).h, 'null');
 check('clinical unit still Microbiology', (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any).section_id, micro);
 
 console.log('\n— Cross-unit grant —');

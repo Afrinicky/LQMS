@@ -9220,6 +9220,79 @@ function migratePrimaryRoles(database: Database.Database) {
  * somebody does NOT belong to, at a stated level, granted by an administrator
  * or the Laboratory Manager and visible in Access Control.
  */
+const ADMIN_UNITS: Array<{ name: string; code: string; module: string; post: string; summary: string }> = [
+  { name: 'Quality Office', code: 'QMS', module: 'documents', post: 'Quality Manager',
+    summary: 'Document control, internal audit, nonconformities, CAPA and management review.' },
+  { name: 'Stores', code: 'STR', module: 'supplier_inventory', post: 'Stores Officer',
+    summary: 'Receiving, issuing, stock counts and the supplier register.' },
+  { name: 'Customer Service', code: 'CSU', module: 'customer_focus', post: 'Customer Service Officer',
+    summary: 'Sample reception, enquiries, feedback, complaints and the communication log.' },
+  { name: 'Safety Office', code: 'SAF', module: 'facilities_safety', post: 'Safety Manager',
+    summary: 'Safety incidents, risk assessments, waste and decontamination.' },
+  { name: 'Point-of-Care Testing', code: 'POCT', module: 'poct', post: 'POCT Officer',
+    summary: 'POCT sites, devices, operators, quality control and incidents.' },
+];
+
+/**
+ * Tie each administrative unit to the post that heads it.
+ *
+ * Called from the migration AND from the seed, because on a brand-new
+ * database the migration runs before any position exists — the seed creates
+ * them — and on an existing one the seed's default positions are already
+ * there. Idempotent either way, and it never overrides a unit a laboratory
+ * has pointed at some other post.
+ */
+export function linkAdministrativeUnitHeads(database: Database.Database) {
+  const tableExists = (name: string) =>
+    (database.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) as { n: number }).n > 0;
+  if (!tableExists('positions') || !tableExists('sections')) return;
+  const sectionCols = new Set((database.prepare('PRAGMA table_info(sections)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!sectionCols.has('head_position_id')) return;
+
+  for (const unit of ADMIN_UNITS) {
+    const section = database.prepare('SELECT id, head_position_id FROM sections WHERE name = ? COLLATE NOCASE').get(unit.name) as
+      { id: number; head_position_id: number | null } | undefined;
+    if (!section) continue;
+    const post = database.prepare('SELECT id FROM positions WHERE title = ? COLLATE NOCASE').get(unit.post) as { id: number } | undefined;
+    if (!post) continue;
+    if (!section.head_position_id) {
+      database.prepare('UPDATE sections SET head_position_id = ? WHERE id = ?').run(post.id, section.id);
+    }
+    /*
+     * And the post supervises the unit.
+     *
+     * This is what makes the head follow the appointment without a second
+     * mechanism: the appointment service already maintains a unit's head from
+     * whoever holds the post that supervises it, so appointing a Quality
+     * Manager makes them head of the Quality Office and standing them down
+     * vacates it. For an ADMINISTRATIVE unit that adds a membership and
+     * leaves their clinical unit alone — a Quality Manager does not stop
+     * being a haematologist.
+     */
+    try {
+      database.prepare('UPDATE positions SET supervises_section_id = ? WHERE id = ? AND supervises_section_id IS NULL')
+        .run(section.id, post.id);
+    } catch { /* another post already supervises it: the laboratory's choice stands */ }
+  }
+
+  // Whoever holds the post today is already running that office.
+  try {
+    database.exec(`
+      UPDATE sections SET head_staff_id = (
+        SELECT spa.staff_id FROM staff_position_assignments spa
+        WHERE spa.position_id = sections.head_position_id AND spa.is_active = 1 AND spa.assignment_type = 'primary'
+        ORDER BY spa.id LIMIT 1)
+      WHERE unit_kind = 'administrative' AND head_position_id IS NOT NULL AND head_staff_id IS NULL
+    `);
+    database.exec(`
+      INSERT OR IGNORE INTO staff_unit_memberships (staff_id, section_id, role, source)
+      SELECT sec.head_staff_id, sec.id, 'head', 'position'
+      FROM sections sec
+      WHERE sec.unit_kind = 'administrative' AND sec.head_staff_id IS NOT NULL
+    `);
+  } catch { /* the tables arrive with the migration; nothing to join yet */ }
+}
+
 function migrateUnitMembership(database: Database.Database) {
   const sectionCols = new Set((database.prepare('PRAGMA table_info(sections)').all() as Array<{ name: string }>).map(c => c.name));
   if (sectionCols.size === 0) return;
@@ -9249,18 +9322,6 @@ function migrateUnitMembership(database: Database.Database) {
   // Created as pseudo units: they are appointments first and places second.
   // The head is not stored here — it follows the position holder, and is kept
   // current by the appointments service.
-  const ADMIN_UNITS: Array<{ name: string; code: string; module: string; post: string; summary: string }> = [
-    { name: 'Quality Office', code: 'QMS', module: 'documents', post: 'Quality Manager',
-      summary: 'Document control, internal audit, nonconformities, CAPA and management review.' },
-    { name: 'Stores', code: 'STR', module: 'supplier_inventory', post: 'Stores Officer',
-      summary: 'Receiving, issuing, stock counts and the supplier register.' },
-    { name: 'Customer Service', code: 'CSU', module: 'customer_focus', post: 'Customer Service Officer',
-      summary: 'Sample reception, enquiries, feedback, complaints and the communication log.' },
-    { name: 'Safety Office', code: 'SAF', module: 'facilities_safety', post: 'Safety Manager',
-      summary: 'Safety incidents, risk assessments, waste and decontamination.' },
-    { name: 'Point-of-Care Testing', code: 'POCT', module: 'poct', post: 'POCT Officer',
-      summary: 'POCT sites, devices, operators, quality control and incidents.' },
-  ];
   const hasDeptCol = sectionCols.has('department_id');
 
   /*
@@ -9354,22 +9415,10 @@ function migrateUnitMembership(database: Database.Database) {
   database.exec('CREATE INDEX IF NOT EXISTS idx_staff_unit_grants_staff ON staff_unit_grants(staff_id)');
 
   // ── 5. Head of an administrative unit follows the post ───────────────────
-  // The Quality Manager heads the Quality Office; the Stores Officer heads the
-  // Stores. Linked by naming the post on the unit, which is the same mechanism
-  // a clinical unit already uses, so one appointment service maintains both.
   if (!sectionCols.has('head_position_id')) {
     database.exec('ALTER TABLE sections ADD COLUMN head_position_id INTEGER REFERENCES positions(id)');
   }
-  const positionsExist = (database.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'positions'").get() as { n: number }).n > 0;
-  if (positionsExist) {
-    for (const unit of ADMIN_UNITS) {
-      const section = database.prepare('SELECT id, head_position_id FROM sections WHERE name = ? COLLATE NOCASE').get(unit.name) as
-        { id: number; head_position_id: number | null } | undefined;
-      if (!section || section.head_position_id) continue;
-      const post = database.prepare('SELECT id FROM positions WHERE title = ? COLLATE NOCASE').get(unit.post) as { id: number } | undefined;
-      if (post) database.prepare('UPDATE sections SET head_position_id = ? WHERE id = ?').run(post.id, section.id);
-    }
-  }
+  linkAdministrativeUnitHeads(database);
 
   // ── 6. The free-text unit column becomes derived ─────────────────────────
   // This is the column that kept printing the unit somebody had left. It is
@@ -9386,31 +9435,6 @@ function migrateUnitMembership(database: Database.Database) {
     database.exec("UPDATE staff SET unit = NULL WHERE section_id IS NULL AND IFNULL(unit, '') <> ''");
   }
 
-  // ── 7. Administrative memberships that already exist in fact ─────────────
-  // Whoever holds one of these posts today is already working in that unit;
-  // recording it is a statement of what is, not a change. Marked 'position' so
-  // it is removed again when the appointment ends.
-  if (positionsExist) {
-    for (const unit of ADMIN_UNITS) {
-      database.prepare(`
-        INSERT OR IGNORE INTO staff_unit_memberships (staff_id, section_id, role, source)
-        SELECT spa.staff_id, sec.id, 'head', 'position'
-        FROM sections sec
-        JOIN positions p ON p.id = sec.head_position_id
-        JOIN staff_position_assignments spa ON spa.position_id = p.id
-        WHERE sec.name = ? COLLATE NOCASE
-          AND spa.is_active = 1 AND spa.assignment_type = 'primary'
-      `).run(unit.name);
-    }
-    // And the unit's head_staff_id follows the same appointment.
-    database.exec(`
-      UPDATE sections SET head_staff_id = (
-        SELECT spa.staff_id FROM staff_position_assignments spa
-        WHERE spa.position_id = sections.head_position_id AND spa.is_active = 1 AND spa.assignment_type = 'primary'
-        ORDER BY spa.id LIMIT 1)
-      WHERE unit_kind = 'administrative' AND head_position_id IS NOT NULL AND head_staff_id IS NULL
-    `);
-  }
 }
 
 /**
