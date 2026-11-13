@@ -37,3 +37,8 @@ local-data/
 # validates. Re-included after the runtime `evidence/` and `*.log` rules above.
 !docs/validation/evidence/
 !docs/validation/evidence/**
+
+# Scratch databases the check scripts build and tear down. access-cache-check
+# writes one into the working tree, which is how a probe file came to be
+# committed by a `git add -A` that happened to run while it was mid-flight.
+.tmp-access-cache-check/
