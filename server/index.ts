@@ -80,6 +80,7 @@ import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
+import { requireMiddlewareOn } from './services/middlewareSwitch.js';
 import { seedDefaults } from './db/seed.js';
 import { config } from './config/index.js';
 import { resolveBindHost, resolvePort, recordBinding, hostIsLan, networkConfig, importLegacyChoices } from './services/hostBinding.js';
@@ -182,10 +183,16 @@ export function createApiServer() {
   app.use('/api/duty', dutyActivityRoutes());
   app.use('/api/routine-sheets', routineSheetRoutes());
   app.use('/api/decontamination', decontaminationRoutes());
-  app.use('/api/instrument-links', instrumentLinkRoutes());
-  app.use('/api/middleware', middlewareRoutes());
-  app.use('/api/result-filler', resultFillerRoutes());
-  app.use('/api/transmission-reports', transmissionReportRoutes());
+  // Analyser links, the middleware engine, the Result Filler and the
+  // transmitted-result reports. All four sit behind the transmission master
+  // switch: a laboratory running SECHLIMS for quality management alone does not
+  // speak to an analyser at all, and these are the four surfaces that would.
+  // Nothing inside them is changed by the switch — when it is on, the guard
+  // waves every request straight through to the code that was already here.
+  app.use('/api/instrument-links', requireMiddlewareOn, instrumentLinkRoutes());
+  app.use('/api/middleware', requireMiddlewareOn, middlewareRoutes());
+  app.use('/api/result-filler', requireMiddlewareOn, resultFillerRoutes());
+  app.use('/api/transmission-reports', requireMiddlewareOn, transmissionReportRoutes());
   // The system's audit of itself: the live trail, and everything not done.
   app.use('/api/system-audit', systemAuditRoutes());
   app.use('/api/scanned-records', scannedRecordsRoutes());

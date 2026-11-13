@@ -6,6 +6,7 @@ import {
   Facts, Live, MessageChip, Note, Panel, StateChip, StatusMark,
   ago, endpointOf, when, type DiagnosticReport, type SectionProps,
 } from './shared';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * Overview — the answer to "is transmission working?".
@@ -171,7 +172,7 @@ export default function MiddlewareOverview({ overview, destinations, links, onOp
       <Panel title="Destinations" subtitle="Each with its own profile, mapping, acknowledgement policy and delivery state.">
         {!destinations.length ? (
           <Note>
-            No destination is configured, so messages are held in SECHLIMS and transmitted nowhere.
+            No destination is configured, so messages are held in {PRODUCT} and transmitted nowhere.
             {' '}<button type="button" className="pq-link" onClick={() => onOpen?.('Destinations')}>Add one</button>
           </Note>
         ) : (

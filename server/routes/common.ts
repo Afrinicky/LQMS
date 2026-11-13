@@ -24,6 +24,9 @@ import { pendingRequests, recentRequests, decideRequest } from '../services/pass
 import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
 import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
 import { audit } from '../services/auditService.js';
+import {
+  MIDDLEWARE_OFF_CODE, MIDDLEWARE_SWITCH_KEY, middlewareEnabled, setMiddlewareEnabled,
+} from '../services/middlewareSwitch.js';
 import { appoint, vacate } from '../services/appointments.js';
 import {
   setClinicalUnit, addUnitMembership, removeUnitMembership, unitsForStaff,
@@ -2563,6 +2566,43 @@ export function commonRoutes() {
       exit_recorded_at = NULL, exit_recorded_by = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(staff.id);
     audit(req, { action: 'reactivate', entity: 'staff', entityId: staff.id, newValue: { fullName: staff.full_name } });
     res.json({ ok: true });
+  });
+
+  /* ------------------------------------------------------------------
+     The analyser transmission master switch.
+
+     Readable by anybody signed in, because every screen in the product has
+     to know whether to offer an analyser at all — the sidebar, the Settings
+     rail, the Equipment tabs and the Quality Control bench all ask. It
+     carries no configuration and no patient data: one boolean saying whether
+     this laboratory transmits.
+
+     Writable only by an administrator, and only against the current state, so
+     two people cannot each think they were the one who switched it.
+     ------------------------------------------------------------------ */
+  router.get('/analyser-transmission', requireAuth, (_req, res) => {
+    res.json({ enabled: middlewareEnabled(), code: MIDDLEWARE_OFF_CODE });
+  });
+  router.put('/analyser-transmission', requirePermission('settings', 'edit'), (req, res) => {
+    const wanted = req.body?.enabled === true || req.body?.enabled === 1 || req.body?.enabled === '1';
+    const was = middlewareEnabled();
+    // Switching this is a decision with a legal dimension behind it, so it is
+    // confirmed in words rather than by a press somebody could make by
+    // accident on the way past.
+    const expected = wanted ? 'TURN ON' : 'TURN OFF';
+    if (String(req.body?.confirm ?? '').trim().toUpperCase() !== expected) {
+      return res.status(400).json({ error: `Type ${expected} to confirm.`, expected });
+    }
+    if (was === wanted) return res.json({ enabled: was, changed: false });
+    setMiddlewareEnabled(wanted);
+    audit(req, {
+      action: wanted ? 'enable' : 'disable',
+      entity: 'analyser_transmission',
+      entityId: MIDDLEWARE_SWITCH_KEY,
+      oldValue: { enabled: was },
+      newValue: { enabled: wanted, reason: String(req.body?.reason ?? '').slice(0, 500) || null },
+    });
+    res.json({ enabled: wanted, changed: true });
   });
 
   router.get('/system-modules', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, key, label, path, enabled, alerts_paused alertsPaused FROM system_modules ORDER BY id').all()));

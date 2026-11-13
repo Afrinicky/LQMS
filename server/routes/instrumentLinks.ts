@@ -40,6 +40,8 @@ import {
   DEFAULT_CONTROL_PATTERNS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
   linkForwards, linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
+import { withProduct } from '../../shared/constants/product.js';
+import { serverProductName } from '../services/productName.js';
 import {
   LHIMS_MEASURE_MAPS, LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS,
   lhimsMapByKey, lhimsMeasureId,
@@ -91,7 +93,7 @@ export function instrumentLinkRoutes() {
         protocol: p.protocol, notes: p.notes ?? null,
         analyteCount: Object.keys(p.analytes).length,
       })),
-      roles: LINK_ROLES.map(r => ({ key: r, label: LINK_ROLE_LABELS[r] })),
+      roles: LINK_ROLES.map(r => ({ key: r, label: withProduct(LINK_ROLE_LABELS[r], serverProductName()) })),
       modes: LINK_MODES, protocols: LINK_PROTOCOLS,
       defaultControlPatterns: DEFAULT_CONTROL_PATTERNS,
       // What LHIMS calls each parameter, taken from this laboratory's own

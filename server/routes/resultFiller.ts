@@ -50,6 +50,7 @@ import {
 } from '../../shared/constants/formIntelligence.js';
 import { browserOf, enrol, newPairingCode, nextDeviceCode, pairingExpiry, requireDevice } from '../services/resultFiller/devices.js';
 import { packageExtension } from '../services/resultFiller/packaging.js';
+import { serverProductName } from '../services/productName.js';
 
 const F = 'analyser_middleware.result_filler';
 
@@ -902,6 +903,10 @@ export function resultFillerRoutes() {
     try {
       await packageExtension(res, {
         host: text(req.query.host, 200) ?? `${req.protocol}://${req.get('host') ?? '127.0.0.1:4317'}`,
+        // The extension says the name of whichever system handed it out, so a
+        // facility running the standalone middleware is not told to sign in to
+        // a product it does not have.
+        product: serverProductName(),
       });
       audit(req, { action: 'export', entity: 'rf_package', newValue: { host: req.query.host ?? null } });
     } catch (error) {

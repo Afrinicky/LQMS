@@ -5,6 +5,7 @@ import {
   CONNECTION_STATE_LABELS, CONNECTION_STATE_TONES, DELIVERY_STATE_LABELS,
   MESSAGE_STATUS_LABELS, type ConnectionState, type DeliveryState,
 } from '../../../shared/constants/middleware';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * The parts every middleware section shares.
@@ -224,7 +225,7 @@ export function ago(value: string | null | undefined): string {
 }
 
 export function endpointOf(destination: Destination): string {
-  if (destination.transport === 'internal') return 'SECHLIMS';
+  if (destination.transport === 'internal') return PRODUCT;
   if (destination.transport === 'file_export') return destination.export_dir || '(no folder set)';
   if (destination.base_url) return destination.base_url;
   if (destination.host) return `${destination.host}:${destination.port ?? '—'}`;

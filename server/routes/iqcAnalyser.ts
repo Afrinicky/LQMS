@@ -33,6 +33,9 @@ import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
 import { linksForControl } from '../services/controlAnalyser.js';
 import { listTransmissions } from '../services/transmissionList.js';
+import {
+  MIDDLEWARE_OFF_MESSAGE, quietWhenMiddlewareOff, requireMiddlewareOn,
+} from '../services/middlewareSwitch.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -48,6 +51,21 @@ function canFetch(mode?: string | null): boolean {
 
 export function iqcAnalyserRoutes() {
   const router = Router();
+
+  /**
+   * The transmission master switch, applied to the paths that reach an
+   * analyser — mounted here rather than at `/api/iqc`, which this router shares
+   * with the whole Quality Control module.
+   *
+   * Asking an analyser for results, and reading patient results off one, stop.
+   * Mapping a control run already on the bench does not: that run is quality
+   * control the laboratory has, and a facility keeping SECHLIMS for quality
+   * management is precisely the one this switch is off for.
+   */
+  const noAnalyser = quietWhenMiddlewareOff({
+    linked: false, why: MIDDLEWARE_OFF_MESSAGE, options: [], waiting: [],
+  });
+  const noRows = quietWhenMiddlewareOff<unknown[]>([]);
 
   /**
    * What is transmitting for this control.
@@ -170,7 +188,7 @@ export function iqcAnalyserRoutes() {
     return { control: Number(control?.id ?? 0), patient: Number(patient?.id ?? 0) };
   }
 
-  router.get('/materials/:id/analyser', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
+  router.get('/materials/:id/analyser', numericOnly, noAnalyser, requirePermission('iqc', 'view'), (req, res) => {
     const found = attachmentFor(req.params.id, parseIntNullable(req.query.equipmentId), parseIntNullable(req.query.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
     const { material, link, feed, options } = found;
@@ -233,7 +251,7 @@ export function iqcAnalyserRoutes() {
    * what it has not sent yet, and nothing here can make it send. That is said
    * rather than pretended away.
    */
-  router.post('/materials/:id/analyser/fetch', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
+  router.post('/materials/:id/analyser/fetch', numericOnly, requireMiddlewareOn, requirePermission('iqc', 'view'), (req, res) => {
     const found = attachmentFor(req.params.id,
       parseIntNullable(req.body?.equipmentId), parseIntNullable(req.body?.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
@@ -265,7 +283,7 @@ export function iqcAnalyserRoutes() {
    * watermark is new — which is what stops yesterday's run being taken for the
    * one somebody is standing at the analyser waiting for.
    */
-  router.post('/materials/:id/analyser/listen', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
+  router.post('/materials/:id/analyser/listen', numericOnly, requireMiddlewareOn, requirePermission('iqc', 'view'), (req, res) => {
     const found = attachmentFor(req.params.id,
       parseIntNullable(req.body?.equipmentId), parseIntNullable(req.body?.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });
@@ -368,7 +386,7 @@ export function iqcAnalyserRoutes() {
    * "the newest few" does not mean a fortnight's runs falling off the bottom
    * of a list with nowhere to look them up.
    */
-  router.get('/analyser/transmissions', requirePermission('iqc', 'view'), (req, res) => {
+  router.get('/analyser/transmissions', noRows, requirePermission('iqc', 'view'), (req, res) => {
     const q = req.query as Record<string, unknown>;
     res.json(listTransmissions(getDb(), {
       source: typeof q.source === 'string' ? q.source : parseIntNullable(q.linkId),
@@ -392,7 +410,7 @@ export function iqcAnalyserRoutes() {
    * in by hand is how a transcription error becomes a QC record. A control run
    * is deliberately not offered here — it is not a previously run sample.
    */
-  router.get('/materials/:id/analyser/patient-samples', numericOnly, requirePermission('iqc', 'view'), (req, res) => {
+  router.get('/materials/:id/analyser/patient-samples', numericOnly, noRows, requirePermission('iqc', 'view'), (req, res) => {
     const found = attachmentFor(req.params.id,
       parseIntNullable(req.query.equipmentId), parseIntNullable(req.query.linkId));
     if (!found) return res.status(404).json({ error: 'IQC material not found' });

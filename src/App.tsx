@@ -5,10 +5,11 @@ import SettingsLayout from './layouts/SettingsLayout';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ThemeProvider } from './hooks/useTheme';
 import { ModuleProvider } from './hooks/useModules';
+import { AnalyserTransmissionProvider, useAnalyserTransmission } from './hooks/useAnalyserTransmission';
 import { PermissionProvider, usePermissions } from './hooks/usePermissions';
 import { DutyReminderProvider } from './hooks/useDutyReminders';
 import { CommunicationsProvider } from './hooks/useCommunications';
-import { RequirePermission, RequireAnyPermission } from './components/RequirePermission';
+import { RequirePermission, RequireAnyPermission, RequireAnalyserTransmission } from './components/RequirePermission';
 import { SETTINGS_TABS, visibleSettingsTabs } from './constants/settingsAccess';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
@@ -59,7 +60,8 @@ const ModuleFallback = () => <div className="card">Loading module…</div>;
 /** /settings lands on the first tab the user can actually open. */
 function SettingsLanding() {
   const { can } = usePermissions();
-  const first = visibleSettingsTabs(can)[0];
+  const { enabled: transmits } = useAnalyserTransmission();
+  const first = visibleSettingsTabs(can, transmits)[0];
   return <Navigate to={first ? first.to : '/home'} replace/>;
 }
 
@@ -190,7 +192,7 @@ function AppRoutes() {
   return <Routes>
     <Route path="/setup" element={<SetupPage/>}/>
     <Route path="/login" element={<LoginPage/>}/>
-    <Route element={<ModuleProvider><PermissionProvider><DutyReminderProvider><CommunicationsProvider><AppLayout/></CommunicationsProvider></DutyReminderProvider></PermissionProvider></ModuleProvider>}>
+    <Route element={<ModuleProvider><PermissionProvider><AnalyserTransmissionProvider><DutyReminderProvider><CommunicationsProvider><AppLayout/></CommunicationsProvider></DutyReminderProvider></AnalyserTransmissionProvider></PermissionProvider></ModuleProvider>}>
       <Route index element={<Navigate to="/home"/>}/>
       <Route path="/home" element={<Home/>}/>
       {/* The Main Dashboard is the laboratory's management view and is granted
@@ -242,7 +244,7 @@ function AppRoutes() {
       <Route path="/system-audit" element={<RequirePermission module="system_audit"><Suspense fallback={<ModuleFallback/>}><SystemAuditPage/></Suspense></RequirePermission>}/>
       <Route path="/process-management" element={<RequirePermission module="process_management"><Suspense fallback={<ModuleFallback/>}><ProcessManagementPage/></Suspense></RequirePermission>}/>
       <Route path="/information-management" element={<RequirePermission module="information_management"><Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense></RequirePermission>}/>
-      <Route path="/analyser-middleware" element={<RequirePermission module="analyser_middleware"><Suspense fallback={<ModuleFallback/>}><MiddlewarePage/></Suspense></RequirePermission>}/>
+      <Route path="/analyser-middleware" element={<RequireAnalyserTransmission><RequirePermission module="analyser_middleware"><Suspense fallback={<ModuleFallback/>}><MiddlewarePage/></Suspense></RequirePermission></RequireAnalyserTransmission>}/>
       {/* A placeholder module is still a module: it is gated like every other
           one, so a workspace nobody has been given does not open just because
           it has no content yet. */}
@@ -263,7 +265,7 @@ function AppRoutes() {
         <Route path="activities" element={<RequirePermission module="personnel.activities" action="edit"><ActivitySettingsPage/></RequirePermission>}/>
         {/* The same component the IQC workspace renders, so Settings and the
             bench cannot show different versions of an analyser's state. */}
-        <Route path="analysers" element={<RequirePermission module="iqc" action="edit"><Suspense fallback={<ModuleFallback/>}><InstrumentLinksTab standalone/></Suspense></RequirePermission>}/>
+        <Route path="analysers" element={<RequireAnalyserTransmission><RequirePermission module="iqc" action="edit"><Suspense fallback={<ModuleFallback/>}><InstrumentLinksTab standalone/></Suspense></RequirePermission></RequireAnalyserTransmission>}/>
         <Route path="system" element={<RequirePermission module="settings" action="edit"><SystemSettings/></RequirePermission>}/>
         <Route path="document-import" element={<RequirePermission module="documents.masterlist" action="create"><DocumentImport/></RequirePermission>}/>
         <Route path="evidence" element={<RequirePermission module="records_reports.evidence" action="create"><EvidenceUpload/></RequirePermission>}/>

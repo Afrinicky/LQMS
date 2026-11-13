@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { api, apiRead, errorText } from '../../services/api';
 import { Field, Note, Panel, Pick, Switch, type Route, type SectionProps } from './shared';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * Routing Rules and Mappings.
@@ -136,7 +137,7 @@ export default function MiddlewareRouting({
 
         {!routes.length ? (
           <Note tone="warn">
-            No routing rule exists, so every message is held in SECHLIMS and transmitted nowhere.
+            No routing rule exists, so every message is held in {PRODUCT} and transmitted nowhere.
           </Note>
         ) : (
           <table className="data-table mw-table">
@@ -234,7 +235,7 @@ export default function MiddlewareRouting({
       >
         <Note>
           A destination&rsquo;s own codes, names, units and conversions are under <strong>Parameter
-          Mappings &rarr; SECHLIMS &rarr; LIS</strong>, beside the other two vocabularies a result passes
+          Mappings &rarr; {PRODUCT} &rarr; LIS</strong>, beside the other two vocabularies a result passes
           through on its way out. A code with no mapping is still withheld and named on the delivery, never
           filed under a guess.
         </Note>

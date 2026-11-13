@@ -5,6 +5,7 @@ import {
 import PageHeader from '../components/ui/PageHeader';
 import { usePermissions } from '../hooks/usePermissions';
 import { visibleSettingsTabs } from '../constants/settingsAccess';
+import { useAnalyserTransmission } from '../hooks/useAnalyserTransmission';
 import type { LucideIcon } from 'lucide-react';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -20,7 +21,10 @@ const ICONS: Record<string, LucideIcon> = {
 
 export default function SettingsLayout() {
   const { can } = usePermissions();
-  const visible = visibleSettingsTabs(can);
+  // Analyser Sync & Interfacing is not a setting a laboratory has while it is
+  // not transmitting, so the rail does not carry it.
+  const { enabled: transmits } = useAnalyserTransmission();
+  const visible = visibleSettingsTabs(can, transmits);
   // Someone who only holds a delegated tool here is not an administrator, so
   // the page does not describe administration they cannot perform.
   const isAdministrator = visible.some(t => t.administration);

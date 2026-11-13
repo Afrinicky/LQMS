@@ -47,15 +47,43 @@ function collect(dir: string, base = ''): Array<{ absolute: string; name: string
 export interface PackageOptions {
   /** The API address the extension should talk to, written into its defaults. */
   host: string;
+  /**
+   * The name of the system handing this out. SECHLIMS by default, and TransLis
+   * where the standalone middleware is serving it.
+   */
+  product?: string;
+}
+
+/** Files whose text is rewritten on the way into the package. */
+const TEXT = /\.(js|html|json|css|md|txt)$/i;
+
+/**
+ * Put the right product name into the extension's own wording.
+ *
+ * Only the standalone uppercase word, and only in text files. The extension
+ * also carries the name in lower case inside storage keys, DOM element ids and
+ * a window flag — `sechlims-result-filler-bubble`, `sechlimsShowAnyway` — and
+ * renaming those would be a behaviour change: a browser already enrolled would
+ * stop recognising its own stored session, and the bubble would mount twice.
+ *
+ * So the rule is a case-sensitive word match, which reaches all sixty-four
+ * places the extension says the name to a person and none of the places it
+ * says it to itself. For SECHLIMS the substitution is the word for itself, so
+ * what it hands out is unchanged.
+ */
+function brand(text: string, product: string): string {
+  return text.replace(/\bSECHLIMS\b/g, product);
 }
 
 export async function packageExtension(res: Response, options: PackageOptions): Promise<void> {
   const root = extensionRoot();
   const files = collect(root);
   const host = String(options.host ?? '').replace(/\/+$/, '');
+  const product = String(options.product ?? 'SECHLIMS').trim() || 'SECHLIMS';
+  const slug = product.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', 'attachment; filename="sechlims-result-filler.zip"');
+  res.setHeader('Content-Disposition', `attachment; filename="${slug}-result-filler.zip"`);
 
   const archive = await createZipArchive({ zlib: { level: 9 } });
   archive.on('error', (error: unknown) => { throw error; });
@@ -65,11 +93,15 @@ export async function packageExtension(res: Response, options: PackageOptions): 
     // One file carries the host, and it is generated rather than edited in
     // place, so the source folder on the server stays exactly as shipped.
     if (file.name === 'config.js') continue;
-    archive.file(file.absolute, { name: file.name });
+    if (TEXT.test(file.name)) {
+      archive.append(brand(fs.readFileSync(file.absolute, 'utf8'), product), { name: file.name });
+    } else {
+      archive.file(file.absolute, { name: file.name });
+    }
   }
 
   archive.append(
-    `/* Written by SECHLIMS when this package was downloaded. */\n`
+    `/* Written by ${product} when this package was downloaded. */\n`
     + `export const DEFAULT_HOST = ${JSON.stringify(host)};\n`
     + `export const PACKAGED_AT = ${JSON.stringify(new Date().toISOString())};\n`,
     { name: 'config.js' },

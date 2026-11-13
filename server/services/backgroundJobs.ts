@@ -20,6 +20,7 @@
  * a timer that decides there is nothing to do.
  */
 import type { getDb as GetDb } from '../db/database.js';
+import { middlewareEnabled } from './middlewareSwitch.js';
 
 type DbGetter = typeof GetDb;
 
@@ -58,8 +59,16 @@ export function startBackgroundServices(getDb: DbGetter): void {
   // and pointedly NOT the one the LHIMS middleware owns, which the bridge
   // refuses to open so the transmission that carries patient results today is
   // left exactly as it is. Idle until a laboratory adds a link.
+  //
+  // Held back entirely where the laboratory has switched analyser transmission
+  // off. A guard on the routes alone would leave the host still listening on
+  // every configured port, which is not what "SECHLIMS does not touch an
+  // analyser" means to the person who switched it off.
   import('./instrumentBridge/index.js')
-    .then(({ getBridge }) => getBridge(getDb).start())
+    .then(({ getBridge }) => {
+      if (!middlewareEnabled()) return;
+      getBridge(getDb).start();
+    })
     .catch(e => console.error('[jobs] analyser bridge failed to start:', e));
 
   // The middleware engine, and the seam between it and the bridge above.
@@ -75,8 +84,15 @@ export function startBackgroundServices(getDb: DbGetter): void {
     import('./instrumentBridge/index.js'),
   ]).then(([{ getEngine }, { observeMessages }]) => {
     const engine = getEngine(getDb);
-    engine.start();
+    // The observer is registered either way. It is the seam the bridge hands a
+    // recorded transmission to, and with the switch off the bridge has opened
+    // nothing to hand it — so registering costs nothing, and switching
+    // transmission back on does not need a restart to be wired up again. The
+    // guard inside it is belt and braces for the moment between the switch
+    // being thrown and the last socket closing.
+    if (middlewareEnabled()) engine.start();
     observeMessages(message => {
+      if (!middlewareEnabled()) return;
       engine.ingest({
         linkId: message.linkId,
         instrumentMessageId: message.instrumentMessageId,
@@ -91,7 +107,9 @@ export function startBackgroundServices(getDb: DbGetter): void {
         source: 'bridge',
       });
     });
-    console.log('[jobs] middleware engine started');
+    console.log(middlewareEnabled()
+      ? '[jobs] middleware engine started'
+      : '[jobs] analyser transmission is switched off: no link opened, nothing delivered');
   }).catch(e => console.error('[jobs] middleware engine failed to start:', e));
 
   // Synchronization engine (stub). Self-gates on SECH_LIMS_SYNC_ENABLED.

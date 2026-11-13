@@ -66,6 +66,7 @@ import {
 } from '../services/iqcAnalyteMatching.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
+import { quietWhenMiddlewareOff, requireMiddlewareOn } from '../services/middlewareSwitch.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -75,6 +76,21 @@ const PERFORM_TIER = 'technical';
 export function iqcPortalRoutes() {
   const router = Router();
   router.use(requireAuth);
+
+  /**
+   * The transmission master switch, applied to the analyser paths in this
+   * router and to nothing else.
+   *
+   * The bench board, the charts, recording a run and accepting one are quality
+   * management and are untouched. What stops is the laboratory's own analysers:
+   * registering a feed, a driver posting a message in, asking a link to look,
+   * standing ready to receive, and reading patient samples off a machine.
+   *
+   * Control runs already waiting on the bench stay readable and recordable. A
+   * facility that has switched transmission off is keeping quality control, and
+   * discarding the controls it already holds would protect nobody.
+   */
+  const noAnalyserRows = quietWhenMiddlewareOff<unknown[]>([]);
   const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
   function mayPerform(req: any, sectionId?: number | null): boolean {
@@ -959,7 +975,7 @@ export function iqcPortalRoutes() {
      Instrument feeds
      ==================================================================== */
 
-  router.get('/portal/feeds', (req, res) => {
+  router.get('/portal/feeds', noAnalyserRows, (req, res) => {
     const db = getDb();
     const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     res.json(db.prepare(`SELECT f.*, e.name AS equipment_name,
@@ -969,7 +985,7 @@ export function iqcPortalRoutes() {
         ORDER BY f.name`).all(sectionId, sectionId));
   });
 
-  router.post('/portal/feeds', requirePermission('iqc', 'edit'), (req, res) => {
+  router.post('/portal/feeds', requireMiddlewareOn, requirePermission('iqc', 'edit'), (req, res) => {
     const db = getDb();
     const b = req.body ?? {};
     const name = String(b.name ?? '').trim();
@@ -1076,7 +1092,7 @@ export function iqcPortalRoutes() {
    * Result Filler, the Message Explorer and every module that takes readings
    * off an analyser — and not to Quality Control alone. See `intake.ts`.
    */
-  router.post('/portal/feeds/:id/messages', numericOnly, (req, res) => {
+  router.post('/portal/feeds/:id/messages', numericOnly, requireMiddlewareOn, (req, res) => {
     const db = getDb();
     const feed = db.prepare('SELECT * FROM iqc_instrument_feeds WHERE id = ? AND is_active = 1').get(req.params.id) as any;
     if (!feed) return res.status(404).json({ error: 'Feed not found' });
@@ -1110,7 +1126,7 @@ export function iqcPortalRoutes() {
    * The run dialog shows the newest few; this is where the rest live, narrowed
    * by day, control, analyser or sample identifier.
    */
-  router.get('/portal/transmissions', (req, res) => {
+  router.get('/portal/transmissions', noAnalyserRows, (req, res) => {
     const q = req.query as Record<string, unknown>;
     const scope = resolveUnitScope(req, q.sectionId);
     res.json(listTransmissions(getDb(), {
@@ -1161,7 +1177,7 @@ export function iqcPortalRoutes() {
    * socket — this is what catches up, and it belongs on the bench screen
    * rather than only in the settings the bench cannot reach.
    */
-  router.post('/portal/controls/:id/analyser-fetch', numericOnly, (req, res) => {
+  router.post('/portal/controls/:id/analyser-fetch', numericOnly, requireMiddlewareOn, (req, res) => {
     const db = getDb();
     const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
@@ -1193,7 +1209,7 @@ export function iqcPortalRoutes() {
    * rather than by the Quality Control view right, which a technician running
    * the morning's controls does not hold.
    */
-  router.get('/portal/controls/:id/patient-samples', numericOnly, (req, res) => {
+  router.get('/portal/controls/:id/patient-samples', numericOnly, noAnalyserRows, (req, res) => {
     const db = getDb();
     const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
@@ -1280,7 +1296,7 @@ export function iqcPortalRoutes() {
    * there from earlier is not taken for the one somebody is standing at the
    * analyser waiting for.
    */
-  router.post('/portal/controls/:id/analyser-listen', numericOnly, (req, res) => {
+  router.post('/portal/controls/:id/analyser-listen', numericOnly, requireMiddlewareOn, (req, res) => {
     const db = getDb();
     const material = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });

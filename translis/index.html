@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>TransLis</title>
+  <meta name="theme-color" content="#FFFFFF" />
+  <!-- The stored theme is applied before the first paint, so the window never
+       flashes the wrong background on the way up. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('sechlims.theme');
+        if (t !== 'light' && t !== 'dark') t = 'light';
+        document.documentElement.setAttribute('data-theme', t);
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', t === 'dark' ? '#0A1322' : '#FFFFFF');
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
