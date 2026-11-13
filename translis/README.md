@@ -136,6 +136,13 @@ npm run dist:translis
 
 `dist:translis` produces `release-translis/TransLis-<version>-Setup.exe`.
 
+It is also built in the repository, like the SECHLIMS installer and the Staff
+APK — `.github/workflows/build-translis-installer.yml`, on a push to `main`, on
+a manual run from the Actions tab (from any branch, so an installer can be
+produced before merging), and on a `v*` tag, where it is attached to that
+release beside the APK. The installer comes back as the
+`TransLis_Windows_Installer` artifact.
+
 Its data folder is `%APPDATA%/TransLis/data` on Windows, and the equivalent
 under `~/.config` or `~/Library/Application Support` elsewhere. It is never the
 SECHLIMS folder: two products writing one SQLite file, one of them deleting
@@ -184,7 +191,35 @@ and `check:result-filler`. There is no second copy of any of it to test.
 
 ---
 
-## 8. Where the code is
+## 8. One middleware, two products
+
+TransLis is not a fork, and that is not a convention — it is checked.
+
+Everything in the engine is imported from the SECHLIMS tree: the bridge, the
+middleware engine, the transports, the safety rules, the diagnostics, the
+discovery, the versioning, the Result Filler services, the four HTTP routers
+and all fourteen workspace sections. **An improvement to either product is an
+improvement to both, and it is not finished until it is true in both.**
+
+What is deliberately not shared: the Dennis Assistant, each product's own
+shell, navigation, settings and accounts, the SECHLIMS transmission master
+switch, and the product's own name — which is a build-time constant so the
+shared components read it rather than writing one of the two names into their
+text.
+
+```bash
+npm run check:translis-parity
+```
+
+23 checks, in the gate. It fails when a section, a route or a component exists
+in one product and not the other, when the sections fall out of order, when a
+shared module has been copied into `translis/`, and when a shared component
+names a product directly. A rule that is only written down is a rule that
+lasts until the next person is in a hurry.
+
+---
+
+## 9. Where the code is
 
 | Path | What it holds |
 |---|---|

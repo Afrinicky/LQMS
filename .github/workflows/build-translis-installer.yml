@@ -1,0 +1,155 @@
+name: Build TransLis Installer
+
+# The standalone analyser middleware, as something a facility can be handed.
+#
+# TransLis is a second product out of this repository: the middleware engine,
+# the analyser bridge and the Result Filler, packaged to run without SECHLIMS
+# for facilities that have a laboratory information system already. It shares
+# the engine by import rather than by copy, so it is built here, from this
+# tree, and never drifts from the SECHLIMS it came out of.
+#
+# It builds on the same occasions as the SECHLIMS installer — a push to the
+# default branch, or a manual run from the Actions tab, which works from any
+# branch so an installer can be produced before merging. On a published release
+# or a pushed v* tag it is attached to that release alongside the Staff APK, so
+# one release carries everything a site installs.
+
+on:
+  # Manual run from the Actions tab, on any branch.
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    # A version tag builds the installer and attaches it to that tag's release.
+    tags:
+      - 'v*'
+  # A release published by hand gets the installer attached to it.
+  release:
+    types: [published]
+
+# Needed so the workflow can attach the installer to a Release.
+permissions:
+  contents: write
+
+jobs:
+  build-translis-installer:
+    name: Build TransLis Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    env:
+      # Force node-gyp to use the Visual Studio toolchain that ships on the
+      # windows-latest runner. better-sqlite3 is a native module and TransLis
+      # carries it for the same reason SECHLIMS does: the queue is a table.
+      GYP_MSVS_VERSION: '2022'
+      # No code signing for unsigned internal builds.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # electron-builder reads GH_TOKEN to attach to releases. Publishing is
+      # done by the explicit step below, so an empty value is correct here.
+      GH_TOKEN: ''
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Refuse to package a TransLis that has drifted from the SECHLIMS it
+      # shares an engine with.
+      - name: TransLis parity
+        run: npm run check:translis-parity
+
+      # The whole TransLis build: the renderer, the Electron main process and
+      # the server it embeds, then the hand-authored CommonJS preload copied in
+      # beside the compiled main.
+      - name: Build TransLis renderer and Electron bundle
+        run: npm run build:translis
+
+      # Prove the entry points the installer is about to reference actually
+      # exist. electron-builder will happily package an app whose `main` points
+      # at nothing, and the failure then arrives on a laboratory's computer as
+      # a window that never opens.
+      - name: Check the bundle is complete
+        shell: bash
+        run: |
+          set -e
+          for f in \
+            dist-translis/index.html \
+            dist-translis-electron/translis/electron/main.js \
+            dist-translis-electron/translis/electron/preload.cjs \
+            dist-translis-electron/translis/server/index.js \
+            dist-translis-electron/server/services/middleware/engine.js \
+            dist-translis-electron/server/services/instrumentBridge/index.js \
+            extension/manifest.json
+          do
+            if [ ! -f "$f" ]; then echo "missing: $f"; exit 1; fi
+            echo "present: $f"
+          done
+
+      - name: Rebuild native modules for Electron
+        run: npm run rebuild:native
+
+      # Through the wrapper, not electron-builder directly: applying
+      # `extraMetadata` rewrites package.json, and on a checkout where the
+      # native module still has to be rebuilt — which is every fresh runner —
+      # it is not put back. The wrapper restores it and says so.
+      - name: Build Windows installer (electron-builder)
+        run: node scripts/package-translis.mjs --win
+
+      # The build must not have left the checkout modified. Harmless on a
+      # runner, destructive on a developer's machine, and this is where it
+      # would be noticed.
+      - name: The build left the repository alone
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain package.json)" ]; then
+            echo "package.json was modified by the build and not restored:"
+            git --no-pager diff --stat package.json
+            exit 1
+          fi
+          echo "package.json is unchanged."
+
+      - name: List release output
+        if: always()
+        shell: bash
+        run: |
+          echo "Release folder contents:"
+          ls -la release-translis || true
+
+      - name: Upload installer artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TransLis_Windows_Installer
+          path: |
+            release-translis/*.exe
+            release-translis/*.blockmap
+            release-translis/*.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      # On a published release OR a pushed v* tag, publish the installer so a
+      # facility can download it without a GitHub account that can reach
+      # workflow artifacts.
+      - name: Publish the installer to the release
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-translis/*.exe
+          generate_release_notes: true
