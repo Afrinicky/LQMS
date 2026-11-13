@@ -43,22 +43,22 @@ export const LINK_ROLES = ['sechlims_only', 'lhims_owned', 'shared_forward'] as 
 export type LinkRole = (typeof LINK_ROLES)[number];
 
 export const LINK_ROLE_LABELS: Record<LinkRole, string> = {
-  sechlims_only: 'SECHLIMS only — this analyser transmits to nothing else',
-  lhims_owned: 'LHIMS owns this link — SECHLIMS must not touch it',
-  shared_forward: 'SECHLIMS receives, and passes a copy on to LHIMS',
+  sechlims_only: '{PRODUCT} only — this analyser transmits to nothing else',
+  lhims_owned: 'LHIMS owns this link — {PRODUCT} must not touch it',
+  shared_forward: '{PRODUCT} receives, and passes a copy on to LHIMS',
 };
 
 export const LINK_ROLE_HINTS: Record<LinkRole, string> = {
   sechlims_only:
-    'The safe case, and the usual one. The analyser is not transmitting anywhere today, so SECHLIMS takes it '
+    'The safe case, and the usual one. The analyser is not transmitting anywhere today, so {PRODUCT} takes it '
     + 'and nothing existing is affected. Both chemistry analysers and the second haematology analyser are this.',
   lhims_owned:
-    'Recorded so the system knows to stay away from it. SECHLIMS will refuse to bind this port or dial this '
+    'Recorded so the system knows to stay away from it. {PRODUCT} will refuse to bind this port or dial this '
     + 'analyser. It may still take a COPY of what this analyser sends, by following the LHIMS client\'s own '
     + 'append log — that reads a file rather than touching the connection, so the existing transmission is '
     + 'unaffected either way.',
   shared_forward:
-    'SECHLIMS receives from the analyser and forwards a copy onward to the LHIMS middleware. Only switch this '
+    '{PRODUCT} receives from the analyser and forwards a copy onward to the LHIMS middleware. Only switch this '
     + 'on for an analyser LHIMS is NOT already receiving, once the link has proved itself — it is how LHIMS '
     + 'could eventually carry all four analysers, but it must never be pointed at a link LHIMS already has.',
 };
@@ -70,20 +70,20 @@ export const LINK_MODES = ['server', 'client', 'file_drop', 'lhims_tap'] as cons
 export type LinkMode = (typeof LINK_MODES)[number];
 
 export const LINK_MODE_LABELS: Record<LinkMode, string> = {
-  server: 'SECHLIMS listens; the analyser connects to it',
-  client: 'SECHLIMS connects out to the analyser',
+  server: '{PRODUCT} listens; the analyser connects to it',
+  client: '{PRODUCT} connects out to the analyser',
   file_drop: 'The analyser writes files to a watched folder',
   lhims_tap: 'Follow the LHIMS client\'s own log — a copy, touching nothing',
 };
 
 export const LINK_MODE_HINTS: Record<LinkMode, string> = {
   server: 'The usual arrangement, and what the LHIMS client uses. Give the analyser this host\'s address and the port below.',
-  client: 'For an analyser that listens instead of dialling out. SECHLIMS opens the connection and keeps it open.',
+  client: 'For an analyser that listens instead of dialling out. {PRODUCT} opens the connection and keeps it open.',
   file_drop: 'For an analyser whose only export is a file. Nothing is connected; the folder is watched.',
   lhims_tap:
     'The way to get a copy of an analyser LHIMS already owns. Set WRITE_TO_FILE = Yes in the LHIMS client and it '
-    + 'appends every message it receives to LHIMSDataInput.txt; SECHLIMS follows that file read-only, the way tail does. '
-    + 'No port is bound, no connection is opened, nothing is intercepted — if SECHLIMS stops, the LHIMS transmission '
+    + 'appends every message it receives to LHIMSDataInput.txt; {PRODUCT} follows that file read-only, the way tail does. '
+    + 'No port is bound, no connection is opened, nothing is intercepted — if {PRODUCT} stops, the LHIMS transmission '
     + 'does not notice.',
 };
 
@@ -103,7 +103,7 @@ export function modeIsPassive(mode?: string | null): boolean {
  * May the bridge open this link at all?
  *
  * An LHIMS-owned link is off limits — with exactly one exception, and it is
- * the exception that lets haematology 1 reach SECHLIMS: following the
+ * the exception that lets haematology 1 reach {PRODUCT}: following the
  * middleware's own append log reads a file, and reading a file cannot disturb
  * a socket. Anything that binds, dials or intercepts stays refused.
  */
@@ -115,7 +115,7 @@ export function linkIsOurs(role?: string | null, mode?: string | null): boolean 
 /**
  * Does this link carry a copy of its results onward to LHIMS?
  *
- * The role decides it, and nothing else may. "SECHLIMS only — this analyser
+ * The role decides it, and nothing else may. "{PRODUCT} only — this analyser
  * transmits to nothing else" is a sentence about where the results go, and a
  * link saved under that role while an older setting still said "carry these to
  * LHIMS" went on carrying them: the screen said one thing, the link did
@@ -205,11 +205,11 @@ export const AFTER_TRANSMISSION_LABELS = {
 
 export const AFTER_TRANSMISSION_HINTS = {
   hold:
-    'The usual arrangement. The analyser keeps one connection and sends each result down it, and SECHLIMS '
+    'The usual arrangement. The analyser keeps one connection and sends each result down it, and {PRODUCT} '
     + 'never hangs up.',
   close:
     'For an analyser that treats one connection as one transmission and waits for the computer to hang up '
-    + 'once it has been acknowledged; left waiting, it abandons the link. SECHLIMS closes politely a few '
+    + 'once it has been acknowledged; left waiting, it abandons the link. {PRODUCT} closes politely a few '
     + 'seconds after the last message, and the analyser dials again by itself for the next sample. '
     + 'Not for an analyser whose manual says it holds a persistent connection and reconnects by itself — the '
     + 'HumaCount 5D is one of those, and on those a connection that keeps dropping is a network fault, most '
@@ -607,7 +607,7 @@ export const INSTRUMENT_PROFILES: InstrumentProfile[] = [
     notes: 'Two ways in, and the analyser\u2019s own manual validates both. A watched folder reads the '
       + 'ASTM file the HI software writes to its Output Worklist when a worksheet is approved \u2014 that '
       + 'works on every software version and needs no port opened. From version 1.5 the HI software can '
-      + 'instead listen for ASTM over TCP on its own port (6557 unless it was changed), which SECHLIMS '
+      + 'instead listen for ASTM over TCP on its own port (6557 unless it was changed), which {PRODUCT} '
       + 'dials. A control request names itself Control in the patient record\u2019s sample-type field.',
   },
   {

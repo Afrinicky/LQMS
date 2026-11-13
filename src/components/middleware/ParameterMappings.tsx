@@ -3,6 +3,7 @@ import { ArrowRight, Check, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { api, apiRead, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { Field, Note, Panel, Pick, Switch, when, type Destination, type SectionProps } from './shared';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * Parameter mappings — what a result is CALLED at each step of its journey.
@@ -25,6 +26,18 @@ import { Field, Note, Panel, Pick, Switch, when, type Destination, type SectionP
 
 const TABS = ['Analyser → SECHLIMS', 'SECHLIMS → LIS'] as const;
 type Tab = (typeof TABS)[number];
+
+/**
+ * What each tab is CALLED, as against what it is keyed on.
+ *
+ * The keys above are compared against in three places and are not worth
+ * churning for a word, so they stay. The label is what the laboratory reads,
+ * and it names whichever product is rendering this.
+ */
+const TAB_LABELS: Record<Tab, string> = {
+  'Analyser → SECHLIMS': `Analyser → ${PRODUCT}`,
+  'SECHLIMS → LIS': `${PRODUCT} → LIS`,
+};
 
 type MappingLink = {
   id: number; name: string; profileKey: string | null; profileLabel: string | null;
@@ -66,7 +79,7 @@ export default function MiddlewareParameterMappings({ destinations, canConfigure
     <>
       <div className="tabs is-inline rf-subtabs">
         {TABS.map(name => (
-          <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>
+          <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{TAB_LABELS[name]}</button>
         ))}
       </div>
 
@@ -422,7 +435,7 @@ function FromAnalyser({ links, profiles, units, canConfigure, busy, setBusy, onE
 
       {link && (
         <UnitMapPanel
-          title="The scale SECHLIMS keeps each parameter in"
+          title={`The scale ${PRODUCT} keeps each parameter in`}
           blurb={'An analyser\u2019s transmitted unit is not always the one on its screen. A Sysmex XN shows RET# as '
             + '267.3 x10^9/L and sends 0.2673 x10^6/uL \u2014 the same concentration at two scales. Set the scale this '
             + 'laboratory keeps, and readings are rescaled onto it as they arrive, with the original kept beside them.'}
@@ -529,7 +542,7 @@ PartProps & { units: KnownUnit[] }) {
         <h4>The scale the receiving system keeps each parameter in</h4>
         <p className="muted">
           No link carries results onward to LHIMS at the moment, so there is nothing to convert for. A link
-          carries onward only when its role is &ldquo;SECHLIMS receives, and passes a copy on to LHIMS&rdquo;.
+          carries onward only when its role is &ldquo;{PRODUCT} receives, and passes a copy on to LHIMS&rdquo;.
         </p>
       </section>
     );
@@ -547,7 +560,7 @@ PartProps & { units: KnownUnit[] }) {
       )}
       <UnitMapPanel
         title="The scale the receiving system keeps each parameter in"
-        blurb={'Set this where LHIMS files a parameter at a different scale from the one SECHLIMS holds it in. '
+        blurb={`Set this where LHIMS files a parameter at a different scale from the one ${PRODUCT} holds it in. `
           + 'A result that cannot be rescaled with certainty is withheld from the delivery and named, rather '
           + 'than sent in the wrong scale.'}
         parameters={parametersOf(link)}
@@ -986,7 +999,7 @@ function ToLhims({ links, lhimsMaps, canConfigure, busy, setBusy, onError, onNot
       {!carriers.length ? (
         <Note>
           No link carries results onward to LHIMS at the moment, so nothing here is in use. A link does so only
-          under the role “SECHLIMS receives, and passes a copy on to LHIMS”.
+          under the role “{PRODUCT} receives, and passes a copy on to LHIMS”.
         </Note>
       ) : (
         <div className="mw-inset mw-grid">
@@ -1007,7 +1020,7 @@ function ToLhims({ links, lhimsMaps, canConfigure, busy, setBusy, onError, onNot
 
           {!rows.length ? <Note>No id has been set by hand on this link.</Note> : (
             <table className="data-table mw-table">
-              <thead><tr><th>SECHLIMS calls it</th><th /><th>LHIMS measure id</th><th /></tr></thead>
+              <thead><tr><th>{PRODUCT} calls it</th><th /><th>LHIMS measure id</th><th /></tr></thead>
               <tbody>
                 {rows.map((row, index) => (
                   <tr key={`${row.name}-${index}`}>
@@ -1034,7 +1047,7 @@ function ToLhims({ links, lhimsMaps, canConfigure, busy, setBusy, onError, onNot
 
           {canConfigure && (
             <div className="mw-inset mw-grid">
-              <Field label="SECHLIMS calls it" value={draft.name} onValue={v => setDraft(d => ({ ...d, name: v }))} placeholder="Haemoglobin" />
+              <Field label={`${PRODUCT} calls it`} value={draft.name} onValue={v => setDraft(d => ({ ...d, name: v }))} placeholder="Haemoglobin" />
               <Field label="LHIMS measure id" value={draft.measureId} type="number" onValue={v => setDraft(d => ({ ...d, measureId: v }))} placeholder="3" />
               <div className="mw-actions">
                 <button className="btn ghost" disabled={busy === 'measures' || !draft.name.trim() || !draft.measureId.trim()}

@@ -5,6 +5,7 @@ import {
   Facts, Field, Note, Panel, Pick, StateChip, Switch,
   endpointOf, when, type Destination, type SectionProps,
 } from './shared';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * LIS/HIS Destination Management.
@@ -68,7 +69,7 @@ export default function MiddlewareDestinations({
     <>
       <Panel
         title="Destinations"
-        subtitle="SECHLIMS, LHIMS and any other compatible information system, each configured independently."
+        subtitle={`${PRODUCT}, LHIMS and any other compatible information system, each configured independently.`}
       >
         {!destinations.length ? (
           <Note>

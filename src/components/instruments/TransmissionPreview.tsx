@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import { DetailModal } from '../ui';
+import { PRODUCT } from '../../constants/product';
 
 /* ----------------------------------------------------------------------------
    What the analyser actually sent
@@ -162,7 +163,7 @@ export default function TransmissionPreview({ mapUrl, message, onUse, onClose }:
       subtitle={
         <>
           {analyser ? `${analyser} · ` : ''}
-          {receivedAt ? `reached SECHLIMS ${receivedAt}` : 'arrival time not recorded'}
+          {receivedAt ? `reached ${PRODUCT} ${receivedAt}` : 'arrival time not recorded'}
         </>
       }
       footer={
@@ -180,7 +181,7 @@ export default function TransmissionPreview({ mapUrl, message, onUse, onClose }:
           deciding whether this is the run they just transmitted asks for the
           time it arrived before it asks for anything else. */}
       <dl className="iqc-tx-facts">
-        <div><dt>Reached SECHLIMS</dt><dd>{receivedAt ?? '—'}</dd></div>
+        <div><dt>Reached {PRODUCT}</dt><dd>{receivedAt ?? '—'}</dd></div>
         <div>
           <dt>Stamped by the analyser</dt>
           <dd>{ranAt ?? <span className="muted">not stated in the transmission</span>}</dd>

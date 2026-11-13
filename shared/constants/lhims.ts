@@ -771,7 +771,7 @@ export const LHIMS_TAP_FILENAME = 'LHIMSDataInput.txt';
 export const LHIMS_TAP_SETUP_STEPS = [
   'On the PC running the LHIMS client, open its configuration and set WRITE_TO_FILE = Yes.',
   'Restart the LHIMS client. It will begin appending every message it receives to LHIMSDataInput.txt, beside the program.',
-  'Share that folder read-only over the network, or point SECHLIMS at the file directly if it runs on the same machine.',
+  'Share that folder read-only over the network, or point {PRODUCT} at the file directly if it runs on the same machine.',
   'Add a link here in "Follow the LHIMS client\'s log" mode and give it the path to that file.',
 ];
 

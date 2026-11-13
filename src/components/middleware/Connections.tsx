@@ -1,5 +1,6 @@
 import { Lock, Stethoscope } from 'lucide-react';
 import { Facts, Note, Panel, ago, linkEndpointOf, when, type SectionProps } from './shared';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * Active Analyser Connections.
@@ -44,12 +45,12 @@ export default function MiddlewareConnections({ links, routes, onOpen }: Section
               {link.mode === 'lhims_tap' ? (
                 <Note>
                   A copy is taken by following the client's own append log, read-only. No port is bound and no
-                  connection is opened, so if SECHLIMS stops the existing transmission does not notice.
+                  connection is opened, so if {PRODUCT} stops the existing transmission does not notice.
                 </Note>
               ) : (
                 <Note tone="warn">
                   Nothing will arrive on this link: it is recorded as one LHIMS owns and is set to bind or dial, so
-                  SECHLIMS never opens it. To take a copy without touching the connection, set it to follow the LHIMS
+                  {PRODUCT} never opens it. To take a copy without touching the connection, set it to follow the LHIMS
                   client's own log.
                 </Note>
               )}
@@ -101,7 +102,7 @@ export default function MiddlewareConnections({ links, routes, onOpen }: Section
         )}
         {ours.some(l => l.unrouted > 0) && (
           <Note tone="warn">
-            Messages marked unrouted matched no routing rule. They are held in SECHLIMS, lost nowhere, and can be
+            Messages marked unrouted matched no routing rule. They are held in {PRODUCT}, lost nowhere, and can be
             re-routed once a rule covers them.
             {' '}<button type="button" className="pq-link" onClick={() => onOpen?.('Routing & Mappings')}>Open routing</button>
           </Note>

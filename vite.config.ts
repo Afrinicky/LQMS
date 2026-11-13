@@ -7,7 +7,13 @@ import { defineConfig } from 'vite';
 const BUILD_STAMP = new Date().toISOString().slice(0, 16).replace('T', ' ');
 
 export default defineConfig({
-  define: { __BUILD_STAMP__: JSON.stringify(BUILD_STAMP) },
+  // The product name the middleware components render. SECHLIMS defines it as
+  // itself, so those components show exactly the text they always have; the
+  // TransLis build defines it as TransLis. See src/constants/product.ts.
+  define: {
+    __BUILD_STAMP__: JSON.stringify(BUILD_STAMP),
+    __PRODUCT_NAME__: JSON.stringify('SECHLIMS'),
+  },
   // Absolute base. The packaged renderer is served over http:// from the
   // embedded API server (same origin), NOT file://, so assets must resolve to
   // the origin root (/assets/index-xxxx.js). A relative base ('./') breaks on

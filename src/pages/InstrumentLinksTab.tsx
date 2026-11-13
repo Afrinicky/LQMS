@@ -19,6 +19,8 @@ import {
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
 import LiveTransmission from '../components/instruments/LiveTransmission';
+import { PRODUCT } from '../constants/product';
+import { withProduct } from '../../shared/constants/product';
 
 /**
  * Analyser links.
@@ -522,7 +524,7 @@ function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMes
             <AlertTriangle size={12} />
             <span>
               Nothing will arrive on this link. It is recorded as one LHIMS owns and set to bind or dial, so
-              SECHLIMS never opens it.
+              {PRODUCT} never opens it.
               {' '}<button type="button" className="pq-link" onClick={onTransmission}>See what to do</button>
             </span>
           </p>
@@ -853,7 +855,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
           {profile && (
             <p className="lf-hint">
               <Check size={12} /> {profile.analyteCount} parameters already mapped for this model.
-              {profile.notes ? <Why summary="What this model needs">{profile.notes}</Why> : null}
+              {profile.notes ? <Why summary="What this model needs">{withProduct(profile.notes, PRODUCT)}</Why> : null}
             </p>
           )}
         </Section>
@@ -863,12 +865,12 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
           <div className="lf-grid">
             <label className="lf-wide"><span>What this link is for</span>
               <select value={form.role} onChange={e => set('role', e.target.value as LinkRole)}>
-                {LINK_ROLES.map(r => <option key={r} value={r}>{LINK_ROLE_LABELS[r]}</option>)}
+                {LINK_ROLES.map(r => <option key={r} value={r}>{withProduct(LINK_ROLE_LABELS[r], PRODUCT)}</option>)}
               </select>
             </label>
             <label><span>How it is reached</span>
               <select value={form.mode} onChange={e => set('mode', e.target.value as LinkMode)}>
-                {LINK_MODES.map(m => <option key={m} value={m}>{LINK_MODE_LABELS[m]}</option>)}
+                {LINK_MODES.map(m => <option key={m} value={m}>{withProduct(LINK_MODE_LABELS[m], PRODUCT)}</option>)}
               </select>
             </label>
             <label><span>What it speaks</span>
@@ -882,7 +884,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             <p className="lf-alert">
               <AlertTriangle size={13} />
               <span>
-                Nothing will arrive on this link. SECHLIMS never binds or dials a link LHIMS owns.
+                Nothing will arrive on this link. {PRODUCT} never binds or dials a link LHIMS owns.
                 {' '}<button type="button" className="pq-link" onClick={() => set('mode', 'lhims_tap')}>
                   Follow its log instead
                 </button> — that reads a file and touches nothing.
@@ -890,8 +892,8 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             </p>
           ) : (
             <Why summary="What these three choices mean">
-              <p><strong>{LINK_ROLE_LABELS[form.role]}</strong> — {LINK_ROLE_HINTS[form.role]}</p>
-              <p><strong>{LINK_MODE_LABELS[form.mode]}</strong> — {LINK_MODE_HINTS[form.mode]}</p>
+              <p><strong>{withProduct(LINK_ROLE_LABELS[form.role], PRODUCT)}</strong> — {withProduct(LINK_ROLE_HINTS[form.role], PRODUCT)}</p>
+              <p><strong>{withProduct(LINK_MODE_LABELS[form.mode], PRODUCT)}</strong> — {withProduct(LINK_MODE_HINTS[form.mode], PRODUCT)}</p>
               <p><strong>{LINK_PROTOCOL_LABELS[form.protocol]}</strong> — {LINK_PROTOCOL_HINTS[form.protocol]}</p>
             </Why>
           )}
@@ -943,7 +945,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                 </select>
               </label>
               <p className="lf-hint">
-                {form.closeAfterMessage ? AFTER_TRANSMISSION_HINTS.close : AFTER_TRANSMISSION_HINTS.hold}
+                {withProduct(form.closeAfterMessage ? AFTER_TRANSMISSION_HINTS.close : AFTER_TRANSMISSION_HINTS.hold, PRODUCT)}
               </p>
             </>
           )}
@@ -965,15 +967,15 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
               <p className="lf-hint">
                 This dials the analyser, so the analyser has to be LISTENING on that port. Most analysers that
                 transmit do the dialling themselves and listen on nothing at all — for those, use
-                &ldquo;{LINK_MODE_LABELS.server}&rdquo; instead.
+                &ldquo;{withProduct(LINK_MODE_LABELS.server, PRODUCT)}&rdquo; instead.
                 {lastPeer && (
-                  <> This one last transmitted to SECHLIMS from <code>{String(lastPeer).replace(/^::ffff:/, '').replace(/:\d+$/, '')}</code>,
+                  <> This one last transmitted to {PRODUCT} from <code>{String(lastPeer).replace(/^::ffff:/, '').replace(/:\d+$/, '')}</code>,
                   which is where it is, though not necessarily a port it accepts connections on.</>
                 )}
               </p>
               {form.remotePort && form.listenPort && form.remotePort === form.listenPort && (
                 <p className="lf-hint warn">
-                  Port {form.remotePort} is the port SECHLIMS itself listens on for this link, not a port on the
+                  Port {form.remotePort} is the port {PRODUCT} itself listens on for this link, not a port on the
                   analyser. Dialling it reaches nothing.
                 </p>
               )}
@@ -995,7 +997,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
               {localDrivePath(form.watchPath) && (
                 <p className="lf-hint warn">
                   <AlertTriangle size={13} /> A drive letter means the disk in <strong>this</strong> computer — the
-                  one SECHLIMS runs on. If the analyser&rsquo;s software is on another computer, share that folder
+                  one {PRODUCT} runs on. If the analyser&rsquo;s software is on another computer, share that folder
                   and enter it as <code>{suggestShare(form.watchPath)}</code> instead: the computer&rsquo;s name,
                   then the share name.
                 </p>
@@ -1033,7 +1035,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                 <TextField value={form.tapPath} onValue={v => set('tapPath', v)}
                   placeholder={`\\\\HAEM-PC\\LHIMS CLIENT\\${LHIMS_TAP_FILENAME}`} /></label>
               <Why summary="How to switch that log on">
-                <ol className="lf-steps">{LHIMS_TAP_SETUP_STEPS.map((step, i) => <li key={i}>{step}</li>)}</ol>
+                <ol className="lf-steps">{LHIMS_TAP_SETUP_STEPS.map((step, i) => <li key={i}>{withProduct(step, PRODUCT)}</li>)}</ol>
               </Why>
             </>
           )}
@@ -1101,10 +1103,10 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             </label>
           ) : (
             <p className="ls-note">
-              This link carries its results to SECHLIMS and nowhere else.
+              This link carries its results to {PRODUCT} and nowhere else.
               {lhimsOwned
                 ? ' A link LHIMS already receives is never delivered back into LHIMS; two copies of one result is worse than none.'
-                : ' To pass a copy on to LHIMS as well, set what this link is for to “SECHLIMS receives, and passes a copy on to LHIMS”.'}
+                : ` To pass a copy on to LHIMS as well, set what this link is for to “${withProduct(LINK_ROLE_LABELS.shared_forward, PRODUCT)}”.`}
             </p>
           )}
           {form.forwardEnabled && (
@@ -1271,7 +1273,7 @@ function TryDialog({ link, onClose }: { link: Link; onClose: () => void }) {
           <button type="button" className="pq-link" onClick={onClose}><X size={14} /></button>
         </header>
         <p className="iqc-modal-lead">
-          Paste a transmission this analyser actually produced and see exactly what SECHLIMS would make of it —
+          Paste a transmission this analyser actually produced and see exactly what {PRODUCT} would make of it —
           which analytes, and whether it would be treated as a control. Nothing is recorded; this answers a
           question rather than making an entry.
         </p>

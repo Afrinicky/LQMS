@@ -6,6 +6,7 @@ import {
   LINK_MODE_LABELS, LINK_PROTOCOL_LABELS, LINK_STATE_LABELS, modeIsPassive,
   type LinkMode, type LinkProtocol,
 } from '../../../shared/constants/instruments';
+import { PRODUCT } from '../../constants/product';
 
 /** One thing the bridge did, for the window that watches it happen. */
 export type BridgeEvent = {
@@ -140,7 +141,7 @@ export default function LiveTransmission({ linkId, canEdit = false, onClose }: {
   } else if (link?.mode === 'client') {
     setup.push(['EQUIPMENT_IP', String(link?.remote_host ?? '—')]);
     setup.push(['PORT', String(link?.remote_port ?? '—')]);
-    setup.push(['MODE', 'client — SECHLIMS connects out']);
+    setup.push(['MODE', `client — ${PRODUCT} connects out`]);
   } else if (link?.mode === 'file_drop') {
     setup.push(['FOLDER', String(link?.watch_path ?? '—')]);
     setup.push(['PATTERN', link?.file_pattern || 'every file']);

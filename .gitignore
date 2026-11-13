@@ -42,3 +42,6 @@ local-data/
 # writes one into the working tree, which is how a probe file came to be
 # committed by a `git add -A` that happened to run while it was mid-flight.
 .tmp-access-cache-check/
+
+# TransLis renderer build output
+dist-translis/

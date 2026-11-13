@@ -9,6 +9,7 @@ import {
   VERIFY_STATUS_TONES, type DeviceState, type FillState,
 } from '../../../shared/constants/resultFiller';
 import { Facts, Field, Note, Panel, Pick, Switch, when, type SectionProps } from './shared';
+import { PRODUCT } from '../../constants/product';
 
 /**
  * The Result Filler extension, configured and administered from inside the
@@ -208,7 +209,7 @@ function Install({ overview, adapters, devices, onError, onNotice, setBusy, busy
       <Panel
         title="Install on a bench computer"
         subtitle="Four steps, once per computer."
-        actions={<Field label="Address staff open SECHLIMS at" value={host} onValue={setHost} />}
+        actions={<Field label={`Address staff open ${PRODUCT} at`} value={host} onValue={setHost} />}
       >
         <ol className="rf-steps">
           <li>
@@ -224,11 +225,11 @@ function Install({ overview, adapters, devices, onError, onNotice, setBusy, busy
           </li>
           <li>
             <strong>Allow the sites</strong>
-            <span>In the extension’s Settings, allow this SECHLIMS site and any other result-entry site. The bubble appears on every tab of those sites and nowhere else.</span>
+            <span>In the extension’s Settings, allow this {PRODUCT} site and any other result-entry site. The bubble appears on every tab of those sites and nowhere else.</span>
           </li>
           <li>
             <strong>Pair and sign in</strong>
-            <span>Issue a pairing code under Browsers, enter it in the extension, then sign in with the usual SECHLIMS account.</span>
+            <span>Issue a pairing code under Browsers, enter it in the extension, then sign in with the usual {PRODUCT} account.</span>
           </li>
         </ol>
       </Panel>
@@ -237,7 +238,7 @@ function Install({ overview, adapters, devices, onError, onNotice, setBusy, busy
         <ol className="rf-flow">
           <li><b>Open</b> the patient, sample or control result-entry form.</li>
           <li>The bubble <b>reads the whole page</b> — the barcode printed in a table cell, the patient’s number, and every result box with the name beside it.</li>
-          <li>SECHLIMS <b>verifies</b> the identifier against the analyser transmission and matches each reading to the box it belongs in.</li>
+          <li>{PRODUCT} <b>verifies</b> the identifier against the analyser transmission and matches each reading to the box it belongs in.</li>
           <li>Press <b>Populate results</b>. The fields fill.</li>
           <li><b>Review, save and authorise</b> exactly as before.</li>
         </ol>
@@ -312,7 +313,7 @@ function Browsers({ devices, mayEdit, mayRemove, busy, setBusy, onError, onNotic
 
       <Panel
         title="Enrolled browsers"
-        subtitle="A browser may ask SECHLIMS for pending results only once an administrator has enrolled it."
+        subtitle={`A browser may ask ${PRODUCT} for pending results only once an administrator has enrolled it.`}
         actions={mayEdit && (
           <button className="btn" onClick={() => setAdding(v => !v)}><Plus size={13} /> Add a browser</button>
         )}
