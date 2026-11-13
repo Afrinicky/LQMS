@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { ShieldOff } from 'lucide-react';
+import { PowerOff, ShieldOff } from 'lucide-react';
 import { usePermissions, type PermissionAction } from '../hooks/usePermissions';
+import { useAnalyserTransmission } from '../hooks/useAnalyserTransmission';
 
 /**
  * Route-level permission gate.
@@ -65,6 +66,36 @@ export function RequireAnyPermission({
       <div className="disabled-module">
         <span className="es-ico"><ShieldOff size={26} /></span>
         <h3>You do not have access to this area</h3>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Gate a route that only exists while this laboratory transmits.
+ *
+ * The analyser workspace and the Analyser Sync page are absent from the
+ * navigation when transmission is switched off, so this catches the ways
+ * somebody still reaches the address — a bookmark, an old link, or the switch
+ * being thrown while the tab was open. It says which of the two reasons applies
+ * rather than one wording that covers both, because they need different people
+ * to fix them: a refusal needs an administrator to grant access, and this needs
+ * an administrator to switch transmission on.
+ */
+export function RequireAnalyserTransmission({ children }: { children: React.ReactNode }) {
+  const { enabled, loading } = useAnalyserTransmission();
+  if (loading) return <div className="card">Checking your access…</div>;
+  if (enabled) return <>{children}</>;
+  return (
+    <div className="module-page">
+      <div className="disabled-module">
+        <span className="es-ico"><PowerOff size={26} /></span>
+        <h3>Analyser transmission is switched off</h3>
+        <p>
+          This laboratory runs SECHLIMS for quality management, so it does not
+          connect to an analyser and does not carry patient results. An
+          administrator can switch transmission on under Settings → System.
+        </p>
       </div>
     </div>
   );

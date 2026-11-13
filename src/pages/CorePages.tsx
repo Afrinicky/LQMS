@@ -7,6 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { canEnterSettings, settingsBlurb } from '../constants/settingsAccess';
+import { useAnalyserTransmission } from '../hooks/useAnalyserTransmission';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
@@ -37,6 +38,7 @@ export function Home() {
   const navigate = useNavigate();
   const { isEnabled } = useModules();
   const { can, canView } = usePermissions();
+  const { enabled: transmits } = useAnalyserTransmission();
   const [unread, setUnread] = useState<number | null>(null);
   const [needsRegistration, setNeedsRegistration] = useState(false);
 
@@ -62,19 +64,23 @@ export function Home() {
       // Settings holds delegated tools as well as administration, so it shows
       // for anyone who can open at least one page inside it.
       const landing = section.key === 'settings'
-        ? (canEnterSettings(can) ? 'settings' : undefined)
-        : section.modules.find(k => isEnabled(k) && canView(k));
+        ? (canEnterSettings(can, transmits) ? 'settings' : undefined)
+        // The analyser workspace is skipped while this laboratory is not
+        // transmitting, so Information Management lands on its own register
+        // rather than on a page that would refuse.
+        : section.modules.find(k =>
+            (transmits || k !== 'analyser_middleware') && isEnabled(k) && canView(k));
       if (!landing) return [];
       return [{
         // The Settings card describes what this person will actually find
         // inside it rather than the administrator's version of the page.
-        section: section.key === 'settings' ? { ...section, desc: settingsBlurb(can) } : section,
+        section: section.key === 'settings' ? { ...section, desc: settingsBlurb(can, transmits) } : section,
         to: MODULE_PATHS.get(landing) ?? '#',
         // Only the twelve quality essentials carry an index badge (01–12).
         essentialIndex: section.group === 'essential' ? essentials.indexOf(section) + 1 : null,
       }];
     });
-  }, [isEnabled, canView, can]);
+  }, [isEnabled, canView, can, transmits]);
 
   const firstName = user?.fullName?.trim().split(/\s+/)[0] ?? 'there';
 

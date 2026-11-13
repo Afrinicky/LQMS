@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { canEnterSettings } from '../constants/settingsAccess';
+import { useAnalyserTransmission } from '../hooks/useAnalyserTransmission';
 import { api } from '../services/api';
 import { moduleIcon, sectionIcon } from '../components/ui/moduleIcons';
 import GlobalSearch from '../components/ui/GlobalSearch';
@@ -34,6 +35,7 @@ export default function AppLayout() {
   const { user, logout, refreshUser } = useAuth();
   const { modules, isEnabled } = useModules();
   const { can, canView } = usePermissions();
+  const { enabled: transmits } = useAnalyserTransmission();
   const navigate = useNavigate();
   const location = useLocation();
   // Where the sidebar starts is the laboratory's to set: a bench terminal that
@@ -60,9 +62,14 @@ export default function AppLayout() {
   // Settings is the one exception to "one module, one right": it also holds
   // delegated tools (roster building, imports, evidence), so it appears for
   // anyone who can open at least one page inside it.
+  //
+  // The analyser workspace carries one more condition: a laboratory that has
+  // switched transmission off does not connect to an analyser, so the entry is
+  // not drawn at all rather than drawn and refused.
   const isVisible = (key: string) => {
     if (!(enabled.size === 0 || enabled.has(key))) return false;
-    return key === 'settings' ? canEnterSettings(can) : canView(key);
+    if (key === 'analyser_middleware' && !transmits) return false;
+    return key === 'settings' ? canEnterSettings(can, transmits) : canView(key);
   };
   const moduleByKey = useMemo(() => new Map(MODULES.map(m => [m.key, m])), []);
 
@@ -75,7 +82,7 @@ export default function AppLayout() {
       items: s.modules.filter(isVisible).map(k => moduleByKey.get(k)).filter(Boolean) as typeof MODULES,
     })).filter(s => s.items.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [enabled, moduleByKey, canView, can]
+    [enabled, moduleByKey, canView, can, transmits]
   );
   const activeSectionKey = useMemo(
     () => sections.find(s => s.items.some(m => location.pathname.startsWith(m.path)))?.key,

@@ -18,6 +18,7 @@ const RECEIVING_TABS = ['Goods receipt', 'Batches & lots'] as const;
 // two ends, so they share a tab rather than competing for the top bar.
 const STOCK_MANAGEMENT_TABS = ['Stock take', 'Stock movements'] as const;
 import { useModules } from '../hooks/useModules';
+import { useAnalyserTransmission } from '../hooks/useAnalyserTransmission';
 import { api, API_BASE, getToken, ApiError, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
@@ -236,6 +237,7 @@ function EquipmentDuties({ item }: { item: EquipmentItem }) {
 export function EquipmentPage() {
   const { can } = usePermissions();
   const { isEnabled } = useModules();
+  const { enabled: transmits } = useAnalyserTransmission();
   const { staff, sections, locations } = useLookups();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [tab, setTab] = useState('Dashboard');
@@ -372,7 +374,10 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Analyser Sync', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
+    {/* Analyser Sync is dropped while this laboratory is not transmitting: the
+        tab exists to show what an instrument is sending, and it is sending
+        nowhere. */}
+    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns', 'Adverse Events', ...(transmits ? ['Analyser Sync'] : []), 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="equipment" /><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -511,7 +516,7 @@ export function EquipmentPage() {
     {/* "Is the Sysmex transmitting?" is an equipment question long before it is
         a quality-control one, and the answer lived only in the last tab of the
         IQC workspace. */}
-    {tab === 'Analyser Sync' && <EquipmentAnalyserTab equipment={equipment} />}
+    {tab === 'Analyser Sync' && transmits && <EquipmentAnalyserTab equipment={equipment} />}
 
     {tab === 'Training & Competency' && <EquipmentCompetencyTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void reloadSelected(); }} />}
 

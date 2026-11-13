@@ -23,6 +23,7 @@ import XlsxToolbar from '../components/XlsxToolbar';
 import { DetailModal, NumberField } from '../components/ui';
 import { OrgChartBoard } from '../components/ui/OrgChart';
 import { usePermissions } from '../hooks/usePermissions';
+import { useAnalyserTransmission } from '../hooks/useAnalyserTransmission';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
 import PersonnelRegisterAdmin from '../components/PersonnelRegisterAdmin';
@@ -2880,7 +2881,7 @@ export function RemoteStaffAccess() {
 // Networking is one subject and now lives under one tab: remote staff accounts
 // and paired devices are ways in to this laboratory, and splitting them across
 // three tabs meant nobody could see the whole answer at once.
-const SYSTEM_TABS = ['Overview', 'Connectivity', 'Appearance', 'Quality Workflow', 'Risk Criteria', 'System Modules', 'Backup & Restore'] as const;
+const SYSTEM_TABS = ['Overview', 'Connectivity', 'Appearance', 'Quality Workflow', 'Risk Criteria', 'Analyser Transmission', 'System Modules', 'Backup & Restore'] as const;
 type SystemTab = typeof SYSTEM_TABS[number];
 
 export function SystemSettings() {
@@ -2896,6 +2897,7 @@ export function SystemSettings() {
       {tab === 'Appearance' && <AppearanceSettings />}
       {tab === 'Quality Workflow' && <QualityWorkflowSettings />}
       {tab === 'Risk Criteria' && <RiskCriteriaSettings />}
+      {tab === 'Analyser Transmission' && <AnalyserTransmissionSettings />}
       {tab === 'System Modules' && <ModuleToggles />}
       {tab === 'Backup & Restore' && <BackupRestore />}
     </div>
@@ -3478,6 +3480,152 @@ export function ConnectivityMode() {
         </div>}
       </div>
     </>}
+  </div>;
+}
+
+
+// ==========================================================================
+// Analyser Transmission & Middleware — the master switch.
+//
+// A laboratory may run SECHLIMS for quality management alone. Until a facility
+// holds clearance to handle patient results in this system, that is the
+// configuration it is obliged to run, and this is where the decision is
+// recorded. Nothing in the transmission or middleware code is changed by it:
+// on, the module behaves exactly as it always has; off, the host opens no
+// connection to an analyser and the module is not offered.
+//
+// It is confirmed in words rather than by a single press. Switching it is a
+// decision with a legal dimension behind it, and the one thing this control
+// must never be is easy to operate by accident.
+// ==========================================================================
+export function AnalyserTransmissionSettings() {
+  const { can } = usePermissions();
+  const canEdit = can('settings', 'edit');
+  const { enabled, loading, refresh } = useAnalyserTransmission();
+  const [intent, setIntent] = useState<boolean | null>(null);
+  const [confirm, setConfirm] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const phrase = intent ? 'TURN ON' : 'TURN OFF';
+
+  function propose(next: boolean) {
+    if (!canEdit || next === enabled) return;
+    setIntent(next); setConfirm(''); setReason(''); setError(null); setMessage(null);
+  }
+
+  function abandon() { setIntent(null); setConfirm(''); setReason(''); setError(null); }
+
+  async function commit() {
+    if (intent === null) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await api('/analyser-transmission', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: intent, confirm, reason }),
+      });
+      setMessage(intent
+        ? 'Analyser transmission is on. Links, destinations and the Result Filler are available again, and the host has reopened the links set to start on their own.'
+        : 'Analyser transmission is off. Every link is closed, nothing is being delivered, and the module is no longer offered.');
+      abandon();
+      await refresh();
+    } catch (e) { setError(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  if (loading) return <div className="card"><h3>Analyser Transmission &amp; Middleware</h3><p className="muted">Loading…</p></div>;
+
+  return <div>
+    <div className="card">
+      <div className="section-head"><h3>Analyser Transmission &amp; Middleware</h3></div>
+
+      <div className="cx-rows">
+        <Row label="State">
+          <strong style={{ color: enabled ? 'var(--ok, inherit)' : 'var(--danger)' }}>
+            {enabled ? 'On' : 'Off'}
+          </strong>
+        </Row>
+        <Row label="This host">
+          {enabled
+            ? 'Receives from the analysers configured for it, and delivers to the destinations approved for it.'
+            : 'Opens no connection to an analyser and delivers nothing.'}
+        </Row>
+        <Row label="Patient results">
+          {enabled
+            ? 'Carried by this system, under the module\u2019s own approval and activation gates.'
+            : 'Not carried by this system.'}
+        </Row>
+      </div>
+
+      <div className="ap-choices" style={{ marginTop: 12 }}>
+        <button type="button" disabled={!canEdit || busy} className={`ap-choice${enabled ? ' is-on' : ''}`}
+          onClick={() => propose(true)}>On — quality management and transmission</button>
+        <button type="button" disabled={!canEdit || busy} className={`ap-choice${!enabled ? ' is-on' : ''}`}
+          onClick={() => propose(false)}>Off — quality management only</button>
+      </div>
+      {!canEdit && <p className="hint" style={{ marginTop: 8 }}>An administrator sets this.</p>}
+
+      {message && <Notice kind="success">{message}</Notice>}
+      {error && intent === null && <Notice kind="error">{error}</Notice>}
+    </div>
+
+    {intent !== null && (
+      <div className="card">
+        <div className="section-head">
+          <h3>{intent ? 'Switch transmission on' : 'Switch transmission off'}</h3>
+        </div>
+
+        {intent === false ? <>
+          <p className="hint" style={{ marginTop: 0 }}>Closing now, on this host:</p>
+          <ul className="hint">
+            <li>Every analyser link. No port is bound, no address is dialled and no folder is watched.</li>
+            <li>The middleware engine. Nothing is routed, queued or delivered.</li>
+            <li>Analyser Transmission &amp; Middleware, and the Result Filler configured inside it.</li>
+            <li>Analyser Sync &amp; Interfacing, and the Analyser Sync tab under Equipment.</li>
+            <li>Taking readings off an analyser in Quality Control, external quality assessment and verification.</li>
+          </ul>
+          <p className="hint">Staying as it is:</p>
+          <ul className="hint">
+            <li>Every control run already on the bench, with its charts, its rules and its records.</li>
+            <li>The whole of quality management, and every other module.</li>
+            <li>The configuration itself. Links, destinations, routes and mappings are kept, and return as they were.</li>
+          </ul>
+          <p className="hint">
+            Controls and patient results can be populated by <strong>TransLis</strong>, which fills a
+            result-entry form from the analyser without this system holding anything.
+          </p>
+        </> : (
+          <p className="hint" style={{ marginTop: 0 }}>
+            The links set to start on their own will be reopened, the engine will pick up whatever is
+            in its queue, and the module returns with its configuration as it was left. Destinations
+            keep whatever approval and activation they already held.
+          </p>
+        )}
+
+        <div className="cx-rows">
+          <Row label={`Type ${phrase} to confirm`}>
+            <input value={confirm} onChange={e => setConfirm(e.target.value)}
+              placeholder={phrase} autoComplete="off" spellCheck={false} />
+          </Row>
+          <Row label="Reason (recorded)">
+            <input value={reason} onChange={e => setReason(e.target.value)}
+              placeholder={intent ? 'e.g. Clearance granted' : 'e.g. Awaiting clearance to handle patient data'} />
+          </Row>
+        </div>
+
+        {error && <Notice kind="error">{error}</Notice>}
+
+        <div className="cx-actions">
+          <button className="primary" disabled={busy || confirm.trim().toUpperCase() !== phrase}
+            onClick={() => void commit()}>
+            {busy ? 'Applying\u2026' : (intent ? 'Switch on' : 'Switch off')}
+          </button>
+          <button className="secondary" disabled={busy} onClick={abandon}>Cancel</button>
+        </div>
+      </div>
+    )}
   </div>;
 }
 

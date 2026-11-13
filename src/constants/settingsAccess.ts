@@ -27,6 +27,13 @@ export type SettingsTab = {
    * laboratory for a page that is not a setting.
    */
   grantsEntry?: boolean;
+  /**
+   * True for a page that only exists while this laboratory transmits. A
+   * facility running SECHLIMS for quality management alone does not connect to
+   * an analyser, so configuring one is not a setting it has — and the server
+   * refuses the page's endpoints either way.
+   */
+  requiresTransmission?: boolean;
 };
 
 export const SETTINGS_TABS: SettingsTab[] = [
@@ -47,7 +54,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   // which is not where anybody looks to set up an instrument. It keeps the IQC
   // module's own edit right, because that is the right the server enforces on
   // it and inventing a second one would only let the two disagree.
-  { to: '/settings/analysers', label: 'Analyser Sync & Interfacing', module: 'iqc', action: 'edit', grantsEntry: true },
+  { to: '/settings/analysers', label: 'Analyser Sync & Interfacing', module: 'iqc', action: 'edit', grantsEntry: true, requiresTransmission: true },
   { to: '/settings/system', label: 'System', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
   { to: '/settings/document-import', label: 'Document Master List Import', module: 'documents.masterlist', action: 'import', grantsEntry: true },
   { to: '/settings/evidence', label: 'Evidence Upload', module: 'records_reports.evidence', action: 'create', grantsEntry: true },
@@ -56,22 +63,30 @@ export const SETTINGS_TABS: SettingsTab[] = [
 
 export type Can = (module: string, action: PermissionAction) => boolean;
 
-/** The Settings pages this user may open. */
-export function visibleSettingsTabs(can: Can): SettingsTab[] {
-  return SETTINGS_TABS.filter(t => can(t.module, t.action));
+/**
+ * The Settings pages this user may open.
+ *
+ * `transmits` is the laboratory's analyser transmission switch. It defaults to
+ * true so a caller that has no reason to care — and a screen rendered before
+ * the switch has been read — behaves exactly as it did before the switch
+ * existed.
+ */
+export function visibleSettingsTabs(can: Can, transmits: boolean = true): SettingsTab[] {
+  return SETTINGS_TABS.filter(t => (transmits || !t.requiresTransmission) && can(t.module, t.action));
 }
 
 /** Whether Settings should be offered at all — see `grantsEntry`. */
-export function canEnterSettings(can: Can): boolean {
-  return SETTINGS_TABS.some(t => t.grantsEntry && can(t.module, t.action));
+export function canEnterSettings(can: Can, transmits: boolean = true): boolean {
+  return SETTINGS_TABS.some(t =>
+    t.grantsEntry && (transmits || !t.requiresTransmission) && can(t.module, t.action));
 }
 
 /**
  * What to promise on the Settings card and header. Someone holding only a
  * delegated tool is not offered "users, permissions and configuration".
  */
-export function settingsBlurb(can: Can): string {
-  const visible = visibleSettingsTabs(can);
+export function settingsBlurb(can: Can, transmits: boolean = true): string {
+  const visible = visibleSettingsTabs(can, transmits);
   if (visible.some(t => t.administration)) return 'Users, permissions and configuration';
   const labels = visible.filter(t => t.grantsEntry).map(t => t.label);
   return labels.length ? labels.join(' · ') : 'Configuration assigned to your role';

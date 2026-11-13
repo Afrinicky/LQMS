@@ -28,6 +28,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { currentBridge } from '../services/instrumentBridge/index.js';
 import { linkIsOurs } from '../../shared/constants/instruments.js';
+import { quietWhenMiddlewareOff, requireMiddlewareOn } from '../services/middlewareSwitch.js';
 
 function safeJson(value: unknown): any {
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -44,6 +45,21 @@ export function analyserFeedRoutes(moduleKey: string) {
   const mayView = requirePermission(moduleKey, 'view');
 
   /**
+   * The transmission master switch, applied to this router alone.
+   *
+   * It is mounted here rather than at the module's prefix in server/index.ts
+   * because these paths share that prefix with the module's own register — a
+   * guard on `/api/eqa` would close external quality assessment itself, which
+   * has nothing to do with whether this laboratory transmits.
+   *
+   * Reading answers empty rather than refusing. These are panels inside pages
+   * about something else, and an analyser that has sent nothing looks exactly
+   * the same, so the screens already draw it. Standing ready to receive is
+   * refused outright, because that one would open a socket.
+   */
+  const noLinks = quietWhenMiddlewareOff<unknown[]>([]);
+
+  /**
    * The analysers this screen could take results from.
    *
    * Ordered by how likely each is to be the one meant: the instrument the work
@@ -52,7 +68,7 @@ export function analyserFeedRoutes(moduleKey: string) {
    * registered one machine twice under slightly different names has no exact
    * match and still has an analyser sitting there talking.
    */
-  router.get('/analyser/links', mayView, (req, res) => {
+  router.get('/analyser/links', noLinks, mayView, (req, res) => {
     const equipmentId = parseIntNullable(req.query.equipmentId);
     const sectionId = parseIntNullable(req.query.sectionId);
     const rows = getDb().prepare(`SELECT l.id, l.name, l.mode, l.role, l.state, l.equipment_id, l.section_id,
@@ -83,7 +99,7 @@ export function analyserFeedRoutes(moduleKey: string) {
    * new — which is what stops this morning's run being taken for the one
    * somebody is standing at the analyser waiting for.
    */
-  router.post('/analyser/listen', mayView, (req, res) => {
+  router.post('/analyser/listen', requireMiddlewareOn, mayView, (req, res) => {
     const db = getDb();
     const linkId = parseIntNullable(req.body?.linkId);
     if (!linkId) return res.status(400).json({ error: 'Say which analyser to listen to.' });
@@ -121,7 +137,7 @@ export function analyserFeedRoutes(moduleKey: string) {
    * the link's own analyte map — so "HGB" arrives as Haemoglobin and the
    * screen receiving it does not have to know what a Sysmex calls things.
    */
-  router.get('/analyser/messages', mayView, (req, res) => {
+  router.get('/analyser/messages', noLinks, mayView, (req, res) => {
     const db = getDb();
     const linkId = parseIntNullable(req.query.linkId);
     if (!linkId) return res.json([]);
