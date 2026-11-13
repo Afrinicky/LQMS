@@ -9,6 +9,8 @@
  * create a schedule for it. The acting head must lose that again when the
  * appointment ends.
  */
+import { appointTo, benchRole } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4440/api';
 const PW = 'Passw0rd!test';
 
@@ -39,22 +41,23 @@ const sectionId = sectionRes.json?.id
 console.log('\n[0] Fixtures');
 check('a unit exists', !!sectionId, JSON.stringify(sectionRes.json));
 
+const grade = await benchRole(j, A, /scientist/i);
 const mk = async (no, first, sur) => (await j('/staff', { token: A, method: 'POST',
-  body: { employeeNo: no, firstName: first, surname: sur, sectionId } })).json;
+  body: { employeeNo: no, firstName: first, surname: sur, sectionId, primaryRoleId: grade.id } })).json;
 const head = await mk(`HEAD-${stamp}`, 'Hilda', 'Head');
 const actor = await mk(`ACT-${stamp}`, 'Ama', 'Acting');
 check('two staff in that unit', !!head?.id && !!actor?.id, JSON.stringify({ head, actor }));
 
-const roles = (await j('/roles', { token: A })).json;
-const roleId = n => roles.find(r => r.name === n)?.id;
-const mkUser = async (username, staffId, roleName) => (await j('/users', { token: A, method: 'POST',
-  body: { username, password: PW, fullName: username, roleId: roleId(roleName), staffId } })).json;
-const headUser = await mkUser(`head${stamp}`, head.id, 'Unit Supervisor');
-const actorUser = await mkUser(`act${stamp}`, actor.id, 'Biomedical Scientist');
-check('a Unit Supervisor account and a Biomedical Scientist account', !!headUser?.id && !!actorUser?.id, JSON.stringify({ headUser, actorUser }));
-
-// The unit records who runs it.
-await j(`/section-config/sections/${sectionId}`, { token: A, method: 'PUT', body: { headStaffId: head.id } });
+const mkUser = async (username, staffId) => (await j('/users', { token: A, method: 'POST',
+  body: { username, password: PW, fullName: username, roleId: grade.id, staffId } })).json;
+// Running a unit is a POST, not an account setting: appointing the head to
+// the unit's supervising post is what confers the supervisor's profile AND
+// what records who runs the unit. Setting either by hand was the fault that
+// let a unit and its post name two different people.
+await appointTo(j, A, head.id, /unit supervisor$/i);
+const headUser = await mkUser(`head${stamp}`, head.id);
+const actorUser = await mkUser(`act${stamp}`, actor.id);
+check('a unit supervisor account and a bench account', !!headUser?.id && !!actorUser?.id, JSON.stringify({ headUser, actorUser }));
 
 const login = async u => (await j('/auth/login', { method: 'POST', body: { username: u, password: PW } })).json?.token;
 const H = await login(`head${stamp}`);
@@ -102,7 +105,10 @@ check('the stand-in no longer runs the unit', !after.creates, JSON.stringify(aft
 
 console.log('\n[4] Standing in never costs somebody rights they already hold');
 const qm = await mk(`QM-${stamp}`, 'Quincy', 'Manager');
-await mkUser(`qm${stamp}`, qm.id, 'Quality Manager');
+// A Quality Manager by APPOINTMENT: the post carries the profile, so holding
+// the post is what makes this person senior enough for the rule below.
+await appointTo(j, A, qm.id, /^quality manager$/i);
+await mkUser(`qm${stamp}`, qm.id);
 const Q1 = await login(`qm${stamp}`);
 const before = (await j('/auth/permissions', { token: Q1 })).json?.permissions ?? {};
 await j('/scheduling/acting-unit-heads', { token: A, method: 'POST',
@@ -114,7 +120,7 @@ check('a Quality Manager covering a unit keeps every right they had', lost.lengt
 
 console.log('\n[5] An appointment only counts while it is running');
 const later = await mk(`FUT-${stamp}`, 'Fred', 'Future');
-await mkUser(`fut${stamp}`, later.id, 'Biomedical Scientist');
+await mkUser(`fut${stamp}`, later.id);
 const sec2 = (await j('/section-config/sections', { token: A, method: 'POST', body: { name: `Micro ${stamp}`, departmentId: dept?.id } })).json?.id
   ?? (await j('/sections', { token: A })).json?.find(x => x.name === `Micro ${stamp}`)?.id;
 const from = new Date(Date.now() + 10 * 864e5).toISOString().slice(0, 10);

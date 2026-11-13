@@ -16,6 +16,7 @@ import {
   recordSignature, SignatureRequiredError, hasSignatureOnFile, staffSignatureDataUri, fileDataUri,
 } from '../services/signatureService.js';
 import { printSheet, signatureBlock, signatureImage, htmlEscape, htmlText } from '../utils/printLayout.js';
+import { matchPrimaryRole } from '../../shared/constants/roles.js';
 import {
   TRAINING_DELIVERY_MODES, TRAINER_TYPES, TRAINING_CATEGORIES, TRAINING_FORMATS,
   TRAINING_STATUSES as TRAINING_STATUS_LIST, ATTENDANCE_STATUSES as ATTENDANCE_STATUS_LIST,
@@ -2120,8 +2121,32 @@ ${event.cancellation_reason ? `<h2>Why the session was called off</h2><div class
       return res.status(400).json({ error: `Could not read the workbook: ${err instanceof Error ? err.message : String(err)}` });
     }
     const db = getDb();
-    const sections = db.prepare('SELECT id, name FROM sections').all() as Array<{ id: number; name: string }>;
-    const sectionByName = (name: string | null) => name ? sections.find(s => s.name.trim().toUpperCase() === name.trim().toUpperCase())?.id ?? null : null;
+    const sections = db.prepare('SELECT id, name, unit_kind AS unitKind FROM sections').all() as Array<{ id: number; name: string; unitKind: string }>;
+    // Only a CLINICAL unit can be somebody's unit of affiliation; an
+    // administrative one is an additional posting, which an import does not make.
+    const sectionByName = (name: string | null) => name
+      ? sections.find(s => s.unitKind !== 'administrative' && s.name.trim().toUpperCase() === name.trim().toUpperCase())?.id ?? null
+      : null;
+
+    /*
+     * The grade an imported row describes.
+     *
+     * The register's DESIGNATION column is free text written by whoever filled
+     * the workbook in — "MEDICAL LAB SCIENTIST", "Biomedical Scientist", "MLS".
+     * It is resolved to a primary role here, at import, rather than left for
+     * the next restart to pick up: an import that leaves every row
+     * unclassified until somebody reboots the host is an import that looks
+     * like it worked and did not.
+     */
+    const primaryRoleIdByName = new Map<string, number>(
+      (db.prepare("SELECT id, name FROM roles WHERE kind = 'primary'").all() as Array<{ id: number; name: string }>)
+        .map(r => [r.name.toLowerCase(), r.id]),
+    );
+    const gradeFor = (...texts: Array<string | null>): { id: number | null; name: string | null; cadre: string | null } => {
+      const match = matchPrimaryRole(...texts);
+      if (!match) return { id: null, name: null, cadre: null };
+      return { id: primaryRoleIdByName.get(match.name.toLowerCase()) ?? null, name: match.name, cadre: match.cadre };
+    };
 
     let created = 0, updated = 0; const errors: string[] = [];
     const upsert = db.transaction((records: Record<string, unknown>[]) => {
@@ -2156,7 +2181,8 @@ ${event.cancellation_reason ? `<h2>Why the session was called off</h2><div class
             }
             return parts.length ? Array.from(new Set(parts)).join(' | ') : null;
           })(),
-          unit, personnel_category: pick(row, 'PERSONNEL CATEGORY', 'CATEGORY'),
+          unit: null,   // derived from the unit link below, never from the sheet alone
+          personnel_category: pick(row, 'PERSONNEL CATEGORY', 'CATEGORY'),
           appointment_type: pick(row, 'APPOINTMENT TYPE'), appointment_date: pick(row, 'DATE OF APPOINTMENT', 'APPOINTMENT DATE'),
           national_id_type: pick(row, 'TYPE OF NATIONAL ID', 'NATIONAL ID TYPE'),
           national_id_number: pick(row, 'NATIONAL ID NUM', 'NATIONAL ID NUMBER', 'NATIONAL ID'),
@@ -2164,6 +2190,24 @@ ${event.cancellation_reason ? `<h2>Why the session was called off</h2><div class
           email: pick(row, 'EMAIL ADDRESS', 'EMAIL_ADDRESS', 'EMAIL'), staff_file_location: pick(row, 'STAFF FILE LOCATION', 'STAFF_FILE_LOCATION', 'FILE LOCATION'),
           section_id: sectionByName(unit),
         };
+        // The grade, from the designation the sheet carries, falling back to
+        // the job title and then to the personnel category (an INTERN row
+        // often names no designation at all).
+        const grade = gradeFor(
+          String(cols.designation ?? '') || null,
+          String(cols.job_title ?? '') || null,
+          String(cols.personnel_category ?? '') || null,
+        );
+        if (grade.id) {
+          cols.primary_role_id = grade.id;
+          cols.designation = grade.name;      // one spelling, the canonical one
+          cols.cadre = grade.cadre;
+        }
+        // `unit` is the unit's own name or nothing, never the sheet's spelling
+        // of a unit this laboratory does not have.
+        cols.unit = cols.section_id
+          ? (sections.find(sec => sec.id === cols.section_id)?.name ?? null)
+          : null;
         const existing = employeeNo ? db.prepare('SELECT id FROM staff WHERE employee_no = ?').get(employeeNo) as { id: number } | undefined : undefined;
         try {
           if (existing) {

@@ -1,3 +1,4 @@
+import { benchRole, makeUser } from './lib/people.mjs';
 /**
  * Live RBAC verification against a running SECH_LIMS API.
  *
@@ -58,9 +59,8 @@ async function main() {
   check('admin may view settings', (admin.permissions.settings || []).includes('view'));
 
   // ---- create a technician user ----
-  const roles = (await call('/roles', { token: A })).json;
-  const techRole = roles.find(r => r.name === 'Technician');
-  const created = await call('/users', { token: A, method: 'POST', body: { username: 'tech1', password: PW, fullName: 'Tech One', roleId: techRole.id } });
+  const techRole = await benchRole(call, A);
+  const created = await makeUser(call, A, { username: 'tech1', password: PW, fullName: 'Tech One', roleId: techRole.id });
   if (created.status >= 400 && created.status !== 409) console.log('   (user create said', created.status, JSON.stringify(created.json), ')');
   const tech = await login('tech1', PW);
   const T = tech.token;
@@ -148,9 +148,10 @@ async function main() {
   // they are gated on void_archive — which the Laboratory Manager holds on the
   // store and the bench roles do not.
   const storeMatrix = (await call('/permissions/matrix', { token: A })).json;
+  const allRoles = (await call('/roles', { token: A })).json ?? [];
   const permById = new Map(storeMatrix.permissions.map(p => [p.id, p]));
   const storeActions = roleName => {
-    const role = roles.find(r => r.name === roleName);
+    const role = allRoles.find(r => r.name === roleName);
     if (!role) return null;
     return new Set(storeMatrix.rolePermissions
       .filter(rp => rp.role_id === role.id && rp.allowed
@@ -160,7 +161,7 @@ async function main() {
   const managerActions = storeActions('Laboratory Manager');
   check('the Laboratory Manager may correct the store', Boolean(managerActions?.has('void_archive')),
     JSON.stringify([...(managerActions ?? [])]));
-  for (const bench of ['Technician', 'Biomedical Scientist']) {
+  for (const bench of ['Medical Laboratory Technician', 'Medical Laboratory Scientist']) {
     const held = storeActions(bench);
     check(`  a ${bench} may not`, Boolean(held) && !held.has('void_archive'), JSON.stringify([...(held ?? [])]));
   }

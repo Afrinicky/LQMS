@@ -107,10 +107,20 @@ async function main() {
     });
     const token = (await call('/auth/login', { method: 'POST', body: { username: ADMIN.username, password: ADMIN.password } })).json?.token;
 
+    // Every staff member carries exactly one primary role, so the records this
+    // protocol creates carry one too. Administrative & Support Staff is chosen
+    // deliberately: it is the one grade that needs no clinical unit, which
+    // keeps this protocol about backup and recovery rather than about the
+    // personnel rules.
+    const primaryRoles = (await call('/roles?kind=primary', { token })).json ?? [];
+    const primaryRoleId = (primaryRoles.find(r => /administrative/i.test(r.name)) ?? primaryRoles[0])?.id;
+    expect('PQ-1.0', 'URS-QMS-01', 'A primary role is available to classify a staff record',
+      Boolean(primaryRoleId), `${primaryRoles.length} primary role(s) offered`);
+
     const names = ['PQ Recovery Subject A', 'PQ Recovery Subject B', 'PQ Recovery Subject C'];
     const createdIds = [];
     for (const fullName of names) {
-      const r = await call('/staff', { method: 'POST', token, body: { fullName, email: `${fullName.replace(/\s+/g, '.').toLowerCase()}@lab.test` } });
+      const r = await call('/staff', { method: 'POST', token, body: { fullName, email: `${fullName.replace(/\s+/g, '.').toLowerCase()}@lab.test`, primaryRoleId } });
       if (r.json?.id) createdIds.push(r.json.id);
     }
     expect('PQ-1.1', 'URS-QMS-01', 'Quality records can be created and are persisted',
@@ -142,7 +152,7 @@ async function main() {
 
     // Deactivate every restored-subject account and add a record that must NOT
     // survive: this is the state the restore has to roll back.
-    const postBackup = await call('/staff', { method: 'POST', token, body: { fullName: 'PQ Post-Backup Subject', email: 'post.backup@lab.test' } });
+    const postBackup = await call('/staff', { method: 'POST', token, body: { fullName: 'PQ Post-Backup Subject', email: 'post.backup@lab.test', primaryRoleId } });
     const postBackupId = postBackup.json?.id;
     const staffAfterLoss = (await call('/staff', { token })).json ?? [];
     expect('PQ-3.1', 'URS-QMS-01', 'A record created after the backup is present before restore',

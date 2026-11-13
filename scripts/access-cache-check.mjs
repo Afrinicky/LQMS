@@ -41,7 +41,7 @@ const results = [];
 const ok = (name, pass, detail = '') => results.push({ name, pass, detail });
 
 // A profile that is not the administrator, and a user who holds it.
-const profile = db.prepare("SELECT id FROM roles WHERE name = 'Biomedical Scientist'").get();
+const profile = db.prepare("SELECT id FROM roles WHERE name = 'Medical Laboratory Scientist'").get();
 db.prepare(\`INSERT INTO users (username, password_hash, full_name, role_id, is_active)
             VALUES ('cache_probe', 'x', 'Cache Probe', ?, 1)\`).run(profile.id);
 const user = db.prepare("SELECT id FROM users WHERE username = 'cache_probe'").get();
@@ -84,7 +84,7 @@ db.prepare("UPDATE system_modules SET enabled = 1 WHERE key = 'iqc'").run();
 ok('re-enabling it brings it back at once', getViewableModules(user.id).has('iqc'));
 
 // ── 4. Changing the profile a user holds is seen at once ────────────────────
-const technician = db.prepare("SELECT id FROM roles WHERE name = 'Technician'").get();
+const technician = db.prepare("SELECT id FROM roles WHERE name = 'Medical Laboratory Technician'").get();
 const wasFull = resolvePermission(user.id, 'iqc', 'edit').allowed;
 db.prepare('UPDATE users SET role_id = ? WHERE id = ?').run(technician.id, user.id);
 ok('moving the user to another profile changes the answer at once',

@@ -9,6 +9,9 @@ import { DECON_FRAMEWORKS } from '../../shared/constants/routineWork.js';
 import { seedCompetencyFrameworks } from './seedCompetency.js';
 import { seedOrientationFrameworks } from './seedOrientation.js';
 import { seedSupplierEvaluationFrameworks } from './seedSupplierEvaluation.js';
+import {
+  PRIMARY_ROLES, matchPrimaryRole, primaryRoleByName, isBenchGradeTitle,
+} from '../../shared/constants/roles.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
 // is env-configurable (SECH_LIMS_DATA_DIR / SECH_LIMS_DB_PATH) from one place.
@@ -8972,12 +8975,466 @@ CREATE INDEX IF NOT EXISTS idx_rf_ranges_key ON rf_reference_ranges(analyte_key,
     if (!cols.has('withdrawn')) database.exec('ALTER TABLE rf_aliases ADD COLUMN withdrawn INTEGER NOT NULL DEFAULT 0');
   }
 
+  migratePrimaryRoles(database);
+  migrateUnitMembership(database);
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an
   // indexed column still ends up scanned. Refreshing it at startup is cheap
   // and keeps the plans honest as the laboratory's data grows.
   try { database.exec('ANALYZE'); } catch { /* statistics are an optimisation, not a requirement */ }
+}
+
+/**
+ * Separate what a person IS from what they HOLD.
+ *
+ * Before this, "role" meant an access profile, a bench grade and an organogram
+ * post all at once. A scientist could be a "MEDICAL LAB SCIENTIST" by
+ * designation, a "Biomedical Scientist" by account role and an "INTERNAL
+ * AUDITOR" by position, and no two screens agreed. Bench grades had even been
+ * created as organogram positions so that people could be put somewhere, which
+ * is why the Positions list carried "MLS" and "LAB TECHNICIAN" beside the
+ * Quality Manager.
+ *
+ * Afterwards:
+ *   · `roles.kind` says whether a row classifies a person ('primary') or backs
+ *     an appointment ('position'). Only primary roles are offered as somebody's
+ *     role; the rest are reached by mapping a position to them.
+ *   · `staff.primary_role_id` is the one mandatory classification, and
+ *     `staff.designation` is kept as its text so the register and every export
+ *     read the same.
+ *   · The bench grades that had become positions are converted to primary roles
+ *     on the people holding them and the position rows are then deleted.
+ *
+ * Every step is idempotent and guarded, because this runs on every start.
+ */
+function migratePrimaryRoles(database: Database.Database) {
+  const roleCols = new Set((database.prepare('PRAGMA table_info(roles)').all() as Array<{ name: string }>).map(c => c.name));
+  if (roleCols.size === 0) return;                       // fresh database: seed builds it
+
+  // ── 1. The classification column on `roles` ──────────────────────────────
+  // Everything that exists when the column is added is a position profile
+  // unless it is one of the fixed primary roles, because that is exactly what
+  // the old list was: a mixture of grades and posts.
+  if (!roleCols.has('kind')) {
+    database.exec("ALTER TABLE roles ADD COLUMN kind TEXT NOT NULL DEFAULT 'position'");
+  }
+
+  // ── 2. Rename the grades to their formal designations ────────────────────
+  // The row is renamed rather than relabelled, so the API, the audit trail and
+  // the Excel exports all say the same thing. Every list in the seed that
+  // matched on the old spelling keeps an alias for it (see roleNameAliases), so
+  // nobody loses access to anything on the day they upgrade.
+  const renames: Array<[string, string]> = [
+    ['Biomedical Scientist', 'Medical Laboratory Scientist'],
+    ['Technician', 'Medical Laboratory Technician'],
+  ];
+  for (const [from, to] of renames) {
+    const old = database.prepare('SELECT id FROM roles WHERE name = ? COLLATE NOCASE').get(from) as { id: number } | undefined;
+    if (!old) continue;
+    const clash = database.prepare('SELECT id FROM roles WHERE name = ? COLLATE NOCASE').get(to) as { id: number } | undefined;
+    if (clash && clash.id !== old.id) {
+      // Both names exist (a part-finished upgrade, or a laboratory that added
+      // the new name by hand). Move everything onto the new row and drop the
+      // old one rather than leaving two rows meaning one grade.
+      database.prepare('UPDATE users SET role_id = ? WHERE role_id = ?').run(clash.id, old.id);
+      database.prepare('UPDATE positions SET access_profile_role_id = ? WHERE access_profile_role_id = ?').run(clash.id, old.id);
+      database.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(old.id);
+      database.prepare('DELETE FROM roles WHERE id = ?').run(old.id);
+    } else {
+      database.prepare('UPDATE roles SET name = ? WHERE id = ?').run(to, old.id);
+    }
+  }
+
+  // ── 3. The fixed primary roles exist, and are marked as such ─────────────
+  for (const role of PRIMARY_ROLES) {
+    database.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, 0)')
+      .run(role.name, role.description);
+    database.prepare("UPDATE roles SET kind = 'primary' WHERE name = ? COLLATE NOCASE").run(role.name);
+  }
+  // Whoever actually carries the administrator flag is a primary role too, even
+  // if the laboratory has renamed the post or moved the flag elsewhere.
+  database.prepare("UPDATE roles SET kind = 'primary' WHERE is_administrator = 1").run();
+
+  // ── 4. `staff.primary_role_id`, and the designation that mirrors it ──────
+  const staffCols = new Set((database.prepare('PRAGMA table_info(staff)').all() as Array<{ name: string }>).map(c => c.name));
+  if (staffCols.size === 0) return;
+  if (!staffCols.has('primary_role_id')) {
+    database.exec('ALTER TABLE staff ADD COLUMN primary_role_id INTEGER REFERENCES roles(id)');
+  }
+
+  const roleIdByName = new Map<string, number>(
+    (database.prepare('SELECT id, name FROM roles').all() as Array<{ id: number; name: string }>)
+      .map(r => [r.name.toLowerCase(), r.id]),
+  );
+  const idOfPrimary = (name: string): number | null => roleIdByName.get(name.toLowerCase()) ?? null;
+
+  // ── 5. Convert the bench grades that had become positions ────────────────
+  // Done before the backfill, so somebody whose only clue is the post they were
+  // put in is still classified correctly, and so the position rows can go.
+  const benchPositions = (database.prepare('SELECT id, title FROM positions').all() as Array<{ id: number; title: string }>)
+    .filter(p => isBenchGradeTitle(p.title));
+  let convertedHolders = 0;
+  const removedPositions: string[] = [];
+  for (const position of benchPositions) {
+    const grade = matchPrimaryRole(position.title);
+    const gradeId = grade ? idOfPrimary(grade.name) : null;
+    const holders = database.prepare(
+      'SELECT DISTINCT staff_id AS staffId FROM staff_position_assignments WHERE position_id = ?',
+    ).all(position.id) as Array<{ staffId: number }>;
+    if (gradeId) {
+      for (const holder of holders) {
+        const current = database.prepare('SELECT primary_role_id AS id FROM staff WHERE id = ?').get(holder.staffId) as { id: number | null } | undefined;
+        if (current && current.id == null) {
+          database.prepare('UPDATE staff SET primary_role_id = ? WHERE id = ?').run(gradeId, holder.staffId);
+          convertedHolders++;
+        }
+      }
+    }
+    // The post itself goes, along with the assignments that pointed at it and
+    // any reporting line that hung off it. Nothing else references a position.
+    database.prepare('DELETE FROM staff_position_assignments WHERE position_id = ?').run(position.id);
+    database.prepare('UPDATE positions SET reports_to_position_id = NULL WHERE reports_to_position_id = ?').run(position.id);
+    try {
+      database.prepare('DELETE FROM positions WHERE id = ?').run(position.id);
+      removedPositions.push(position.title);
+    } catch {
+      // Something unforeseen still points at it: retire it instead of failing
+      // the start-up, and leave it out of the lists.
+      database.prepare('UPDATE positions SET is_active = 0 WHERE id = ?').run(position.id);
+    }
+  }
+
+  // ── 6. Backfill everybody's primary role ─────────────────────────────────
+  // Most authoritative evidence first. A record that matches nothing is left
+  // unset on purpose: guessing a grade is worse than showing the register an
+  // honest "not set" for somebody to answer.
+  const unclassified = database.prepare(`
+    SELECT s.id, s.designation, s.job_title AS jobTitle, s.cadre, s.personnel_category AS category,
+           r.name AS accountRole
+    FROM staff s
+    LEFT JOIN users u ON u.staff_id = s.id
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE s.primary_role_id IS NULL
+  `).all() as Array<{ id: number; designation: string | null; jobTitle: string | null; cadre: string | null; category: string | null; accountRole: string | null }>;
+
+  const cadreToRole: Record<string, string> = {
+    scientist: 'Medical Laboratory Scientist',
+    technician: 'Medical Laboratory Technician',
+    assistant: 'Medical Laboratory Assistant',
+  };
+  let backfilled = 0;
+  for (const person of unclassified) {
+    // An account role only counts when it is itself a grade: somebody whose
+    // account says "Quality Manager" has told us their post, not their grade.
+    const fromAccount = primaryRoleByName(person.accountRole)?.name ?? null;
+    const fromCadre = cadreToRole[String(person.cadre ?? '').toLowerCase()] ?? null;
+    const fromCategory = /^(intern|nss|student)$/i.test(String(person.category ?? '')) ? 'Intern' : null;
+    const resolved =
+      matchPrimaryRole(person.designation, person.jobTitle)?.name
+      ?? fromAccount ?? fromCadre ?? fromCategory;
+    const roleId = resolved ? idOfPrimary(resolved) : null;
+    if (!roleId) continue;
+    database.prepare('UPDATE staff SET primary_role_id = ? WHERE id = ?').run(roleId, person.id);
+    backfilled++;
+  }
+
+  // The designation is the primary role's text. Kept in step here rather than
+  // left to the screen that happens to save next, so the register, the Excel
+  // export and the organogram cannot drift apart again.
+  database.exec(`
+    UPDATE staff SET designation = (SELECT r.name FROM roles r WHERE r.id = staff.primary_role_id)
+    WHERE primary_role_id IS NOT NULL
+      AND IFNULL(designation, '') <> IFNULL((SELECT r.name FROM roles r WHERE r.id = staff.primary_role_id), '')
+  `);
+  // Cadre follows the grade, because the organogram orders a unit by it.
+  for (const role of PRIMARY_ROLES) {
+    const roleId = idOfPrimary(role.name);
+    if (!roleId) continue;
+    database.prepare('UPDATE staff SET cadre = ? WHERE primary_role_id = ? AND IFNULL(cadre, \'\') <> ?')
+      .run(role.cadre, roleId, role.cadre);
+  }
+
+  // ── 7. A login account works under its holder's grade ────────────────────
+  // The account role and the grade are one field now, so an account linked to a
+  // classified staff member follows it — unless the account is an
+  // administrator, which is never demoted by anything (that is how a laboratory
+  // locks itself out of its own access control).
+  database.exec(`
+    UPDATE users SET role_id = (SELECT s.primary_role_id FROM staff s WHERE s.id = users.staff_id)
+    WHERE staff_id IS NOT NULL
+      AND (SELECT s.primary_role_id FROM staff s WHERE s.id = users.staff_id) IS NOT NULL
+      AND role_id IN (SELECT id FROM roles WHERE kind = 'primary' AND is_administrator = 0)
+      AND role_id <> (SELECT s.primary_role_id FROM staff s WHERE s.id = users.staff_id)
+  `);
+
+  if (convertedHolders || backfilled || removedPositions.length) {
+    try {
+      database.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, new_value) VALUES (NULL, ?, ?, ?)')
+        .run('primary_roles_migrated', 'roles', JSON.stringify({
+          convertedHolders, backfilled, removedPositions,
+        }));
+    } catch { /* the migration matters, the note about it does not */ }
+    console.log(`[migrate] primary roles: ${backfilled} staff classified, ${convertedHolders} from a bench post, ${removedPositions.length} bench position(s) removed`);
+  }
+}
+
+/**
+ * One person, one clinical unit — and the administrative units they also sit in.
+ *
+ * THE FAILURE THIS EXISTS TO END. A member of staff was moved from Haematology
+ * to Microbiology on the personnel register and was still, everywhere that
+ * mattered, in Haematology: the work routed to them was Haematology's, their
+ * personnel file printed "HAEMATOLOGY", and a supervisor appointed to run
+ * Microbiology could not touch Microbiology's records. Three separate stores
+ * of "which unit" disagreed, and each screen read whichever one it knew about:
+ *
+ *   `staff.section_id`        the register's link to the unit;
+ *   `staff.unit`              a FREE TEXT column, written once at import and
+ *                             never again, which the personnel file, the staff
+ *                             file printout and the Excel export all printed in
+ *                             PREFERENCE to the real unit;
+ *   the monthly reassignment memo, which `dutyService.unitAssignments()` reads
+ *                             FIRST — so until the memo was re-cut, the person
+ *                             was still rostered, scheduled and held to account
+ *                             in the unit they had left.
+ *
+ * Afterwards there is one answer and three honest views of it:
+ *
+ *   `staff.section_id` is the ONE CLINICAL UNIT a person belongs to. It is
+ *   mandatory for laboratory professionals and is what every existing query,
+ *   roster and report already reads, so nothing had to be rewritten to trust it.
+ *
+ *   `staff_unit_memberships` holds the ADMINISTRATIVE units they also sit in —
+ *   the Quality Office, the Stores — which is an addition to a clinical unit,
+ *   never a replacement for one.
+ *
+ *   `staff.unit` is derived. It is overwritten from the real unit on every save
+ *   and backfilled here, so a printout can no longer contradict the register.
+ *
+ *   The current month's memo and `section_id` are kept in step both ways by
+ *   `unitMembership.ts`; past months stay as the historical record they are.
+ *
+ * `staff_unit_grants` is the deliberate exception: permission to work in a unit
+ * somebody does NOT belong to, at a stated level, granted by an administrator
+ * or the Laboratory Manager and visible in Access Control.
+ */
+const ADMIN_UNITS: Array<{ name: string; code: string; module: string; post: string; summary: string }> = [
+  { name: 'Quality Office', code: 'QMS', module: 'documents', post: 'Quality Manager',
+    summary: 'Document control, internal audit, nonconformities, CAPA and management review.' },
+  { name: 'Stores', code: 'STR', module: 'supplier_inventory', post: 'Stores Officer',
+    summary: 'Receiving, issuing, stock counts and the supplier register.' },
+  { name: 'Customer Service', code: 'CSU', module: 'customer_focus', post: 'Customer Service Officer',
+    summary: 'Sample reception, enquiries, feedback, complaints and the communication log.' },
+  { name: 'Safety Office', code: 'SAF', module: 'facilities_safety', post: 'Safety Manager',
+    summary: 'Safety incidents, risk assessments, waste and decontamination.' },
+  { name: 'Point-of-Care Testing', code: 'POCT', module: 'poct', post: 'POCT Officer',
+    summary: 'POCT sites, devices, operators, quality control and incidents.' },
+];
+
+/**
+ * Tie each administrative unit to the post that heads it.
+ *
+ * Called from the migration AND from the seed, because on a brand-new
+ * database the migration runs before any position exists — the seed creates
+ * them — and on an existing one the seed's default positions are already
+ * there. Idempotent either way, and it never overrides a unit a laboratory
+ * has pointed at some other post.
+ */
+export function linkAdministrativeUnitHeads(database: Database.Database) {
+  const tableExists = (name: string) =>
+    (database.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) as { n: number }).n > 0;
+  if (!tableExists('positions') || !tableExists('sections')) return;
+  const sectionCols = new Set((database.prepare('PRAGMA table_info(sections)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!sectionCols.has('head_position_id')) return;
+
+  for (const unit of ADMIN_UNITS) {
+    const section = database.prepare('SELECT id, head_position_id FROM sections WHERE name = ? COLLATE NOCASE').get(unit.name) as
+      { id: number; head_position_id: number | null } | undefined;
+    if (!section) continue;
+    const post = database.prepare('SELECT id FROM positions WHERE title = ? COLLATE NOCASE').get(unit.post) as { id: number } | undefined;
+    if (!post) continue;
+    if (!section.head_position_id) {
+      database.prepare('UPDATE sections SET head_position_id = ? WHERE id = ?').run(post.id, section.id);
+    }
+    /*
+     * And the post supervises the unit.
+     *
+     * This is what makes the head follow the appointment without a second
+     * mechanism: the appointment service already maintains a unit's head from
+     * whoever holds the post that supervises it, so appointing a Quality
+     * Manager makes them head of the Quality Office and standing them down
+     * vacates it. For an ADMINISTRATIVE unit that adds a membership and
+     * leaves their clinical unit alone — a Quality Manager does not stop
+     * being a haematologist.
+     */
+    try {
+      database.prepare('UPDATE positions SET supervises_section_id = ? WHERE id = ? AND supervises_section_id IS NULL')
+        .run(section.id, post.id);
+    } catch { /* another post already supervises it: the laboratory's choice stands */ }
+  }
+
+  // Whoever holds the post today is already running that office.
+  try {
+    database.exec(`
+      UPDATE sections SET head_staff_id = (
+        SELECT spa.staff_id FROM staff_position_assignments spa
+        WHERE spa.position_id = sections.head_position_id AND spa.is_active = 1 AND spa.assignment_type = 'primary'
+        ORDER BY spa.id LIMIT 1)
+      WHERE unit_kind = 'administrative' AND head_position_id IS NOT NULL AND head_staff_id IS NULL
+    `);
+    database.exec(`
+      INSERT OR IGNORE INTO staff_unit_memberships (staff_id, section_id, role, source)
+      SELECT sec.head_staff_id, sec.id, 'head', 'position'
+      FROM sections sec
+      WHERE sec.unit_kind = 'administrative' AND sec.head_staff_id IS NOT NULL
+    `);
+  } catch { /* the tables arrive with the migration; nothing to join yet */ }
+}
+
+function migrateUnitMembership(database: Database.Database) {
+  const sectionCols = new Set((database.prepare('PRAGMA table_info(sections)').all() as Array<{ name: string }>).map(c => c.name));
+  if (sectionCols.size === 0) return;
+
+  // ── 1. What kind of unit this is ─────────────────────────────────────────
+  // Everything that already exists is a clinical unit: that is what a section
+  // has always meant here. The laboratory re-classifies from Section/Unit
+  // Configuration afterwards.
+  if (!sectionCols.has('unit_kind')) {
+    database.exec("ALTER TABLE sections ADD COLUMN unit_kind TEXT NOT NULL DEFAULT 'clinical'");
+  }
+  // A pseudo unit is an appointment with no floor space — a Quality Office
+  // that is really one person and a filing cabinet inside Haematology. It
+  // exists so the post has somewhere to live, and it is left out when the
+  // laboratory counts its units.
+  if (!sectionCols.has('is_pseudo')) {
+    database.exec('ALTER TABLE sections ADD COLUMN is_pseudo INTEGER NOT NULL DEFAULT 0');
+  }
+  // Which module an administrative unit's services are drawn from, so the
+  // Stores shows stock and the Quality Office shows documents rather than a
+  // test menu neither of them has.
+  if (!sectionCols.has('service_module')) {
+    database.exec('ALTER TABLE sections ADD COLUMN service_module TEXT');
+  }
+
+  // ── 2. The administrative units, and the post that heads each ────────────
+  // Created as pseudo units: they are appointments first and places second.
+  // The head is not stored here — it follows the position holder, and is kept
+  // current by the appointments service.
+  const hasDeptCol = sectionCols.has('department_id');
+
+  /*
+   * One unit per name.
+   *
+   * The seed used to create "Quality Office", "Stores" and "Customer Service"
+   * as ordinary sections under the Laboratory department, so a database that
+   * has been through both can hold two rows for one office — the sections
+   * table is unique on (department_id, name), and a NULL department is not
+   * the Laboratory department. Two rows for one office is how a unit ends up
+   * with half its staff and half its records. The older row is kept, because
+   * that is the one the laboratory's existing records point at, and
+   * everything on the newer one is moved across before it goes.
+   */
+  const mergeDuplicateSections = (name: string): number | null => {
+    const rows = database.prepare('SELECT id FROM sections WHERE name = ? COLLATE NOCASE ORDER BY id').all(name) as Array<{ id: number }>;
+    if (rows.length === 0) return null;
+    const keep = rows[0].id;
+    for (const extra of rows.slice(1)) {
+      for (const [table, column] of [
+        ['staff', 'section_id'], ['lab_test_catalog', 'section_id'], ['equipment_items', 'section_id'],
+        ['inventory_items', 'section_id'], ['section_services', 'section_id'], ['staff_unit_memberships', 'section_id'],
+        ['staff_unit_grants', 'section_id'], ['positions', 'supervises_section_id'], ['positions', 'default_section_id'],
+      ] as Array<[string, string]>) {
+        try { database.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`).run(keep, extra.id); }
+        catch { /* a table this build does not have is nothing to move */ }
+      }
+      try { database.prepare('DELETE FROM sections WHERE id = ?').run(extra.id); }
+      catch { database.prepare('UPDATE sections SET is_active = 0 WHERE id = ?').run(extra.id); }
+    }
+    return keep;
+  };
+
+  for (const unit of ADMIN_UNITS) {
+    mergeDuplicateSections(unit.name);
+  }
+  for (const unit of ADMIN_UNITS) {
+    const existing = database.prepare('SELECT id FROM sections WHERE name = ? COLLATE NOCASE').get(unit.name) as { id: number } | undefined;
+    if (!existing) {
+      // The UNIQUE key is (department_id, name); a NULL department is fine and
+      // is what an administrative unit that belongs to no department should have.
+      database.prepare(
+        `INSERT INTO sections (${hasDeptCol ? 'department_id, ' : ''}name, code, description, service_summary, unit_kind, is_pseudo, service_module, is_active)
+         VALUES (${hasDeptCol ? 'NULL, ' : ''}?, ?, ?, ?, 'administrative', 1, ?, 1)`,
+      ).run(unit.name, unit.code, unit.summary, unit.summary, unit.module);
+    } else {
+      // Already present (a laboratory that made one by hand, or a re-run):
+      // classify it, but never overwrite a choice the laboratory has made.
+      database.prepare(
+        "UPDATE sections SET unit_kind = 'administrative', is_pseudo = 1, service_module = COALESCE(service_module, ?) WHERE id = ? AND unit_kind <> 'administrative'",
+      ).run(unit.module, existing.id);
+    }
+  }
+
+  // ── 3. Additional unit memberships ───────────────────────────────────────
+  // The clinical unit stays on `staff.section_id`. This table is only ever the
+  // ADDITIONAL units — which in practice means the administrative ones — so
+  // there is no second place a person's clinical unit can be written.
+  database.exec(`CREATE TABLE IF NOT EXISTS staff_unit_memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    section_id INTEGER NOT NULL REFERENCES sections(id),
+    role TEXT NOT NULL DEFAULT 'member',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(staff_id, section_id)
+  );`);
+  database.exec('CREATE INDEX IF NOT EXISTS idx_staff_unit_memberships_staff ON staff_unit_memberships(staff_id)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_staff_unit_memberships_section ON staff_unit_memberships(section_id)');
+
+  // ── 4. Permission to work in a unit you do not belong to ─────────────────
+  // A haematology scientist covering a biochemistry bench. Deliberate,
+  // attributable, and capped at resolve time by what their own profile allows,
+  // so a grant can widen WHERE they work and never WHAT they may do.
+  database.exec(`CREATE TABLE IF NOT EXISTS staff_unit_grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    section_id INTEGER NOT NULL REFERENCES sections(id),
+    level TEXT NOT NULL DEFAULT 'contribute',
+    reason TEXT,
+    starts_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    granted_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TEXT,
+    revoked_by INTEGER REFERENCES users(id),
+    UNIQUE(staff_id, section_id)
+  );`);
+  database.exec('CREATE INDEX IF NOT EXISTS idx_staff_unit_grants_staff ON staff_unit_grants(staff_id)');
+
+  // ── 5. Head of an administrative unit follows the post ───────────────────
+  if (!sectionCols.has('head_position_id')) {
+    database.exec('ALTER TABLE sections ADD COLUMN head_position_id INTEGER REFERENCES positions(id)');
+  }
+  linkAdministrativeUnitHeads(database);
+
+  // ── 6. The free-text unit column becomes derived ─────────────────────────
+  // This is the column that kept printing the unit somebody had left. It is
+  // backfilled from the real unit once, here, and overwritten on every save
+  // from now on (see buildStaffColumns).
+  const staffCols = new Set((database.prepare('PRAGMA table_info(staff)').all() as Array<{ name: string }>).map(c => c.name));
+  if (staffCols.has('unit') && staffCols.has('section_id')) {
+    database.exec(`
+      UPDATE staff SET unit = (SELECT sec.name FROM sections sec WHERE sec.id = staff.section_id)
+      WHERE section_id IS NOT NULL
+        AND IFNULL(unit, '') <> IFNULL((SELECT sec.name FROM sections sec WHERE sec.id = staff.section_id), '')
+    `);
+    // Somebody with no unit at all should show nothing rather than a stale name.
+    database.exec("UPDATE staff SET unit = NULL WHERE section_id IS NULL AND IFNULL(unit, '') <> ''");
+  }
+
 }
 
 /**

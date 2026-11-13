@@ -89,9 +89,19 @@ export function isCorePositionTitle(title: string): boolean {
   return /manager|supervisor|officer|head|director|auditor|coordinator|administrator/.test(t);
 }
 
+/**
+ * The posts a laboratory starts with.
+ *
+ * Bench grades are deliberately absent. "Biomedical Scientist" and
+ * "Technician" used to be seeded here, which is how a grade ended up on the
+ * organogram beside the Quality Manager and how one person could be a
+ * scientist by designation and a technician by position. A grade is a PRIMARY
+ * ROLE on the person (see shared/constants/roles.ts); a position is a post
+ * somebody is appointed to.
+ */
 export const DEFAULT_POSITIONS = [
   'Laboratory Manager', 'Deputy Laboratory Manager', 'Quality Manager', 'Quality Team Member', 'Secretary', 'Safety Manager',
   'Blood Bank Unit Supervisor', 'Microbiology Unit Supervisor', 'Biochemistry Unit Supervisor', 'Haematology Unit Supervisor',
-  'Stores Officer', 'Customer Service Officer', 'POCT Officer', 'Biomedical Scientist', 'Technician',
+  'Stores Officer', 'Customer Service Officer', 'POCT Officer',
   'System Administrator', 'Data Officer'
 ];

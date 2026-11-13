@@ -4,10 +4,11 @@ import { api, API_BASE, getToken, errorText } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
 import { DetailModal, RowMenu } from './ui';
 import {
-  GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES, EXIT_REASONS,
+  GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, AVAILABILITY_STATUSES, EXIT_REASONS,
   emptyStaffForm, staffFormFrom, yearsOfService, isTimeLimited, PLACEMENT_GRACE_DAYS, type StaffFormValues,
 } from '../../shared/constants/personnel';
-import type { Staff, Section, ProfessionalRank } from '../../shared/types/api';
+import type { Staff, Section, ProfessionalRank, Role } from '../../shared/types/api';
+import { requiresClinicalUnit } from '../../shared/constants/roles';
 import TextField from './ui/TextField';
 import { Notice } from './ui/Feedback';
 
@@ -64,6 +65,7 @@ export default function PersonnelRegisterAdmin() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
+  const [primaryRoles, setPrimaryRoles] = useState<Role[]>([]);
   const [former, setFormer] = useState<Staff[]>([]);
   const [query, setQuery] = useState('');
   // People who have left are not colleagues you can roster or assign work to,
@@ -76,6 +78,13 @@ export default function PersonnelRegisterAdmin() {
 
   const [editing, setEditing] = useState<Staff | null>(null);
   const [form, setForm] = useState<StaffFormValues>(emptyStaffForm());
+  // A laboratory professional belongs to exactly one clinical unit; an
+  // administrative unit is an additional posting and is never offered here.
+  const clinicalUnits = useMemo(() => sections.filter(s => s.unitKind !== 'administrative'), [sections]);
+  const unitRequired = useMemo(
+    () => requiresClinicalUnit(primaryRoles.find(r => String(r.id) === String(form.primaryRoleId))?.name),
+    [primaryRoles, form.primaryRoleId],
+  );
   // Recording a departure and erasing a record are different decisions with
   // different consequences, so they are different dialogs. Neither is reachable
   // by mis-clicking the other.
@@ -102,12 +111,13 @@ export default function PersonnelRegisterAdmin() {
     void load();
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(() => setRanks([]));
+    api<Role[]>('/roles?kind=primary').then(setPrimaryRoles).catch(() => setPrimaryRoles([]));
   }, []);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const source = view === 'former' ? former : staff;
-    return source.filter(s => !q || [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit, s.sectionName, s.username]
+    return source.filter(s => !q || [s.fullName, s.employeeNo, s.primaryRole, s.primaryPosition, s.sectionName, s.username]
       .some(v => v?.toLowerCase().includes(q)));
   }, [staff, former, query, view]);
 
@@ -145,7 +155,11 @@ export default function PersonnelRegisterAdmin() {
   // ---- Edit ----------------------------------------------------------------
   function openEdit(s: Staff) {
     setEditing(s);
-    setForm({ ...staffFormFrom(s as unknown as Record<string, unknown>), sectionId: s.sectionId ? String(s.sectionId) : '' });
+    setForm({
+      ...staffFormFrom(s as unknown as Record<string, unknown>),
+      sectionId: s.sectionId ? String(s.sectionId) : '',
+      primaryRoleId: s.primaryRoleId ? String(s.primaryRoleId) : '',
+    });
     setError(null); setNotice(null);
   }
   async function saveEdit(e: FormEvent) {
@@ -284,7 +298,7 @@ export default function PersonnelRegisterAdmin() {
       <div className="table-scroll">
         <table className="data-table reg-table">
           <thead><tr>
-            <th>Person</th><th>Role</th><th>Unit</th>
+            <th>Person</th><th>Primary role</th><th>Unit</th>
             {view === 'former' ? <th>Reason for leaving</th> : <th>Licence</th>}
             {view === 'former' ? <th>Left</th> : <th>Login account</th>}
             <th className="reg-actions-col">Actions</th>
@@ -314,13 +328,13 @@ export default function PersonnelRegisterAdmin() {
                   </span>
                 </td>
                 <td>
-                  <span className="reg-primary">{s.designation || s.jobTitle || s.primaryPosition || '—'}</span>
+                  <span className="reg-primary">{s.primaryRole || s.designation || <span className="badge inactive">No primary role</span>}</span>
                   <span className="reg-sub">
-                    {s.jobTitle || s.primaryPosition || 'No position assigned'}
+                    {s.primaryPosition || 'No position held'}
                     {s.appointmentDate ? ` · ${yearsOfService(s.appointmentDate)}` : ''}
                   </span>
                 </td>
-                <td>{s.unit || s.sectionName || '—'}</td>
+                <td>{s.sectionName || s.unit || '—'}</td>
                 {view === 'former'
                   ? <td>
                       <span className="reg-primary">{s.exitReason || '—'}</span>
@@ -394,9 +408,26 @@ export default function PersonnelRegisterAdmin() {
         <label>Initials<TextField value={form.initials} onValue={setText('initials')} placeholder="auto" /></label>
         <label>Date of birth<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
         <label>Gender<select value={form.gender} onChange={set('gender')}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
-        <label>Designation (grade)<TextField value={form.designation} onValue={setText('designation')} placeholder="e.g. Principal Medical Lab Scientist" /></label>
-        <label>Position / role<TextField value={form.jobTitle} onValue={setText('jobTitle')} placeholder="e.g. Biochemistry Unit Supervisor" /></label>
-        <label>Unit / Section<select value={form.sectionId} onChange={set('sectionId')}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        {/* The grade and the designation were two fields holding one fact,
+            typed differently by everybody. One field now, from a fixed list,
+            and the designation printed on every personnel record follows it. */}
+        <label>Primary role
+          <select value={form.primaryRoleId} onChange={set('primaryRoleId')} required>
+            <option value="">—</option>
+            {primaryRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </label>
+        {/* A post is an appointment and is made in one place; this was a
+            second, unconnected place to type one. */}
+        <label>Post held
+          <span className="appt-readonly">{editing?.primaryPosition ?? '—'}</span>
+        </label>
+        <label>Clinical unit
+          <select value={form.sectionId} onChange={set('sectionId')} required={unitRequired}>
+            <option value="">{unitRequired ? 'Select…' : '—'}</option>
+            {clinicalUnits.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
         <label>Professional regulator<TextField value={form.professionalRegulator} onValue={setText('professionalRegulator')} placeholder="e.g. AHPC" /></label>
         <label>Professional licence no.<TextField value={form.professionalLicence} onValue={setText('professionalLicence')} /></label>
         <label>Licence expiry<input type="date" value={form.licenceExpiryDate} onChange={set('licenceExpiryDate')} /></label>
@@ -418,15 +449,8 @@ export default function PersonnelRegisterAdmin() {
         <label>Contact phone<TextField value={form.phone} onValue={setText('phone')} /></label>
         <label>Email<TextField type="email" value={form.email} onValue={setText('email')} /></label>
         <label>Emergency contact<TextField value={form.emergencyContact} onValue={setText('emergencyContact')} placeholder="e.g. Spouse - 0200000000" /></label>
-        <label>Cadre<select value={form.cadre} onChange={set('cadre')}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>Professional rank<select value={form.professionalRank} onChange={set('professionalRank')}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
+        <label>Professional rank<select value={form.professionalRank} onChange={set('professionalRank')}><option value="">Auto (from primary role)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
         <label>Availability<select value={form.availabilityStatus} onChange={set('availabilityStatus')}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
-        {/* The post a person holds is an appointment, and appointments are
-            made in one place. This changed it here with no regard for who
-            already held it, which is how two people came to hold one post. */}
-        <label>Post held
-          <span className="appt-readonly">{editing?.primaryPosition ?? '—'}</span>
-        </label>
         <label>Staff file location<TextField value={form.staffFileLocation} onValue={setText('staffFileLocation')} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
       </form>}
     </DetailModal>

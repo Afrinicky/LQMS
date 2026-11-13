@@ -1,3 +1,4 @@
+import { benchRole, makeStaff, probeUsername } from './lib/people.mjs';
 /**
  * Verifies the other half of the personnel requirement: a member of staff
  * reaches their OWN record and nobody else's.
@@ -29,12 +30,12 @@ const A = admin.token;
 
 // Give the Technician probe user a staff record of their own, and make sure a
 // second, unrelated staff record exists to attempt to reach.
-const tech = await login('probe_technician');
-const mine = await j('/staff', { token: A, method: 'POST', body: { fullName: 'Probe Technician', email: 'probe.tech@lab' } });
-const other = await j('/staff', { token: A, method: 'POST', body: { fullName: 'Someone Else', email: 'someone@lab' } });
-const myStaffId = mine.json?.id, otherStaffId = other.json?.id;
+const techRole = await benchRole(j, A);
+const tech = await login(probeUsername(techRole.name));
+const myStaffId = await makeStaff(j, A, 'Probe Technician', { email: 'probe.tech@lab' });
+const otherStaffId = await makeStaff(j, A, 'Someone Else', { email: 'someone@lab' });
 await j(`/users/${tech.user.id}`, { token: A, method: 'PUT', body: { staffId: myStaffId } });
-const T = (await login('probe_technician')).token;
+const T = (await login(probeUsername(techRole.name))).token;
 
 console.log('\n[Self-service — a Technician and their own record]');
 const own = await j(`/staff/${myStaffId}`, { token: T });

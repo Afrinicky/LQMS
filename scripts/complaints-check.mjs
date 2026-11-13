@@ -9,6 +9,8 @@
  * the complainant when handling has ended. Each of those is checked here,
  * including the refusals — a rule that can be skipped is not a control.
  */
+import { benchRole, clinicalUnit } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4420/api';
 const PW = 'Passw0rd!test';
 
@@ -27,11 +29,13 @@ const j = async (p, o = {}) => {
 if (!(await j('/setup/status')).json?.setupComplete)
   await j('/setup/initialize', { method: 'POST', body: { facilityName: 'Complaint Lab', username: 'admin', password: PW, fullName: 'Admin User' } });
 const A = (await j('/auth/login', { method: 'POST', body: { username: 'admin', password: PW } })).json.token;
+const grade = await benchRole(j, A);
+const unitId = (await clinicalUnit(j, A))?.id ?? null;
 const stamp = Date.now();
 
 // Two people: one investigates, one reviews. They must not be the same.
-await j('/staff', { token: A, method: 'POST', body: { employeeNo: `INV-${stamp}`, firstName: 'Ivy', surname: 'Investigator' } });
-await j('/staff', { token: A, method: 'POST', body: { employeeNo: `REV-${stamp}`, firstName: 'Rita', surname: 'Reviewer' } });
+await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: grade.id, sectionId: unitId, employeeNo: `INV-${stamp}`, firstName: 'Ivy', surname: 'Investigator' } });
+await j('/staff', { token: A, method: 'POST', body: { primaryRoleId: grade.id, sectionId: unitId, employeeNo: `REV-${stamp}`, firstName: 'Rita', surname: 'Reviewer' } });
 const staff = (await j('/staff', { token: A })).json;
 const investigator = staff.find(s => s.employeeNo === `INV-${stamp}`);
 const reviewer = staff.find(s => s.employeeNo === `REV-${stamp}`);

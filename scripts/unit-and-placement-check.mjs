@@ -160,7 +160,7 @@ console.log('\n[6] A week after it ends, access is withdrawn and the record is k
 const leaver = await mkStaff(`STU-${stamp}`, 'Sam', 'Student', bloodBank, {
   personnelCategory: 'STUDENT', appointmentDate: day(-120), placementEndDate: day(14),
 });
-await mkUser(`stu${stamp}`, 'Technician', leaver.id);
+await mkUser(`stu${stamp}`, 'Medical Laboratory Technician', leaver.id);
 check('the student could sign in while the placement ran', (await login(`stu${stamp}`)).status === 200);
 // The placement now ends more than a week ago, which is where the grace
 // period has run out and the withdrawal is due.

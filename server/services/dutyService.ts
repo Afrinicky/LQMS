@@ -184,6 +184,47 @@ export function unitAssignments(db: Db, month: string): Map<number, UnitAssignme
   const sectionNames = new Map<number, string>();
   for (const s of db.prepare('SELECT id, name FROM sections').all() as any[]) sectionNames.set(Number(s.id), s.name);
 
+  /*
+   * For the month we are actually in, the REGISTER answers.
+   *
+   * This line is the fix for a specific, long-running failure: a person moved
+   * between units went on being given the old unit's work, because the memo
+   * was read first and the memo had not been re-cut. The register and the
+   * current month's memo are now kept in step in both directions
+   * (unitMembership.ts), so they say the same thing — and where anything has
+   * still managed to drift, the register is the one that was written last and
+   * is therefore the one to believe.
+   *
+   * The memo still supplies the ROLE for the month (who supervises, who
+   * deputises), because that is the memo's own business and not the
+   * register's. Past and future months are read from the memo exactly as
+   * before: one is history, the other is a plan.
+   */
+  const isCurrentMonth = month === new Date().toISOString().slice(0, 7);
+  if (isCurrentMonth) {
+    const roleByStaff = new Map<number, string>();
+    const schedule = activeReassignment(db, month);
+    if (schedule) {
+      const rows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ?').all(schedule.id) as any[];
+      for (const row of rows) {
+        if (row.supervisor_staff_id) roleByStaff.set(Number(row.supervisor_staff_id), 'supervisor');
+        if (row.deputy_staff_id) roleByStaff.set(Number(row.deputy_staff_id), 'deputy');
+      }
+    }
+    for (const s of db.prepare('SELECT id, section_id FROM staff WHERE is_active = 1').all() as any[]) {
+      if (!s.section_id) continue;
+      const id = Number(s.id);
+      const sectionId = Number(s.section_id);
+      out.set(id, {
+        sectionId,
+        sectionName: sectionNames.get(sectionId) ?? null,
+        role: roleByStaff.get(id) ?? 'member',
+        source: schedule ? 'reassignment' : 'staff_register',
+      });
+    }
+    return out;
+  }
+
   const schedule = activeReassignment(db, month);
   if (schedule) {
     const rows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ? ORDER BY display_order, id').all(schedule.id) as any[];

@@ -20,6 +20,8 @@
  * code could produce, so it is written directly; that check runs when DB
  * points at the database the API is using.
  */
+import { appointTo, benchRole } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4500/api';
 const DB_PATH = process.env.DB || null;
 const PW = 'Passw0rd!test';
@@ -70,11 +72,15 @@ const unit = (await j('/section-config/sections', { token: A, method: 'POST', bo
 // account that may verify, and a signature on file — nothing may be signed
 // without one.
 const roles = (await j('/roles', { token: A })).json;
+const supGrade = await benchRole(j, A, /scientist/i);
 const sup = (await j('/staff', { token: A, method: 'POST',
-  body: { employeeNo: `SUP-${stamp}`, firstName: 'Felix', surname: 'Gadzeto', sectionId: unit } })).json;
+  body: { primaryRoleId: supGrade.id, employeeNo: `SUP-${stamp}`, firstName: 'Felix', surname: 'Gadzeto', sectionId: unit } })).json;
+// The supervisor's profile comes from the post they hold, so they are
+// appointed to it rather than handed it on the account.
+await appointTo(j, A, sup.id, /unit supervisor$/i);
 await j('/users', { token: A, method: 'POST', body: {
   username: `sup${stamp}`, password: PW, fullName: 'Felix Gadzeto',
-  roleId: roles.find(r => r.name === 'Unit Supervisor')?.id, staffId: sup.id,
+  roleId: supGrade.id, staffId: sup.id,
 } });
 const S = (await j('/auth/login', { method: 'POST', body: { username: `sup${stamp}`, password: PW } })).json?.token;
 {

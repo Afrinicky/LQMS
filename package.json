@@ -24,6 +24,8 @@
     "audit:cache": "node scripts/access-cache-check.mjs",
     "audit:dashboard": "node scripts/dashboard-perf-check.mjs",
     "check:accounts": "node scripts/account-check.mjs",
+    "check:primary-roles": "npx tsx scripts/primary-roles-check.mts",
+    "check:unit-membership": "npx tsx scripts/unit-membership-check.mts",
     "check:appointments": "node scripts/appointments-check.mjs",
     "check:iqc": "node scripts/iqc-check.mjs",
     "check:iqc-bulk": "node scripts/iqc-bulk-check.mjs",

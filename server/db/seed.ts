@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS, isCorePositionTitle } from '../../shared/constants/modules.js';
+import { PRIMARY_ROLE_NAMES } from '../../shared/constants/roles.js';
 import { FEATURES, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
-import { getDb } from './database.js';
+import { getDb, linkAdministrativeUnitHeads } from './database.js';
 import { config } from '../config/index.js';
 
 export function seedDefaults() {
@@ -18,8 +19,16 @@ export function seedDefaults() {
       { name: 'Quality Manager', description: 'Lead quality assurance, corrective action, and review workflows.' },
       { name: 'Quality Team Member', description: 'Operational QMS user for investigations, CAPA, and action follow-up.' },
       { name: 'Unit Supervisor', description: 'Runs a unit of the laboratory: its people, its equipment, its technical quality.' },
-      { name: 'Biomedical Scientist', description: 'Technical staff member assigned to quality and operational records.' },
-      { name: 'Technician', description: 'Frontline technical staff with access to assigned quality actions and records.' },
+      // ---- Primary roles: what a staff member IS -------------------------
+      // One mandatory classification per person, merged with the designation
+      // they carry on the personnel register. Everything else in this list is
+      // a POSITION profile: the access a post carries, reached by mapping an
+      // organogram position to it, never offered as somebody's grade.
+      { name: 'Medical Laboratory Scientist', description: 'Registered scientific staff: performs, reviews and verifies technical work.' },
+      { name: 'Medical Laboratory Technician', description: 'Technical staff: performs assigned bench work and the records that go with it.' },
+      { name: 'Medical Laboratory Assistant', description: 'Laboratory support at the bench: specimen handling, preparation and housekeeping.' },
+      { name: 'Intern', description: 'Bench staff under supervision for a stated period: intern, student, trainee or national service.' },
+      { name: 'Administrative & Support Staff', description: 'Non-laboratory staff: administration, records, stores, front desk and support services.' },
       { name: 'Blood Bank Unit Supervisor', description: 'Runs the blood bank: a unit supervisor, with the blood registers on top.' },
       { name: 'Safety Manager', description: 'Oversees safety incidents and reviews blood bank adverse events.' },
       { name: 'Data Officer', description: 'Imports LHIMS raw data and prepares monthly reports.' },
@@ -35,6 +44,14 @@ export function seedDefaults() {
     for (const role of rolesToSeed) {
       db.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)').run(role.name, role.description, role.is_system ?? 0);
     }
+    // Which of these classify a person and which back an appointment. Stated
+    // on the row rather than inferred from its name, so a laboratory that
+    // renames one does not change what it is. The migration has already set
+    // this on an existing database; this is for a fresh one.
+    for (const name of PRIMARY_ROLE_NAMES) {
+      db.prepare("UPDATE roles SET kind = 'primary' WHERE name = ? COLLATE NOCASE").run(name);
+    }
+    db.prepare("UPDATE roles SET kind = 'position' WHERE kind IS NULL OR kind = ''").run();
     // The administrator flag is what reserves the few capabilities that sit
     // outside the permission matrix (see requireAdministrator). A laboratory
     // that has never had one gets it on the seeded role; one that has moved it
@@ -64,9 +81,19 @@ export function seedDefaults() {
     }
     db.prepare('INSERT OR IGNORE INTO departments (name) VALUES (?)').run('Laboratory');
     const labDept = db.prepare('SELECT id FROM departments WHERE name = ?').get('Laboratory') as { id: number };
-    for (const section of ['Blood Bank', 'Microbiology', 'Biochemistry', 'Haematology', 'Quality Office', 'Stores', 'Customer Service']) {
+    // Clinical units only. The Quality Office, the Stores and Customer
+    // Service used to be seeded here as ordinary sections, which made them
+    // look like benches: they had a test menu, they counted towards the
+    // laboratory's units, and nothing said who ran them. They are
+    // administrative units now and are created, classified and linked to
+    // their heading post by migrateUnitMembership().
+    for (const section of ['Blood Bank', 'Microbiology', 'Biochemistry', 'Haematology']) {
       db.prepare('INSERT OR IGNORE INTO sections (department_id, name) VALUES (?, ?)').run(labDept.id, section);
     }
+    // The administrative units are created by the migration, which runs before
+    // any position exists on a brand-new database. Now that the default posts
+    // are in, tie each office to the one that heads it.
+    linkAdministrativeUnitHeads(db);
     db.prepare('INSERT OR IGNORE INTO locations (name, description) VALUES (?, ?)').run('Main Laboratory', 'Default local site location.');
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('setupComplete', 'false')").run();
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('hostMode', 'true')").run();
@@ -102,7 +129,10 @@ export function seedDefaults() {
     // The communication hub moves it again: a laboratory already in service has
     // to receive the baseline communication right, or nobody but the
     // administrator can read a message addressed to them.
-    const ROLE_DEFAULTS_VERSION = '2026.10-features.12-communication';
+    // Bumped for the primary-role split: the grades were renamed and three new
+    // primary roles (Assistant, Intern, Administrative & Support) need their
+    // defaults applied to laboratories that are already running.
+    const ROLE_DEFAULTS_VERSION = '2026.11-primary-roles.1';
 
     // ── Bulk export and import ─────────────────────────────────────────────
     // Downloading a whole register as a spreadsheet, or loading one back in,
@@ -198,7 +228,7 @@ export function seedDefaults() {
       // ---- Frontline bench staff ------------------------------------------
       // Records the work they do. Owns nothing, configures nothing, and cannot
       // open a colleague's personnel file.
-      'Technician': {
+      'Medical Laboratory Technician': {
         contribute: [
           'monitoring.readings', 'equipment.maintenance', 'supplier_inventory.stock',
           'process_management.receipt', 'process_management.rejections',
@@ -215,7 +245,7 @@ export function seedDefaults() {
       // ---- Registered scientific staff -------------------------------------
       // Everything a Technician does, plus the technical quality work they are
       // qualified to perform and the registers that go with it.
-      'Biomedical Scientist': {
+      'Medical Laboratory Scientist': {
         manage: ['iqc', 'monitoring.readings', 'equipment.maintenance', 'process_management.receipt'],
         contribute: [
           'eqa', 'verification_validation', 'measurement_uncertainty',
@@ -231,6 +261,52 @@ export function seedDefaults() {
           'equipment.register', 'equipment.files', 'supplier_inventory.storage',
           'assessments', 'meetings', 'records_reports.generate',
           'notifications.calendar', 'monitoring.reports', 'documents.records',
+        ],
+      },
+
+      // ---- Laboratory support at the bench ---------------------------------
+      // Specimen handling, preparation, housekeeping and the stock they draw
+      // on. They record what they do; they do not run a control, release a
+      // result or own a register.
+      'Medical Laboratory Assistant': {
+        contribute: [
+          'supplier_inventory.stock', 'process_management.receipt',
+          'monitoring.readings', 'customer_focus.feedback',
+        ],
+        view: [
+          'process_management.directory', 'supplier_inventory.storage',
+          'equipment.register', 'notifications.calendar',
+        ],
+      },
+
+      // ---- Bench staff under supervision ------------------------------------
+      // An intern is here to learn and is supervised in everything, so the
+      // profile is deliberately read-mostly: they can see the work of the
+      // bench and keep their own training and competency file, and they can
+      // raise what they find — but running or accepting a control, releasing a
+      // result and editing a register all belong to somebody who answers for
+      // them. The laboratory widens this in Access Control the day an intern
+      // is assessed as competent, which is the point at which it should move.
+      'Intern': {
+        view: [
+          'process_management.directory', 'process_management.intervals',
+          'equipment.register', 'supplier_inventory.storage',
+          'monitoring.reports', 'notifications.calendar',
+          'iqc', 'eqa', 'documents.records',
+        ],
+      },
+
+      // ---- Administration and support ---------------------------------------
+      // Not bench staff: the office, the records, the store and the front desk.
+      // What any particular one of them runs — the store, the data returns,
+      // the front desk — is the POSITION they hold, and the position's profile
+      // carries it. This is only the floor they stand on.
+      'Administrative & Support Staff': {
+        contribute: [
+          'customer_focus.feedback', 'customer_focus.communication', 'complaints',
+        ],
+        view: [
+          'notifications.calendar', 'documents.records', 'meetings',
         ],
       },
 
@@ -647,7 +723,7 @@ export function seedDefaults() {
     //
     // The general tier is in the baseline above and so is not repeated.
     const ROUTINE_TECHNICAL_ROLES = [
-      'Biomedical Scientist', 'Unit Supervisor', 'Blood Bank Unit Supervisor', 'POCT Officer',
+      'Medical Laboratory Scientist', 'Unit Supervisor', 'Blood Bank Unit Supervisor', 'POCT Officer',
       'Safety Manager', 'Quality Team Member', 'Quality Manager', 'Laboratory Manager',
       'Deputy Laboratory Manager',
     ];
@@ -753,7 +829,7 @@ export function seedDefaults() {
         view: ['analyser_middleware.overview', 'analyser_middleware.dennis', 'analyser_middleware.result_filler',
           'analyser_middleware.reports'],
       }],
-      ['Biomedical Scientist', {
+      ['Medical Laboratory Scientist', {
         view: ['analyser_middleware.overview', 'analyser_middleware.diagnostics', 'analyser_middleware.result_filler',
           'analyser_middleware.reports'],
       }],
@@ -882,12 +958,11 @@ export function seedDefaults() {
       // Any other "… Unit Supervisor" — or the older "… Unit Head" a register
       // may still carry — runs a unit.
       { match: /(unit\s*(supervisor|head|manager)|section\s*(supervisor|head)|head\s*of\s*unit)$/, profile: 'Unit Supervisor' },
-      { match: /^biomedical\s*scientist$/, profile: 'Biomedical Scientist' },
-      { match: /^(medical\s*)?laboratory\s*(scientist|technologist)$/, profile: 'Biomedical Scientist' },
-      { match: /^technician$/, profile: 'Technician' },
-      // An intern is bench staff under supervision: the narrowest bench profile.
-      { match: /^(intern|student|trainee|attach(e|ment)e?)$/, profile: 'Technician' },
-      { match: /^(secretary|administrative\s*assistant|records\s*clerk)$/, profile: 'Quality User' },
+      // Bench grades are NOT in this table any more. A grade is a primary
+      // role on the person, not a post on the organogram, so the titles that
+      // used to appear here ("Biomedical Scientist", "Technician", "INTERN")
+      // no longer exist as positions — the migration converted them.
+      { match: /^(secretary|administrative\s*assistant|records\s*clerk)$/, profile: 'Administrative & Support Staff' },
     ];
 
     {

@@ -14,6 +14,7 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { ALERT_TARGETS } from '../shared/constants/alertTargets.ts';
+import { makeStaff } from './lib/people.mjs';
 
 const BASE = process.env.API || 'http://127.0.0.1:4431/api';
 const PW = 'Passw0rd!test';
@@ -46,11 +47,10 @@ console.log('\n[0] Give the laboratory some problems to raise alerts about');
 
 // Routing delivers to staff, so the lab needs at least one person for the scan
 // to have anywhere to send a notification.
-const me = await j('/staff', { token: A, method: 'POST', body: { fullName: 'Quality Manager', email: `qm${stamp}@lab.test` } });
-const meId = me.json?.id;
+const meId = await makeStaff(j, A, 'Quality Manager', { email: `qm${stamp}@lab.test` });
 const admin = (await j('/users', { token: A })).json.find(u => u.username === 'admin');
 if (admin && meId) await j(`/users/${admin.id}`, { token: A, method: 'PUT', body: { staffId: meId } });
-check('the laboratory has a person alerts can be routed to', !!meId, JSON.stringify(me.json));
+check('the laboratory has a person alerts can be routed to', !!meId, `staff id ${meId}`);
 
 const eq = await j('/equipment', { token: A, method: 'POST', body: {
   name: `Centrifuge ${stamp}`, equipmentNumber: `EQ-${stamp}`, status: 'operational',

@@ -20,6 +20,8 @@
  * posts accountable for the laboratory's records, the Quality Manager
  * included, and to nobody else.
  */
+import { appointTo, benchRole } from './lib/people.mjs';
+
 const BASE = process.env.API || 'http://127.0.0.1:4440/api';
 const PW = 'Passw0rd!test';
 
@@ -55,8 +57,9 @@ const theirs = await mkSection(`Microbiology ${stamp}`);
 const third = await mkSection(`Serology ${stamp}`);
 check('three units exist', !!mine && !!theirs && !!third, JSON.stringify({ mine, theirs, third }));
 
+const grade = await benchRole(j, A, /scientist/i);
 const mkStaff = async (no, first, sur, sectionId) => (await j('/staff', { token: A, method: 'POST',
-  body: { employeeNo: no, firstName: first, surname: sur, sectionId } })).json;
+  body: { employeeNo: no, firstName: first, surname: sur, sectionId, primaryRoleId: grade.id } })).json;
 
 /*
  * Putting somebody in charge of a unit.
@@ -72,32 +75,34 @@ const putInCharge = async (sectionId, staffId, title) => {
   await j(`/appointments/posts/${post.id}/supervises`, { token: A, method: 'PUT', body: { sectionId } });
   return j('/appointments', { token: A, method: 'POST', body: { positionId: post.id, staffId } });
 };
-const roles = (await j('/roles', { token: A })).json;
-const roleId = n => roles.find(r => r.name === n)?.id;
-const mkUser = async (username, staffId, roleName) => (await j('/users', { token: A, method: 'POST',
-  body: { username, password: PW, fullName: username, roleId: roleId(roleName), staffId } })).json;
+// Every account here works under a bench GRADE. Where somebody is meant to
+// carry a post's profile instead — the Quality Team Member, the Quality
+// Manager — they are appointed to the post, which is what confers it.
+const mkUser = async (username, staffId) => (await j('/users', { token: A, method: 'POST',
+  body: { username, password: PW, fullName: username, roleId: grade.id, staffId } })).json;
 
 // The substantive head of a unit, on a bench profile — which is the case the
 // laboratory reported: the post is recorded on the unit, not on the account.
 const head = await mkStaff(`UH-${stamp}`, 'Hanna', 'Head', mine);
-await mkUser(`uh${stamp}`, head.id, 'Biomedical Scientist');
+await mkUser(`uh${stamp}`, head.id);
 await putInCharge(mine, head.id, `Unit Supervisor ${stamp} A`);
 // Somebody standing in for the head of the OTHER unit, also on a bench profile.
 const stand = await mkStaff(`AC-${stamp}`, 'Ama', 'Acting', theirs);
-await mkUser(`ac${stamp}`, stand.id, 'Biomedical Scientist');
+await mkUser(`ac${stamp}`, stand.id);
 const today = new Date().toISOString().slice(0, 10);
 const until = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
 await j('/scheduling/acting-unit-heads', { token: A, method: 'POST',
   body: { sectionId: theirs, actingStaffId: stand.id, startDate: today, endDate: until, reason: 'Annual leave' } });
 // A bench scientist who runs no unit at all — the control group.
 const bench = await mkStaff(`BS-${stamp}`, 'Bernard', 'Bench', mine);
-await mkUser(`bs${stamp}`, bench.id, 'Biomedical Scientist');
+await mkUser(`bs${stamp}`, bench.id);
 // Somebody who heads a unit on a profile that reads quality control but does
 // not hold the laboratory-wide right to create in it. This is the person the
 // unit-scoping is actually for: everything they may do here, they may do
 // because they run that one unit.
 const scoped = await mkStaff(`SC-${stamp}`, 'Sena', 'Scoped', third);
-await mkUser(`sc${stamp}`, scoped.id, 'Quality Team Member');
+await appointTo(j, A, scoped.id, /^quality team member$/i);
+await mkUser(`sc${stamp}`, scoped.id);
 await putInCharge(third, scoped.id, `Unit Supervisor ${stamp} C`);
 
 const H = await login(`uh${stamp}`);
@@ -179,7 +184,8 @@ check('a right withdrawn individually is not handed back by the post',
 
 console.log('\n[5] Correcting the store — who may cancel a voucher');
 const qm = await mkStaff(`QM-${stamp}`, 'Quincy', 'Manager', mine);
-await mkUser(`qm${stamp}`, qm.id, 'Quality Manager');
+await appointTo(j, A, qm.id, /^quality manager$/i);
+await mkUser(`qm${stamp}`, qm.id);
 const Q = await login(`qm${stamp}`);
 const qmPerms = (await j('/auth/permissions', { token: Q })).json?.permissions ?? {};
 check('the Quality Manager may cancel a voucher issued in error',
