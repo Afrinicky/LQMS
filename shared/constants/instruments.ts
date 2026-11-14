@@ -66,12 +66,13 @@ export const LINK_ROLE_HINTS: Record<LinkRole, string> = {
 /* ============================================================================
    How the analyser is reached
    ========================================================================= */
-export const LINK_MODES = ['server', 'client', 'file_drop', 'lhims_tap'] as const;
+export const LINK_MODES = ['server', 'client', 'serial', 'file_drop', 'lhims_tap'] as const;
 export type LinkMode = (typeof LINK_MODES)[number];
 
 export const LINK_MODE_LABELS: Record<LinkMode, string> = {
   server: '{PRODUCT} listens; the analyser connects to it',
   client: '{PRODUCT} connects out to the analyser',
+  serial: 'A serial cable, straight into this computer',
   file_drop: 'The analyser writes files to a watched folder',
   lhims_tap: 'Follow the LHIMS client\'s own log — a copy, touching nothing',
 };
@@ -79,6 +80,11 @@ export const LINK_MODE_LABELS: Record<LinkMode, string> = {
 export const LINK_MODE_HINTS: Record<LinkMode, string> = {
   server: 'The usual arrangement, and what the LHIMS client uses. Give the analyser this host\'s address and the port below.',
   client: 'For an analyser that listens instead of dialling out. {PRODUCT} opens the connection and keeps it open.',
+  serial:
+    'For an analyser wired to this computer by an RS-232 cable rather than the network — a Biotecnica BT1500 is '
+    + 'this. Give the port the operating system calls it (COM1 on Windows, /dev/ttyUSB0 on Linux) and the settings '
+    + 'from the analyser\'s own service menu; they must match on both ends exactly or the bytes arrive as nonsense. '
+    + 'Nothing is bound and nothing is dialled, so no network setting is involved at all.',
   file_drop: 'For an analyser whose only export is a file. Nothing is connected; the folder is watched.',
   lhims_tap:
     'The way to get a copy of an analyser LHIMS already owns. Set WRITE_TO_FILE = Yes in the LHIMS client and it '
@@ -86,6 +92,43 @@ export const LINK_MODE_HINTS: Record<LinkMode, string> = {
     + 'No port is bound, no connection is opened, nothing is intercepted — if {PRODUCT} stops, the LHIMS transmission '
     + 'does not notice.',
 };
+
+/* ----------------------------------------------------------------------------
+   What a serial line has to agree about
+   ----------------------------------------------------------------------------
+   Both ends must say the same thing or the bytes arrive as nonsense — not as
+   an error, which is the trouble: a mismatched baud rate produces a steady
+   stream of plausible-looking rubbish rather than silence. These are offered
+   as a list rather than a free-text box so that the one thing a person can get
+   wrong is the value, not the spelling of it.
+
+   The defaults are the BT1500's, from its service manual: 9600, 8 data bits,
+   no parity, 1 stop bit, hardware handshake.
+   -------------------------------------------------------------------------- */
+export const SERIAL_BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200] as const;
+export const SERIAL_DATA_BITS = [7, 8] as const;
+export const SERIAL_STOP_BITS = [1, 2] as const;
+export const SERIAL_PARITIES = ['none', 'even', 'odd'] as const;
+export const SERIAL_FLOW_CONTROL = ['hardware', 'none', 'software'] as const;
+
+export const SERIAL_FLOW_LABELS: Record<string, string> = {
+  hardware: 'Hardware (RTS/CTS)',
+  none: 'None',
+  software: 'Software (XON/XOFF)',
+};
+
+export const SERIAL_DEFAULTS = {
+  baudRate: 9600,
+  dataBits: 8,
+  stopBits: 1,
+  parity: 'none',
+  flowControl: 'hardware',
+} as const;
+
+/** Does this mode speak over a serial cable rather than the network? */
+export function modeIsSerial(mode?: string | null): boolean {
+  return mode === 'serial';
+}
 
 /**
  * A mode that only ever reads a file somebody else writes.

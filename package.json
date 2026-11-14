@@ -125,6 +125,7 @@
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
+    "serialport": "^13.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

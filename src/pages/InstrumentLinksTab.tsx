@@ -15,6 +15,8 @@ import {
   LINK_PROTOCOLS, LINK_PROTOCOL_HINTS, LINK_PROTOCOL_LABELS,
   LINK_ROLES, LINK_ROLE_HINTS, LINK_ROLE_LABELS, LINK_STATE_LABELS,
   AFTER_TRANSMISSION_HINTS, AFTER_TRANSMISSION_LABELS, DEFAULT_CONTROL_PATTERNS, linkForwards, modeIsPassive,
+  SERIAL_BAUD_RATES, SERIAL_DATA_BITS, SERIAL_DEFAULTS, SERIAL_FLOW_CONTROL, SERIAL_FLOW_LABELS,
+  SERIAL_PARITIES, SERIAL_STOP_BITS,
   type LinkMode, type LinkProtocol, type LinkRole,
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
@@ -55,6 +57,9 @@ type Link = {
   listen_host: string | null; listen_port: number | null;
   remote_host: string | null; remote_port: number | null;
   watch_path: string | null;
+  serial_path?: string | null; serial_baud?: number | null;
+  serial_data_bits?: number | null; serial_stop_bits?: number | null;
+  serial_parity?: string | null; serial_flow?: string | null;
   analyte_map: Record<string, string>; control_patterns: string[];
   measure_map: Record<string, number>;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
@@ -113,6 +118,9 @@ const EMPTY = {
   name: '', equipmentId: '', sectionId: '', profileKey: 'sysmex_xn',
   role: 'sechlims_only' as LinkRole, mode: 'server' as LinkMode, protocol: 'astm' as LinkProtocol,
   listenHost: '', listenPort: '', remoteHost: '', remotePort: '', watchPath: '',
+  serialPath: '', serialBaud: String(SERIAL_DEFAULTS.baudRate), serialDataBits: String(SERIAL_DEFAULTS.dataBits),
+  serialStopBits: String(SERIAL_DEFAULTS.stopBits), serialParity: SERIAL_DEFAULTS.parity as string,
+  serialFlow: SERIAL_DEFAULTS.flowControl as string,
   controlPatterns: DEFAULT_CONTROL_PATTERNS.join(', '),
   forwardEnabled: false, forwardHost: '', forwardPort: '', closeAfterMessage: false,
   forwardTarget: 'lhims_api',
@@ -124,8 +132,19 @@ const EMPTY = {
   autoStart: true, notes: '',
 };
 
-/** Only a folder or a log file can be asked to be read again. */
+/** Only a folder or a log file can be asked to be read again ON A SCHEDULE. */
 const CAN_FETCH = (mode: string) => mode === 'file_drop' || mode === 'lhims_tap';
+
+/**
+ * Can this link be asked for something NOW?
+ *
+ * A folder and a log can be re-read. So, unlike every other analyser here, can
+ * a BT1500 — it transmits only when a host asks, so asking is the whole of how
+ * its results arrive and "Fetch" is a real action on it rather than a polite
+ * no-op.
+ */
+const CAN_ASK = (link: { mode: string; protocol: string }) =>
+  CAN_FETCH(link.mode) || link.protocol === 'bt1500';
 
 /**
  * A path that can only ever mean the disk in the machine reading it.
@@ -454,6 +473,12 @@ function formFrom(link: Link) {
     listenHost: link.listen_host ?? '', listenPort: link.listen_port ? String(link.listen_port) : '',
     remoteHost: link.remote_host ?? '', remotePort: link.remote_port ? String(link.remote_port) : '',
     watchPath: link.watch_path ?? '',
+    serialPath: link.serial_path ?? '',
+    serialBaud: String(link.serial_baud ?? SERIAL_DEFAULTS.baudRate),
+    serialDataBits: String(link.serial_data_bits ?? SERIAL_DEFAULTS.dataBits),
+    serialStopBits: String(link.serial_stop_bits ?? SERIAL_DEFAULTS.stopBits),
+    serialParity: link.serial_parity ?? SERIAL_DEFAULTS.parity,
+    serialFlow: link.serial_flow ?? SERIAL_DEFAULTS.flowControl,
     controlPatterns: (link.control_patterns ?? []).join(', '),
     closeAfterMessage: Boolean(link.close_after_message),
     forwardEnabled: Boolean(link.forward_enabled),
@@ -565,7 +590,7 @@ function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMes
                 {busy ? <Loader2 size={12} className="pd-spin" /> : <Play size={12} />} Start
               </button>
         )}
-        {CAN_FETCH(link.mode) && (link.role !== 'lhims_owned' || modeIsPassive(link.mode)) && (
+        {CAN_ASK(link) && (link.role !== 'lhims_owned' || modeIsPassive(link.mode)) && (
           <button type="button" className="pq-link" disabled={fetching} onClick={onFetch}>
             {fetching ? <Loader2 size={12} className="pd-spin" /> : <DownloadCloud size={12} />} Fetch
           </button>
@@ -1001,6 +1026,7 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
               </p>
             </>
           )}
+          {form.mode === 'serial' && <SerialFields form={form} set={set} />}
           {form.mode === 'client' && (
             <>
               <div className="lf-grid">
@@ -1438,5 +1464,86 @@ function FilesDialog({ link, onClose }: { link: Link; onClose: () => void }) {
           )}
       </div>
     </div>
+  );
+}
+
+/* ============================================================================
+   A cabled analyser
+   ----------------------------------------------------------------------------
+   Six settings, and all six have to match the analyser's own service menu. A
+   mismatch does not announce itself: the wrong baud rate produces a steady
+   stream of plausible rubbish rather than an error, which is why every one of
+   them is a list rather than something to type, and why the defaults are the
+   BT1500's own.
+
+   The port is the exception, and stays typeable. This computer's list is
+   offered because "is it COM3 or COM4" is the thing people actually get
+   wrong — but a port that only appears once the analyser is powered on would
+   be impossible to choose from a list that was read before it was.
+   ========================================================================= */
+function SerialFields({ form, set }: {
+  form: typeof EMPTY;
+  set: <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => void;
+}) {
+  const [ports, setPorts] = useState<Array<{ path: string; label: string | null }>>([]);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await api<{ ports: typeof ports; note: string | null }>('/instrument-links/serial-ports');
+        setPorts(data.ports ?? []);
+        setNote(data.note ?? null);
+      } catch { /* the port is typed in instead */ }
+    })();
+  }, []);
+
+  return (
+    <>
+      <div className="lf-grid">
+        <label className="lf-wide"><span>The port this computer calls it</span>
+          <TextField value={form.serialPath} onValue={v => set('serialPath', v)}
+            placeholder="COM1" list="il-serial-ports" />
+          <datalist id="il-serial-ports">
+            {ports.map(port => <option key={port.path} value={port.path}>{port.label ?? port.path}</option>)}
+          </datalist>
+        </label>
+        <label><span>Baud rate</span>
+          <select value={form.serialBaud} onChange={e => set('serialBaud', e.target.value)}>
+            {SERIAL_BAUD_RATES.map(rate => <option key={rate} value={String(rate)}>{rate}</option>)}
+          </select>
+        </label>
+        <label><span>Data bits</span>
+          <select value={form.serialDataBits} onChange={e => set('serialDataBits', e.target.value)}>
+            {SERIAL_DATA_BITS.map(bits => <option key={bits} value={String(bits)}>{bits}</option>)}
+          </select>
+        </label>
+        <label><span>Parity</span>
+          <select value={form.serialParity} onChange={e => set('serialParity', e.target.value)}>
+            {SERIAL_PARITIES.map(parity => <option key={parity} value={parity}>{parity}</option>)}
+          </select>
+        </label>
+        <label><span>Stop bits</span>
+          <select value={form.serialStopBits} onChange={e => set('serialStopBits', e.target.value)}>
+            {SERIAL_STOP_BITS.map(bits => <option key={bits} value={String(bits)}>{bits}</option>)}
+          </select>
+        </label>
+        <label><span>Handshake</span>
+          <select value={form.serialFlow} onChange={e => set('serialFlow', e.target.value)}>
+            {SERIAL_FLOW_CONTROL.map(flow => (
+              <option key={flow} value={flow}>{SERIAL_FLOW_LABELS[flow] ?? flow}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="lf-hint">
+        {ports.length > 0
+          ? <>This computer reports {ports.map(p => p.path).join(', ')}. </>
+          : null}
+        {note}
+        {' '}Every setting here must match the analyser's own service menu exactly. A BT1500 leaves the factory at
+        9600, 8 data bits, no parity, 1 stop bit, hardware handshake.
+      </p>
+    </>
   );
 }

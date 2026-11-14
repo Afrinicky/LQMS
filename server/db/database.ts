@@ -7041,6 +7041,16 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       ['outbound_unit_map', 'outbound_unit_map TEXT'],
       ['tap_path', 'tap_path TEXT'],
       ['tap_offset', 'tap_offset INTEGER NOT NULL DEFAULT 0'],
+      // An analyser wired to this computer by an RS-232 cable rather than the
+      // network. Both ends must agree on every one of these or the bytes
+      // arrive as plausible-looking rubbish, so each is recorded rather than
+      // assumed. The defaults are the BT1500's, from its service manual.
+      ['serial_path', 'serial_path TEXT'],
+      ['serial_baud', 'serial_baud INTEGER NOT NULL DEFAULT 9600'],
+      ['serial_data_bits', 'serial_data_bits INTEGER NOT NULL DEFAULT 8'],
+      ['serial_stop_bits', 'serial_stop_bits INTEGER NOT NULL DEFAULT 1'],
+      ['serial_parity', "serial_parity TEXT NOT NULL DEFAULT 'none'"],
+      ['serial_flow', "serial_flow TEXT NOT NULL DEFAULT 'hardware'"],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }

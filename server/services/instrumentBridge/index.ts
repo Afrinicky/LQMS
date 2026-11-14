@@ -245,6 +245,10 @@ interface LinkRow {
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
   lhims_map_key: string | null; measure_map: string | null; outbound_unit_map: string | null;
   tap_path: string | null; tap_offset: number | null;
+  // An analyser on the other end of an RS-232 cable rather than the network.
+  serial_path?: string | null; serial_baud?: number | null;
+  serial_data_bits?: number | null; serial_stop_bits?: number | null;
+  serial_parity?: string | null; serial_flow?: string | null;
   // Fetching, for the modes that can be asked rather than only pushed to.
   fetch_enabled: number; fetch_interval_seconds: number | null;
   file_pattern: string | null; archive_path: string | null; delete_after_read: number;
@@ -432,6 +436,7 @@ class Link {
     if (this.row.mode === 'lhims_tap') return this.startTap();
     if (this.row.mode === 'file_drop') return this.startWatcher();
     if (this.row.mode === 'client') return this.startClient();
+    if (this.row.mode === 'serial') return this.startSerial();
     return this.startServer();
   }
 
@@ -525,6 +530,120 @@ class Link {
       this.socket = socket;
     };
     connect();
+  }
+
+
+  /* ---------------------------------------------------------------- serial */
+  /**
+   * An analyser wired to this computer by an RS-232 cable.
+   *
+   * Everything else here reaches an analyser across the network. This one does
+   * not touch the network at all: the instrument is on the other end of a
+   * cable, and the operating system presents it as a port — COM1 on Windows,
+   * /dev/ttyUSB0 on Linux. A Biotecnica BT1500 connects this way.
+   *
+   * The serial driver is loaded only when a link actually needs it. It is a
+   * native module, and a host that has never wired an analyser directly should
+   * not fail to start because a package it has no use for would not build. If
+   * it is missing the link says so in words somebody can act on, and every
+   * other link on the host carries on untouched.
+   *
+   * Once the port is open it is handed to the same `attach` every network link
+   * uses, through a small adapter, so framing, acknowledgement, the idle
+   * flush, the silence report and BT1500 polling all behave identically. A
+   * serial link is a different wire, not a different protocol stack.
+   */
+  private startSerial(): void {
+    const path = this.row.serial_path?.trim();
+    if (!path) {
+      this.setState('error', 'No serial port set for this link.', 'No serial port set');
+      this.opened = false;
+      return;
+    }
+
+    const settings = {
+      path,
+      baudRate: Number(this.row.serial_baud) || 9600,
+      dataBits: (Number(this.row.serial_data_bits) || 8) as 7 | 8,
+      stopBits: (Number(this.row.serial_stop_bits) || 1) as 1 | 2,
+      parity: String(this.row.serial_parity || 'none') as 'none' | 'even' | 'odd',
+      rtscts: String(this.row.serial_flow || 'hardware') === 'hardware',
+      xon: String(this.row.serial_flow) === 'software',
+      xoff: String(this.row.serial_flow) === 'software',
+      autoOpen: false,
+    };
+    const described = `${path} at ${settings.baudRate} ${settings.dataBits}${settings.parity[0].toUpperCase()}${settings.stopBits}`;
+
+    const open = async () => {
+      if (this.stopping) return;
+      this.setState('connecting', `Opening ${described}`);
+
+      let SerialPort: any;
+      try {
+        ({ SerialPort } = await import('serialport'));
+      } catch {
+        this.setState('error',
+          'The serial driver is not installed on this computer, so a cabled analyser cannot be opened. '
+          + 'Install the application\'s dependencies (npm install) and start it again. Nothing else on this host is affected.',
+          'Serial driver not installed');
+        this.opened = false;
+        return;
+      }
+
+      const port = new SerialPort(settings);
+      port.open((error: Error | null) => {
+        if (!error) return;
+        /*
+         * The two faults worth telling apart, because they need opposite
+         * actions: a port that is not there at all, and one another program
+         * already has. On Windows the analyser's own software holding the port
+         * is much the commoner of the two, and it looks identical to a wiring
+         * fault unless it is said outright.
+         */
+        const text = /access denied|resource busy|cannot open/i.test(error.message)
+          ? `${path} is open in another program. The analyser's own software usually holds it — close that, or give this link a different port.`
+          : `${path} could not be opened: ${error.message}`;
+        this.setState('error', text, error.message);
+        if (!this.stopping) this.reconnectTimer = setTimeout(() => { void open(); }, LINK_RECONNECT_MS);
+      });
+
+      port.on('open', () => {
+        this.setState('connected', `Open on ${described}`);
+        try {
+          this.getDb().prepare('UPDATE instrument_links SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?').run(this.id);
+        } catch { /* not worth dropping a link over */ }
+      });
+
+      /*
+       * The adapter. `attach` wants the handful of things a socket does, and a
+       * serial port does all of them under other names or not at all —
+       * keep-alive and a peer address mean nothing on a cable. Rather than
+       * reshape the code path that carries results for every working analyser
+       * on this host, the port is given the shape that path already expects.
+       */
+      const line: any = {
+        setKeepAlive: () => undefined,
+        remoteAddress: undefined,
+        remotePort: undefined,
+        get destroyed() { return !port.isOpen; },
+        write: (chunk: Buffer) => { try { port.write(chunk); } catch { /* the close handler reports it */ } },
+        end: () => { try { port.close(() => undefined); } catch { /* already gone */ } },
+        destroy: () => { try { port.close(() => undefined); } catch { /* already gone */ } },
+        on: (event: string, handler: (...args: any[]) => void) => { port.on(event, handler); return line; },
+      };
+
+      this.attach(line as unknown as net.Socket, described);
+      this.socket = line as unknown as net.Socket;
+
+      port.on('close', () => {
+        this.socket = null;
+        if (this.stopping) return;
+        this.setState('connecting', `The serial port closed; reopening every ${Math.round(LINK_RECONNECT_MS / 1000)}s`);
+        this.reconnectTimer = setTimeout(() => { void open(); }, LINK_RECONNECT_MS);
+      });
+    };
+
+    void open();
   }
 
   /* ------------------------------------------------------- the LHIMS tap */

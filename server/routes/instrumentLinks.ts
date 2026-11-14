@@ -38,6 +38,7 @@ import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
   DEFAULT_CONTROL_PATTERNS, LINK_PROTOCOL_LABELS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
+  SERIAL_BAUD_RATES, SERIAL_DEFAULTS, SERIAL_FLOW_CONTROL, SERIAL_PARITIES,
   linkForwards, linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
 import {
@@ -120,6 +121,41 @@ export function instrumentLinkRoutes() {
       })),
       tap: { filename: LHIMS_TAP_FILENAME, steps: LHIMS_TAP_SETUP_STEPS },
     });
+  });
+
+  /**
+   * The serial ports this computer can see.
+   *
+   * "Is it COM3 or COM4" is the single thing people get wrong about a cabled
+   * analyser, and it is not knowable from anywhere else — so the list is read
+   * from the operating system and offered. It is a suggestion, never a
+   * restriction: a port that appears only once the analyser is powered on
+   * would otherwise be impossible to choose, so the field stays typeable.
+   */
+  router.get('/serial-ports', requirePermission(MODULE, 'view'), async (_req, res) => {
+    try {
+      const { SerialPort } = await import('serialport');
+      const ports = await SerialPort.list();
+      res.json({
+        ports: ports.map(port => ({
+          path: port.path,
+          // friendlyName is Windows' own description of the device — "USB
+          // Serial Port (COM3)" — and is the thing that tells one identical
+          // adaptor from another. It is not on every platform's port record,
+          // which is why it is read defensively rather than declared.
+          label: [port.manufacturer, (port as { friendlyName?: string }).friendlyName ?? port.pnpId]
+            .filter(Boolean).join(' · ') || null,
+        })),
+        note: ports.length ? null : 'This computer reports no serial ports. Type the port in if the analyser is not powered on yet.',
+      });
+    } catch (error) {
+      /*
+       * Not an error the screen should shout about. A host with no serial
+       * driver, or one whose operating system will not enumerate ports, can
+       * still run a cabled link — the port is simply typed in.
+       */
+      res.json({ ports: [], note: `The port list could not be read here (${(error as Error).message}). Type the port in instead.` });
+    }
   });
 
   router.get('/profiles/:key/analytes', requirePermission(MODULE, 'view'), (req, res) => {
@@ -333,6 +369,13 @@ export function instrumentLinkRoutes() {
       remoteHost: pick(b.remoteHost, existing.remote_host) ?? null,
       remotePort: b.remotePort !== undefined ? parseIntNullable(b.remotePort) : (existing.remote_port ?? null),
       watchPath: pick(b.watchPath, existing.watch_path) ?? null,
+      // The cable, for an analyser wired straight into this computer.
+      serialPath: pick(b.serialPath, existing.serial_path) ?? null,
+      serialBaud: b.serialBaud !== undefined ? parseIntNullable(b.serialBaud) : (existing.serial_baud ?? SERIAL_DEFAULTS.baudRate),
+      serialDataBits: b.serialDataBits !== undefined ? parseIntNullable(b.serialDataBits) : (existing.serial_data_bits ?? SERIAL_DEFAULTS.dataBits),
+      serialStopBits: b.serialStopBits !== undefined ? parseIntNullable(b.serialStopBits) : (existing.serial_stop_bits ?? SERIAL_DEFAULTS.stopBits),
+      serialParity: String(pick(b.serialParity, existing.serial_parity) ?? SERIAL_DEFAULTS.parity),
+      serialFlow: String(pick(b.serialFlow, existing.serial_flow) ?? SERIAL_DEFAULTS.flowControl),
       analyteMap: b.analyteMap !== undefined ? JSON.stringify(b.analyteMap ?? {}) : (existing.analyte_map ?? null),
       unitMap: b.unitMap !== undefined ? JSON.stringify(b.unitMap ?? {}) : (existing.unit_map ?? null),
       outboundUnitMap: b.outboundUnitMap !== undefined
@@ -414,6 +457,21 @@ export function instrumentLinkRoutes() {
 
     if (v.mode === 'server' && !v.listenPort) return 'A listening link needs the port the analyser will send to.';
     if (v.mode === 'client' && (!v.remoteHost || !v.remotePort)) return 'A dialling link needs the analyser\'s address and port.';
+    if (v.mode === 'serial') {
+      if (!v.serialPath) return 'A cabled link needs the serial port this computer calls the analyser — COM1 on Windows, /dev/ttyUSB0 on Linux.';
+      if (!SERIAL_BAUD_RATES.includes(v.serialBaud as never)) return `The baud rate must be one of: ${SERIAL_BAUD_RATES.join(', ')}.`;
+      if (!SERIAL_PARITIES.includes(v.serialParity as never)) return `Parity must be one of: ${SERIAL_PARITIES.join(', ')}.`;
+      if (!SERIAL_FLOW_CONTROL.includes(v.serialFlow as never)) return `Handshake must be one of: ${SERIAL_FLOW_CONTROL.join(', ')}.`;
+      /*
+       * Two links on one cable is not a configuration, it is two programs
+       * fighting over a port — and the one that loses reports nothing rather
+       * than failing, which is the hardest kind of fault to find.
+       */
+      const taken = db.prepare(`SELECT name FROM instrument_links
+          WHERE mode = 'serial' AND is_active = 1 AND serial_path = ? AND (? IS NULL OR id != ?)`)
+        .get(v.serialPath, id, id) as any;
+      if (taken) return `${v.serialPath} is already used by "${taken.name}". A serial port carries one analyser.`;
+    }
     if (v.mode === 'file_drop' && !v.watchPath) return 'A watched link needs the folder the analyser writes into.';
     if (v.mode === 'lhims_tap' && !v.tapPath) {
       return `Following the LHIMS client needs the path to its ${LHIMS_TAP_FILENAME}, or to the folder holding it. Set WRITE_TO_FILE = Yes in the client first, then point this at the file it writes.`;
@@ -517,14 +575,18 @@ export function instrumentLinkRoutes() {
 
     const result = db.prepare(`INSERT INTO instrument_links
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
-         listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, unit_map, outbound_unit_map, control_patterns,
+         listen_host, listen_port, remote_host, remote_port, watch_path,
+         serial_path, serial_baud, serial_data_bits, serial_stop_bits, serial_parity, serial_flow,
+         analyte_map, unit_map, outbound_unit_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
          lhims_password, lhims_map_key, measure_map, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
          close_after_message, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath,
+        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow,
+        v.analyteMap, v.unitMap,
         v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
@@ -547,13 +609,17 @@ export function instrumentLinkRoutes() {
 
     db.prepare(`UPDATE instrument_links SET name = ?, equipment_id = ?, section_id = ?, profile_key = ?,
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
-        watch_path = ?, analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
+        watch_path = ?, serial_path = ?, serial_baud = ?, serial_data_bits = ?, serial_stop_bits = ?,
+        serial_parity = ?, serial_flow = ?,
+        analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
         fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
         close_after_message = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath,
+        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow,
+        v.analyteMap, v.unitMap,
         v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
@@ -763,6 +829,16 @@ export function instrumentLinkRoutes() {
       add('address', 'SECHLIMS can reach the analyser', link.messages_received > 0 ? 'ok' : 'todo',
         link.remote_host ? `It dials ${link.remote_host}:${link.remote_port ?? '—'}.` : 'No analyser address is set.',
         link.remote_host ? undefined : 'Give the link the analyser\'s address and port.');
+    } else if (link.mode === 'serial') {
+      add('address', 'The cable is open', link.messages_received > 0 ? 'ok' : 'todo',
+        link.serial_path
+          ? `${link.serial_path} at ${link.serial_baud ?? 9600} baud, ${link.serial_data_bits ?? 8} data bits, `
+            + `${link.serial_parity ?? 'none'} parity, ${link.serial_stop_bits ?? 1} stop bit, `
+            + `${String(link.serial_flow ?? 'hardware')} handshake. Every one of these must match the analyser's own service menu.`
+          : 'No serial port is set, so there is nothing to open.',
+        link.serial_path
+          ? undefined
+          : 'Give the link the port this computer calls the analyser — COM1 on Windows, /dev/ttyUSB0 on Linux.');
     } else if (link.mode === 'file_drop') {
       // Which of the half-dozen reasons it is decides what somebody does next,
       // and the one most often true — a path read off the analyser's own
@@ -781,6 +857,28 @@ export function instrumentLinkRoutes() {
         link.tap_path ? target.note : `No path to ${LHIMS_TAP_FILENAME} is set.`,
         target.file ? undefined
           : `Switch WRITE_TO_FILE on in the client and point the link at the ${LHIMS_TAP_FILENAME} it writes, or at the folder holding it.`);
+    }
+
+    /*
+     * The BT1500's own precondition, which is not visible from this end.
+     *
+     * It holds a result back until somebody accepts it on the analyser, so a
+     * link can be perfectly configured, perfectly connected, politely asking
+     * every fifteen seconds, and still collect nothing at all — because there
+     * is genuinely nothing to collect. That looks exactly like a broken link
+     * and is the first thing to rule out, so it is stated here rather than
+     * left in a manual.
+     */
+    if (link.protocol === 'bt1500') {
+      add('bt1500_validate', 'Results are released on the analyser',
+        Number(link.messages_received ?? 0) > 0 ? 'ok' : 'info',
+        Number(link.messages_received ?? 0) > 0
+          ? 'Reports are being collected, so results are being released.'
+          : 'The BT1500 offers a report only once it has been accepted. Until then it answers every request with '
+            + '"nothing waiting", which is indistinguishable from a quiet analyser.',
+        'On the analyser, either accept each run under Utility, RS232, "Accept result to be sent" — or switch it '
+        + 'off altogether under Utility, Setup Analyzer, Serial, with "All results must be sent automatically '
+        + '(without validate)" at the foot of the page.');
     }
 
     /* 4 — has anything ever actually arrived? */
