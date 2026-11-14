@@ -41,8 +41,18 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   decodeExport, detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes,
-  splitTransmissions, type Framer, type AnalyserMessage,
+  splitTransmissions, Bt1500Framer, STX, type Framer, type AnalyserMessage,
 } from './protocols.js';
+
+/**
+ * How often to ask a polled analyser whether it has anything.
+ *
+ * Fifteen seconds is a compromise between a bench waiting for a result and a
+ * serial line carrying needless traffic. It only sets the floor: a report
+ * always triggers the next request immediately, so a batch arrives at the
+ * speed of the connection rather than one every fifteen seconds.
+ */
+const BT1500_POLL_MS = 15_000;
 import {
   LINK_CLOSE_AFTER_MS, LINK_FOLDER_POLL_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
   classifyMessage, linkForwards, linkIsOurs, mapAnalyte, modeIsPassive,
@@ -301,6 +311,15 @@ class Link {
   private server: net.Server | null = null;
   private socket: net.Socket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  /**
+   * The BT1500 asks for nothing and offers nothing until it is asked.
+   *
+   * Every other analyser here transmits when it has something; this one holds
+   * its reports until a host collects them, so the link has to keep asking.
+   * The timer does that while a connection is up, and is cleared with the rest
+   * when the link stops.
+   */
+  private pollTimer: NodeJS.Timeout | null = null;
   private idleTimers = new Map<net.Socket, NodeJS.Timeout>();
   private watcher: fs.FSWatcher | null = null;
   /** Only set when the folder could not be watched and must be polled instead. */
@@ -961,6 +980,19 @@ class Link {
           : 'Nothing new in the log.',
         messages);
     }
+    /*
+     * A polled analyser is the one case where "fetch now" does something real
+     * over a socket: the BT1500 is holding its reports until it is asked, so
+     * asking is exactly what this button is for.
+     */
+    if (this.row.protocol === 'bt1500') {
+      const socket = this.socket;
+      if (!socket || socket.destroyed) {
+        return { ok: false, read: 0, note: 'Not connected to the analyser at the moment, so it cannot be asked. The link keeps retrying.' };
+      }
+      socket.write(Buffer.from([STX]));
+      return stamp('Asked the analyser for its next report. Anything it is holding will arrive in a moment.', 0);
+    }
     if (this.row.mode === 'client') {
       // Dialling out IS the fetch, so the honest answer is whether the
       // connection is up — not a pretence that a message was pulled.
@@ -1041,6 +1073,31 @@ class Link {
       }, LINK_CLOSE_AFTER_MS);
     };
 
+    /*
+     * Asking the BT1500 for what it is holding.
+     *
+     * One exchange collects at most one report, so after a report arrives the
+     * next request goes out straight away and the queue drains at the speed of
+     * the wire rather than of the timer. When the analyser answers that it has
+     * nothing, the timer takes over again.
+     */
+    const polled = framer instanceof Bt1500Framer ? framer : null;
+    const askAgain = (why: string) => {
+      if (!polled || socket.destroyed || this.stopping) return;
+      const opening = polled.poll();
+      socket.write(opening);
+      this.emit('out', `Asked ${peer} for the next report (${why})`, printableBytes(opening));
+    };
+    if (polled) {
+      askAgain('the connection opened');
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      this.pollTimer = setInterval(() => {
+        if (socket.destroyed) return;
+        // Never interrupt an exchange already in flight.
+        if (!polled.busy) askAgain('routine poll');
+      }, BT1500_POLL_MS);
+    }
+
     socket.on('data', chunk => {
       bytes += chunk.length;
       if (!firstBytes) firstBytes = Buffer.from(chunk.subarray(0, 400));
@@ -1052,7 +1109,7 @@ class Link {
         // it spends waiting.
         answer(replies);
         for (const message of messages) { taken++; this.ingest(message, peer); }
-        if (messages.length) closeWhenQuiet();
+        if (messages.length) { closeWhenQuiet(); askAgain('a report was collected'); }
       } catch (error) {
         this.setState('error', `Reading from ${peer}: ${(error as Error).message}`, (error as Error).message);
       }
@@ -1061,6 +1118,7 @@ class Link {
 
     socket.on('close', () => {
       if (hangUp) { clearTimeout(hangUp); hangUp = null; }
+      if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
       this.clearIdle(socket);
       // Whatever arrived but was never terminated is still a record. A link
       // that drops mid-transmission should not silently lose the sample.
@@ -1491,6 +1549,7 @@ class Link {
     this.stopping = true;
     this.opened = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.tapTimer) { clearInterval(this.tapTimer); this.tapTimer = null; }
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();

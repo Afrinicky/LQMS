@@ -129,12 +129,13 @@ export function linkForwards(role?: string | null, forwardEnabled?: unknown): bo
 /* ============================================================================
    What it says on the wire
    ========================================================================= */
-export const LINK_PROTOCOLS = ['astm', 'hl7', 'delimited', 'auto'] as const;
+export const LINK_PROTOCOLS = ['astm', 'hl7', 'bt1500', 'delimited', 'auto'] as const;
 export type LinkProtocol = (typeof LINK_PROTOCOLS)[number];
 
 export const LINK_PROTOCOL_LABELS: Record<LinkProtocol, string> = {
   astm: 'ASTM E1394 (most haematology and chemistry analysers)',
   hl7: 'HL7 v2 ORU^R01 over MLLP',
+  bt1500: 'Biotecnica BT1500 — fixed columns, asked for by the host',
   delimited: 'Plain delimited text, one result per line',
   auto: 'Work it out from what arrives',
 };
@@ -142,6 +143,13 @@ export const LINK_PROTOCOL_LABELS: Record<LinkProtocol, string> = {
 export const LINK_PROTOCOL_HINTS: Record<LinkProtocol, string> = {
   astm: 'Framed records with ENQ/ACK handshaking and a checksum. Sysmex, Mindray BC-3600, ABX Pentra, BT-3000, Selectra and DIRUI all speak it.',
   hl7: 'Message framed between 0x0B and 0x1C 0x0D. Mindray BC-5800 and newer analysers use it.',
+  bt1500:
+    'The Biotecnica dialogue. Unlike every other protocol here the analyser never transmits on its own — '
+    + '{PRODUCT} has to ask, and keeps asking: STX, then the analyser\'s ACK, then the request, and back comes '
+    + 'one report in fixed columns or a NAK meaning none is waiting. Results only become available to ask for '
+    + 'once they are validated on the analyser, so set "All results must be sent automatically (without '
+    + 'validate)" under Utility, Setup Analyzer, Serial — otherwise nothing arrives until somebody presses '
+    + 'Accept on the machine.',
   delimited: 'A fallback for an analyser with a simple text output. The layout is mapped by hand.',
   auto:
     'For an analyser whose protocol nobody has written down. The first message is read for its shape — ASTM records, '
@@ -423,7 +431,19 @@ export interface InstrumentProfile {
   protocol: LinkProtocol;
   /** Instrument mnemonic → the analyte name a control in this system uses. */
   analytes: Record<string, string>;
+  /** Parameter → the scale this laboratory keeps it in. Absent means do not rescale. */
+  units?: Record<string, string>;
   notes?: string;
+  /**
+   * Kept so an existing link still resolves, but never offered in a picker.
+   *
+   * The two original "something else that speaks ASTM / HL7" entries are this:
+   * links saved under those keys go on working, while anybody choosing today
+   * is offered the per-discipline sets instead.
+   */
+  hidden?: boolean;
+  /** Where this model came from. Built in, a discipline default, or made here. */
+  origin?: 'builtin' | 'default' | 'custom';
 }
 
 const FBC_SYSMEX: Record<string, string> = {
@@ -536,6 +556,198 @@ const CHEMISTRY_HUMASTAR: Record<string, string> = {
   APOA1: 'Apolipoprotein A1', APOB: 'Apolipoprotein B',
 };
 
+/**
+ * The molecular vocabulary, kept apart so the discipline default can use it.
+ */
+const MOLECULAR_GENEXPERT: Record<string, string> = {
+  MTB: 'MTB', RIF: 'Rifampicin resistance', 'MTB-RIF': 'MTB/RIF',
+  'HIV-VL': 'HIV viral load', HCV: 'HCV', HBV: 'HBV', CT: 'Chlamydia trachomatis', NG: 'Neisseria gonorrhoeae',
+};
+
+/**
+ * The immunology vocabulary.
+ *
+ * Every one of these is run on a chemistry analyser in this laboratory, so the
+ * spellings are the ones the chemistry maps already use. It is a separate set
+ * because an immunology bench that gets handed the whole chemistry menu spends
+ * its first afternoon deleting eighty parameters it does not measure.
+ */
+const IMMUNOLOGY_DEFAULT: Record<string, string> = {
+  CRP: 'C-reactive protein', ASO: 'ASO', RF: 'Rheumatoid factor',
+  C3: 'Complement C3', C4: 'Complement C4',
+  IGA: 'IgA', IGG: 'IgG', IGM: 'IgM', IGE: 'IgE',
+  FERR: 'Ferritin', TRF: 'Transferrin',
+  TSH: 'TSH', FT3: 'Free T3', FT4: 'Free T4', T3: 'T3', T4: 'T4',
+  PSA: 'PSA', AFP: 'AFP', CEA: 'CEA', BHCG: 'Beta hCG',
+  'VIT-D': 'Vitamin D', B12: 'Vitamin B12', FOL: 'Folate',
+  PROC: 'Procalcitonin', TROP: 'Troponin I', 'TROP-I': 'Troponin I',
+};
+
+/* ============================================================================
+   Defaults for an analyser the system has never heard of
+   ----------------------------------------------------------------------------
+   A model that is not on the list used to start a link with nothing: no
+   parameters, no units, and a Parameter Mappings screen with an empty table.
+   Everything the machine sent arrived under its own spelling and stayed that
+   way until somebody typed out the whole menu by hand.
+
+   These sets are what a link starts from instead. Each is the union of every
+   analyser of that discipline this system already knows, taken from the maps
+   above rather than written out again, so a spelling corrected on a model is
+   corrected here too. Nothing here is binding: a link may add, rename or drop
+   any of it, and the whole set is editable in Settings under Analysers, where
+   a laboratory that measures something else entirely says so once.
+   ========================================================================= */
+export const ANALYSER_DISCIPLINES = ['haematology', 'chemistry', 'molecular', 'immunology', 'other'] as const;
+export type AnalyserDiscipline = (typeof ANALYSER_DISCIPLINES)[number];
+
+export const DISCIPLINE_LABELS: Record<AnalyserDiscipline, string> = {
+  haematology: 'Haematology',
+  chemistry: 'Biochemistry',
+  molecular: 'Molecular',
+  immunology: 'Immunology',
+  other: 'Other',
+};
+
+/**
+ * Merge analyte maps, first spelling wins.
+ *
+ * First rather than last because the maps are listed in order of how well this
+ * laboratory knows them, and a code that means one thing on the analyser in the
+ * room should not be redefined by one that is merely possible elsewhere.
+ */
+function unionAnalytes(...maps: Array<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const map of maps) {
+    for (const [code, parameter] of Object.entries(map)) {
+      if (!(code in out)) out[code] = parameter;
+    }
+  }
+  return out;
+}
+
+/** What a link starts with when the analyser is not one of the listed models. */
+export const DEFAULT_PARAMETER_SETS: Record<AnalyserDiscipline, Record<string, string>> = {
+  haematology: unionAnalytes(FBC_SYSMEX, FBC_HUMACOUNT, FBC_MINDRAY_3PART),
+  chemistry: unionAnalytes(CHEMISTRY_SELECTRA, CHEMISTRY_HUMASTAR),
+  molecular: unionAnalytes(MOLECULAR_GENEXPERT),
+  immunology: unionAnalytes(IMMUNOLOGY_DEFAULT),
+  other: unionAnalytes(
+    FBC_SYSMEX, FBC_HUMACOUNT, FBC_MINDRAY_3PART,
+    CHEMISTRY_SELECTRA, CHEMISTRY_HUMASTAR,
+    MOLECULAR_GENEXPERT, IMMUNOLOGY_DEFAULT,
+  ),
+};
+
+/**
+ * The scale each default parameter is kept in.
+ *
+ * SI throughout, because that is what LHIMS files and what this laboratory
+ * reports. A parameter absent from here is simply not rescaled — the reading is
+ * kept exactly as it arrived, which is the right answer until somebody states
+ * otherwise.
+ */
+const UNITS_HAEMATOLOGY: Record<string, string> = {
+  WBC: '10^9/L', RBC: '10^12/L', Haemoglobin: 'g/dL', Haematocrit: '%',
+  MCV: 'fL', MCH: 'pg', MCHC: 'g/dL', Platelets: '10^9/L',
+  'Neutrophils %': '%', 'Lymphocytes %': '%', 'Monocytes %': '%',
+  'Eosinophils %': '%', 'Basophils %': '%',
+  Neutrophils: '10^9/L', Lymphocytes: '10^9/L', Monocytes: '10^9/L',
+  Eosinophils: '10^9/L', Basophils: '10^9/L',
+  'Mid cells': '10^9/L', 'Mid cells %': '%',
+  Granulocytes: '10^9/L', 'Granulocytes %': '%',
+  'Atypical lymphocytes': '10^9/L', 'Atypical lymphocytes %': '%',
+  'Large immature cells': '10^9/L', 'Large immature cells %': '%',
+  'RDW-CV': '%', 'RDW-SD': 'fL', PDW: 'fL', MPV: 'fL',
+  'P-LCR': '%', 'P-LCC': '10^9/L', PCT: '%',
+  Reticulocytes: '10^9/L', 'Reticulocytes %': '%',
+};
+
+const UNITS_CHEMISTRY: Record<string, string> = {
+  Glucose: 'mmol/L', Urea: 'mmol/L', Creatinine: 'umol/L', 'Uric acid': 'umol/L',
+  'Total protein': 'g/L', Albumin: 'g/L', Globulin: 'g/L',
+  'Total bilirubin': 'umol/L', 'Direct bilirubin': 'umol/L', 'Indirect bilirubin': 'umol/L',
+  AST: 'U/L', ALT: 'U/L', ALP: 'U/L', 'Gamma GT': 'U/L',
+  Amylase: 'U/L', Lipase: 'U/L', LDH: 'U/L', CK: 'U/L', 'CK-MB': 'U/L',
+  'Total cholesterol': 'mmol/L', Triglycerides: 'mmol/L',
+  'HDL cholesterol': 'mmol/L', 'LDL cholesterol': 'mmol/L',
+  VLDL: 'mmol/L', 'VLDL cholesterol': 'mmol/L',
+  Sodium: 'mmol/L', Potassium: 'mmol/L', Chloride: 'mmol/L', Lithium: 'mmol/L',
+  Calcium: 'mmol/L', Magnesium: 'mmol/L', Phosphate: 'mmol/L',
+  Iron: 'umol/L', UIBC: 'umol/L', TIBC: 'umol/L',
+  Transferrin: 'g/L', Ferritin: 'ug/L',
+  'C-reactive protein': 'mg/L', ASO: 'U/L', 'Rheumatoid factor': 'U/L',
+  'Complement C3': 'g/L', 'Complement C4': 'g/L',
+  IgA: 'g/L', IgG: 'g/L', IgM: 'g/L',
+  'Cystatin C': 'mg/L', Homocysteine: 'umol/L',
+  Microalbumin: 'mg/L', HbA1c: '%',
+  'Apolipoprotein A1': 'g/L', 'Apolipoprotein B': 'g/L',
+};
+
+const UNITS_IMMUNOLOGY: Record<string, string> = {
+  'C-reactive protein': 'mg/L', ASO: 'U/L', 'Rheumatoid factor': 'U/L',
+  'Complement C3': 'g/L', 'Complement C4': 'g/L',
+  IgA: 'g/L', IgG: 'g/L', IgM: 'g/L', IgE: 'U/L',
+  Ferritin: 'ug/L', Transferrin: 'g/L',
+  TSH: 'U/L', 'Free T3': 'nmol/L', 'Free T4': 'nmol/L', T3: 'nmol/L', T4: 'nmol/L',
+  PSA: 'ug/L', AFP: 'ug/L', CEA: 'ug/L', 'Beta hCG': 'U/L',
+  'Vitamin D': 'nmol/L', 'Vitamin B12': 'nmol/L', Folate: 'nmol/L',
+  Procalcitonin: 'ug/L', 'Troponin I': 'ug/L',
+};
+
+export const DEFAULT_UNIT_SETS: Record<AnalyserDiscipline, Record<string, string>> = {
+  haematology: { ...UNITS_HAEMATOLOGY },
+  chemistry: { ...UNITS_CHEMISTRY },
+  molecular: {},
+  immunology: { ...UNITS_IMMUNOLOGY },
+  other: { ...UNITS_HAEMATOLOGY, ...UNITS_CHEMISTRY, ...UNITS_IMMUNOLOGY },
+};
+
+/** The model key a laboratory gets when it says the analyser is not listed. */
+export function genericKey(discipline: AnalyserDiscipline, protocol: LinkProtocol): string {
+  return `generic_${discipline}_${protocol}`;
+}
+
+
+/**
+ * The BT1500's method codes.
+ *
+ * Four characters, space padded, and chosen by whoever set the analyser up:
+ * the service manual names only GLU, BUN and CHO, in its worked example, and
+ * leaves the rest to the methods a laboratory configures. So this is a
+ * starting vocabulary of the spellings Biotecnica's own methods ship under,
+ * and the chemistry set underneath it catches the rest. Where this machine
+ * says something else, Parameter Mappings lists the codes it has actually sent
+ * and the name is given once.
+ *
+ * CHO is cholesterol here, not choline and not creatinine — the manual's
+ * example transmits CHO at 100.0, which is a cholesterol in mg/dL and nothing
+ * else. BUN is urea, reported as urea nitrogen.
+ */
+const CHEMISTRY_BT1500: Record<string, string> = {
+  GLU: 'Glucose', GLUC: 'Glucose',
+  BUN: 'Urea', UREA: 'Urea', URE: 'Urea',
+  CREA: 'Creatinine', CRE: 'Creatinine', CREJ: 'Creatinine',
+  UA: 'Uric acid', URIC: 'Uric acid',
+  TP: 'Total protein', PROT: 'Total protein', ALB: 'Albumin',
+  TBIL: 'Total bilirubin', BILT: 'Total bilirubin', BILI: 'Total bilirubin',
+  DBIL: 'Direct bilirubin', BILD: 'Direct bilirubin',
+  AST: 'AST', GOT: 'AST', ALT: 'ALT', GPT: 'ALT',
+  ALP: 'ALP', ALKP: 'ALP', GGT: 'Gamma GT',
+  AMY: 'Amylase', AMYL: 'Amylase', LIP: 'Lipase', LDH: 'LDH',
+  CK: 'CK', CPK: 'CK', CKMB: 'CK-MB',
+  CHO: 'Total cholesterol', CHOL: 'Total cholesterol',
+  TRI: 'Triglycerides', TRIG: 'Triglycerides', TG: 'Triglycerides',
+  HDL: 'HDL cholesterol', LDL: 'LDL cholesterol', VLDL: 'VLDL cholesterol',
+  CA: 'Calcium', MG: 'Magnesium', PHO: 'Phosphate', PHOS: 'Phosphate',
+  FE: 'Iron', IRON: 'Iron', UIBC: 'UIBC', TIBC: 'TIBC',
+  NA: 'Sodium', K: 'Potassium', CL: 'Chloride',
+  CRP: 'C-reactive protein', ASO: 'ASO', RF: 'Rheumatoid factor',
+  C3: 'Complement C3', C4: 'Complement C4',
+  IGA: 'IgA', IGG: 'IgG', IGM: 'IgM',
+  MALB: 'Microalbumin', FRUC: 'Fructosamine', LAC: 'Lactate',
+};
+
 export const INSTRUMENT_PROFILES: InstrumentProfile[] = [
   {
     key: 'sysmex_xn', label: 'Sysmex XN series (XN-330 / XN-550 / XN-1000)',
@@ -631,6 +843,20 @@ export const INSTRUMENT_PROFILES: InstrumentProfile[] = [
     vendor: 'Biotecnica', discipline: 'chemistry', protocol: 'astm', analytes: CHEMISTRY_SELECTRA,
   },
   {
+    key: 'bt1500', label: 'Biotecnica BT1500',
+    vendor: 'Biotecnica', discipline: 'chemistry', protocol: 'bt1500',
+    analytes: { ...CHEMISTRY_SELECTRA, ...CHEMISTRY_HUMASTAR, ...CHEMISTRY_BT1500 },
+    units: DEFAULT_UNIT_SETS.chemistry,
+    notes:
+      'The analyser is asked rather than listened to: it never transmits on its own, so {PRODUCT} polls it and '
+      + 'collects one report per exchange until the machine says there are none left. Reach it over the LAN '
+      + '(TCP/IP) where its PC offers that, or over RS-232 through a serial-to-network device set to 9600 baud, '
+      + '8 data bits, no parity, 1 stop bit, hardware handshake. Two settings on the analyser matter: under '
+      + 'Utility, RS232 a result is only offered once accepted, and under Utility, Setup Analyzer, Serial the '
+      + 'option "All results must be sent automatically (without validate)" removes that step. A control run is '
+      + 'recognised by its sample identifier, as the standard report carries no control field.',
+  },
+  {
     key: 'mindray_bs380', label: 'Mindray BS-380 / BS-240',
     vendor: 'Mindray', discipline: 'chemistry', protocol: 'astm', analytes: CHEMISTRY_SELECTRA,
   },
@@ -640,22 +866,125 @@ export const INSTRUMENT_PROFILES: InstrumentProfile[] = [
   },
   {
     key: 'genexpert', label: 'Cepheid GeneXpert',
-    vendor: 'Cepheid', discipline: 'molecular', protocol: 'astm',
-    analytes: { 'MTB': 'MTB', 'RIF': 'Rifampicin resistance', 'MTB-RIF': 'MTB/RIF' },
+    vendor: 'Cepheid', discipline: 'molecular', protocol: 'astm', analytes: MOLECULAR_GENEXPERT,
+  },
+  /* --------------------------------------------------------------------------
+     The analyser that is not on the list
+     --------------------------------------------------------------------------
+     One entry per discipline per protocol, each starting from that discipline's
+     default parameter set rather than from nothing. Choosing one is a single
+     pick in the Model list — there is no second field to find — and what it
+     loads is editable afterwards, both on the link and, for every future link,
+     in Settings under Analysers.
+     ----------------------------------------------------------------------- */
+  {
+    key: 'generic_haematology_astm', label: 'Haematology analyser, not listed — speaks ASTM',
+    vendor: 'Not listed', discipline: 'haematology', protocol: 'astm',
+    analytes: DEFAULT_PARAMETER_SETS.haematology, units: DEFAULT_UNIT_SETS.haematology, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for haematology work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
   },
   {
+    key: 'generic_haematology_hl7', label: 'Haematology analyser, not listed — speaks HL7',
+    vendor: 'Not listed', discipline: 'haematology', protocol: 'hl7',
+    analytes: DEFAULT_PARAMETER_SETS.haematology, units: DEFAULT_UNIT_SETS.haematology, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for haematology work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_chemistry_astm', label: 'Biochemistry analyser, not listed — speaks ASTM',
+    vendor: 'Not listed', discipline: 'chemistry', protocol: 'astm',
+    analytes: DEFAULT_PARAMETER_SETS.chemistry, units: DEFAULT_UNIT_SETS.chemistry, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for biochemistry work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_chemistry_hl7', label: 'Biochemistry analyser, not listed — speaks HL7',
+    vendor: 'Not listed', discipline: 'chemistry', protocol: 'hl7',
+    analytes: DEFAULT_PARAMETER_SETS.chemistry, units: DEFAULT_UNIT_SETS.chemistry, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for biochemistry work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_immunology_astm', label: 'Immunology analyser, not listed — speaks ASTM',
+    vendor: 'Not listed', discipline: 'immunology', protocol: 'astm',
+    analytes: DEFAULT_PARAMETER_SETS.immunology, units: DEFAULT_UNIT_SETS.immunology, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for immunology work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_immunology_hl7', label: 'Immunology analyser, not listed — speaks HL7',
+    vendor: 'Not listed', discipline: 'immunology', protocol: 'hl7',
+    analytes: DEFAULT_PARAMETER_SETS.immunology, units: DEFAULT_UNIT_SETS.immunology, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for immunology work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_molecular_astm', label: 'Molecular analyser, not listed — speaks ASTM',
+    vendor: 'Not listed', discipline: 'molecular', protocol: 'astm',
+    analytes: DEFAULT_PARAMETER_SETS.molecular, units: DEFAULT_UNIT_SETS.molecular, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for molecular work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_molecular_hl7', label: 'Molecular analyser, not listed — speaks HL7',
+    vendor: 'Not listed', discipline: 'molecular', protocol: 'hl7',
+    analytes: DEFAULT_PARAMETER_SETS.molecular, units: DEFAULT_UNIT_SETS.molecular, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for molecular work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_other_astm', label: 'Other analyser, not listed — speaks ASTM',
+    vendor: 'Not listed', discipline: 'other', protocol: 'astm',
+    analytes: DEFAULT_PARAMETER_SETS.other, units: DEFAULT_UNIT_SETS.other, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for general work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+  {
+    key: 'generic_other_hl7', label: 'Other analyser, not listed — speaks HL7',
+    vendor: 'Not listed', discipline: 'other', protocol: 'hl7',
+    analytes: DEFAULT_PARAMETER_SETS.other, units: DEFAULT_UNIT_SETS.other, origin: 'default',
+    notes: 'Start here for an analyser that is not listed. The link begins with every parameter this system knows for general work, in SI, and the first message the machine sends shows which of them it actually uses. Add, rename or remove any of it on this link without affecting anything else.',
+  },
+
+  /* The two keys these replaced. Hidden from every picker, still resolvable, so
+     a link saved before the split keeps the model it was saved with. */
+  {
     key: 'generic_astm', label: 'Something else that speaks ASTM',
-    vendor: 'Generic', discipline: 'other', protocol: 'astm', analytes: {},
-    notes: 'Start here for an analyser not listed. The first message it sends shows you exactly which mnemonics it uses, and the map is built from that.',
+    vendor: 'Not listed', discipline: 'other', protocol: 'astm',
+    analytes: DEFAULT_PARAMETER_SETS.other, units: DEFAULT_UNIT_SETS.other,
+    origin: 'default', hidden: true,
   },
   {
     key: 'generic_hl7', label: 'Something else that speaks HL7',
-    vendor: 'Generic', discipline: 'other', protocol: 'hl7', analytes: {},
+    vendor: 'Not listed', discipline: 'other', protocol: 'hl7',
+    analytes: DEFAULT_PARAMETER_SETS.other, units: DEFAULT_UNIT_SETS.other,
+    origin: 'default', hidden: true,
   },
 ];
 
+/**
+ * Where a model may come from, beyond the ones compiled in.
+ *
+ * A laboratory can edit a discipline default and build a model of its own, and
+ * both are rows in a database rather than entries in this file. The server
+ * installs a resolver at boot that reads them; the browser never has one and
+ * works from what the API hands it. Nothing else in this module knows the
+ * difference, so a stored model behaves exactly like a built-in one —
+ * including inside the bridge, which is the point.
+ */
+type ProfileResolver = (key: string) => InstrumentProfile | null;
+let storedProfiles: ProfileResolver | null = null;
+
+/** Install the resolver. Called once, by the server, at boot. */
+export function setProfileResolver(resolver: ProfileResolver | null): void {
+  storedProfiles = resolver;
+}
+
 export function profileByKey(key?: string | null): InstrumentProfile | null {
-  return INSTRUMENT_PROFILES.find(p => p.key === key) ?? null;
+  const wanted = String(key ?? '').trim();
+  if (!wanted) return null;
+  if (storedProfiles) {
+    const stored = storedProfiles(wanted);
+    if (stored) return stored;
+  }
+  return INSTRUMENT_PROFILES.find(p => p.key === wanted) ?? null;
+}
+
+/** The models a picker should offer: everything not deliberately retired. */
+export function listedProfiles(): InstrumentProfile[] {
+  return INSTRUMENT_PROFILES.filter(p => !p.hidden);
 }
 
 /** The analyte a mnemonic means on this link: the link's own map first, then the profile's. */

@@ -374,7 +374,38 @@ function FromAnalyser({ links, profiles, units, canConfigure, busy, setBusy, onE
           <>
             {profile
               ? <Note tone="ok">{profile.label} — {Object.keys(profile.analytes).length} codes understood before anything is added here.</Note>
-              : <Note tone="warn">No model is chosen for this link, so nothing is understood by default. Every code it sends has to be named here, or a model chosen under Connection Setup.</Note>}
+              : (
+                <>
+                  <Note tone="warn">
+                    No model is chosen for this link, so nothing is understood by default. Take the standard set for
+                    the work this analyser does — it is every parameter this system knows for that discipline, and
+                    everything in it can be changed here afterwards.
+                  </Note>
+                  {canConfigure && (
+                    <StandardSet
+                      busy={busy === 'analyte'}
+                      onApply={async (analytes, unitMap) => {
+                        const map = { ...(link.analyteMap ?? {}), ...analytes };
+                        setBusy('analyte'); onError(null);
+                        try {
+                          await api(`/middleware/parameter-mappings/${link.id}`, {
+                            method: 'PUT',
+                            body: JSON.stringify({
+                              analyteMap: map,
+                              // The link's own scales win: a laboratory that has
+                              // already set one meant it.
+                              unitMap: { ...unitMap, ...(link.unitMap ?? {}) },
+                            }),
+                          });
+                          onNotice(`${Object.keys(analytes).length} parameters are now mapped on this link. The analyser was not disconnected.`);
+                          await reload();
+                        } catch (e) { onError(errorText(e)); }
+                        finally { setBusy(null); }
+                      }}
+                    />
+                  )}
+                </>
+              )}
 
             {!shown.length ? (
               <Note>{needle ? 'No parameter matches.' : 'Nothing is mapped on this analyser yet. Add a parameter below.'}</Note>
@@ -1272,5 +1303,61 @@ function ToDestination({ destinations, canConfigure, busy, setBusy, onError, onN
         </>
       )}
     </Panel>
+  );
+}
+
+
+/* ============================================================================
+   The standard set, for a link with no model
+   ----------------------------------------------------------------------------
+   A link saved without a model understands nothing, and this screen used to
+   say so and stop. Choosing the discipline here copies that discipline's
+   starting set onto the link in one action — the same set a "not listed"
+   model would have loaded — so the laboratory is editing a full table rather
+   than typing one out.
+
+   It is copied ONTO the link rather than pointing the link at a model,
+   because the link may already have names on it that somebody chose
+   deliberately. Those win: the set fills the gaps around them.
+   ========================================================================= */
+function StandardSet({ busy, onApply }: {
+  busy: boolean;
+  onApply: (analytes: Record<string, string>, units: Record<string, string>) => Promise<void>;
+}) {
+  const [sets, setSets] = useState<Array<{
+    discipline: string; label: string;
+    analytes: Record<string, string>; units: Record<string, string>;
+  }>>([]);
+  const [chosen, setChosen] = useState('');
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await apiRead<{ defaults: typeof sets }>('/instrument-links/models', { defaults: [] } as any);
+        setSets(data.defaults ?? []);
+      } catch { /* the link can still be mapped by hand */ }
+    })();
+  }, []);
+
+  if (!sets.length) return null;
+  const set = sets.find(s => s.discipline === chosen) ?? null;
+
+  return (
+    <div className="mw-inset mw-grid">
+      <Pick
+        label="What does this analyser measure?" value={chosen} onValue={setChosen} wide
+        blank="Choose a discipline"
+        options={sets.map(s => ({
+          key: s.discipline,
+          label: `${s.label} — ${Object.keys(s.analytes).length} codes`,
+        }))}
+      />
+      <div className="mw-actions">
+        <button className="btn ghost" disabled={!set || busy}
+          onClick={() => { if (set) void onApply(set.analytes, set.units); }}>
+          <Plus size={13} /> Use this set
+        </button>
+      </div>
+    </div>
   );
 }

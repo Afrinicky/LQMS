@@ -38,6 +38,7 @@ import { resultFillerRoutes } from '../../server/routes/resultFiller.js';
 import { transmissionReportRoutes } from '../../server/routes/transmissionReports.js';
 import { optionalAuth } from '../../server/middleware/auth.js';
 import { ensureDataDirs, getDb } from '../../server/db/database.js';
+import { installModelRegistry } from '../../server/services/instrumentModels.js';
 import { SignatureRequiredError } from '../../server/services/signatureService.js';
 
 import { PRODUCT, PRODUCT_LONG } from './brand.js';
@@ -67,6 +68,17 @@ export function createTransLisServer() {
   // choice, so an upgrade that adds a feature grants it to the administrator
   // without anybody having to notice.
   if (setupComplete(db)) seedTransLis(db);
+  /*
+   * The same analyser models SECHLIMS resolves, resolved here too.
+   *
+   * TransLis serves the analyser links and the middleware from SECHLIMS's own
+   * routes, so a laboratory's own models and its edited discipline defaults
+   * have to be installed on this boot as well. Without it this product would
+   * offer the models compiled in and silently ignore every one the laboratory
+   * had added — on the installation most likely to have added them, since
+   * TransLis is what sits on the analyser's own PC.
+   */
+  installModelRegistry(getDb);
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));

@@ -37,9 +37,18 @@ import { diagnoseWatchPathAsync, forgetWatchPath } from '../services/instrumentB
 import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
+  DEFAULT_CONTROL_PATTERNS, LINK_PROTOCOL_LABELS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
   linkForwards, linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
+import {
+  ANALYSER_DISCIPLINES, DISCIPLINE_LABELS, DEFAULT_PARAMETER_SETS, DEFAULT_UNIT_SETS,
+  type AnalyserDiscipline,
+} from '../../shared/constants/instruments.js';
+import {
+  allModels, checkModel, defaultKey, disciplineDefault, linksUsingModel,
+  modelByKey, removeModel, resetDefault, saveModel,
+} from '../services/instrumentModels.js';
+import { knownUnits } from '../../shared/constants/units.js';
 import { withProduct } from '../../shared/constants/product.js';
 import { serverProductName } from '../services/productName.js';
 import {
@@ -88,9 +97,16 @@ export function instrumentLinkRoutes() {
      ==================================================================== */
   router.get('/profiles', requirePermission(MODULE, 'view'), (_req, res) => {
     res.json({
-      profiles: INSTRUMENT_PROFILES.map(p => ({
+      /*
+       * Built-in models and the laboratory's own, in one list and told apart
+       * only by `origin`. A model somebody added here is chosen in exactly the
+       * same way as one that ships with the system, which is the whole point
+       * of being able to add one.
+       */
+      profiles: allModels().map(p => ({
         key: p.key, label: p.label, vendor: p.vendor, discipline: p.discipline,
         protocol: p.protocol, notes: p.notes ?? null,
+        origin: p.origin ?? 'builtin',
         analyteCount: Object.keys(p.analytes).length,
       })),
       roles: LINK_ROLES.map(r => ({ key: r, label: withProduct(LINK_ROLE_LABELS[r], serverProductName()) })),
@@ -110,6 +126,148 @@ export function instrumentLinkRoutes() {
     const profile = profileByKey(req.params.key);
     if (!profile) return res.status(404).json({ error: 'Unknown analyser profile' });
     res.json(profile.analytes);
+  });
+
+  /* ======================================================================
+     Models a laboratory keeps for itself
+     ----------------------------------------------------------------------
+     Two things live here, and they are deliberately the same shape.
+
+     A DISCIPLINE DEFAULT is what a link starts from when the analyser is not
+     one of the listed models. It ships as the union of every analyser of that
+     discipline this system knows, and is edited here when a laboratory
+     measures something else — once, for every link that follows.
+
+     A CUSTOM MODEL is an analyser nobody wrote a model for. Saved here, it
+     appears in the Model list beside the built-in ones from that moment, and
+     behaves identically everywhere else.
+
+     None of this touches a connection. A model says what a code is READ AS;
+     changing one affects messages arriving from then on and nothing else, so
+     no link is restarted and no analyser notices.
+     ==================================================================== */
+
+  /** Everything the models screen reads, in one request. */
+  router.get('/models', requirePermission(MODULE, 'view'), (_req, res) => {
+    res.json({
+      models: allModels().map(profile => ({
+        key: profile.key,
+        label: profile.label,
+        vendor: profile.vendor,
+        discipline: profile.discipline,
+        protocol: profile.protocol,
+        notes: profile.notes ?? null,
+        origin: profile.origin ?? 'builtin',
+        analytes: profile.analytes,
+        units: profile.units ?? {},
+        analyteCount: Object.keys(profile.analytes).length,
+        // Named so that a model cannot be removed from under a working link
+        // without somebody being told which links those are.
+        usedBy: linksUsingModel(getDb, profile.key),
+      })),
+      defaults: ANALYSER_DISCIPLINES.map(discipline => {
+        const current = disciplineDefault(discipline);
+        return {
+          discipline,
+          label: DISCIPLINE_LABELS[discipline],
+          key: defaultKey(discipline),
+          analytes: current.analytes,
+          units: current.units,
+          edited: current.edited,
+          shippedCount: Object.keys(DEFAULT_PARAMETER_SETS[discipline] ?? {}).length,
+        };
+      }),
+      disciplines: ANALYSER_DISCIPLINES.map(d => ({ key: d, label: DISCIPLINE_LABELS[d] })),
+      protocols: LINK_PROTOCOLS,
+      units: knownUnits(),
+    });
+  });
+
+  /** Add a model, or change one this laboratory added. */
+  router.post('/models', requirePermission(MODULE, 'edit'), (req, res) => {
+    const body = req.body ?? {};
+    const existingKey = typeof body.existingKey === 'string' ? body.existingKey.trim() : undefined;
+    const input = {
+      key: String(body.key ?? '').trim().toLowerCase(),
+      label: String(body.label ?? ''),
+      vendor: String(body.vendor ?? ''),
+      discipline: String(body.discipline ?? 'other'),
+      protocol: String(body.protocol ?? 'astm'),
+      kind: 'custom' as const,
+      analytes: body.analytes,
+      units: body.units,
+      notes: body.notes ?? null,
+    };
+    const check = checkModel(input, existingKey);
+    if (!check.ok) return res.status(400).json({ error: check.error });
+
+    // Renaming the key of a model links already point at would strand them.
+    if (existingKey && existingKey !== input.key) {
+      const stranded = linksUsingModel(getDb, existingKey);
+      if (stranded.length) {
+        return res.status(400).json({
+          error: `${stranded.join(', ')} ${stranded.length === 1 ? 'is' : 'are'} set to this model, so its key cannot be changed. `
+            + 'Everything else about it can be.',
+        });
+      }
+      removeModel(getDb, existingKey);
+    }
+
+    saveModel(getDb, input, (req as any).user?.id ?? null);
+    audit(req, { action: existingKey ? 'edit' : 'create', entity: 'analyser_models', entityId: input.key,
+      newValue: { label: input.label, discipline: input.discipline, protocol: input.protocol,
+        parameters: Object.keys(input.analytes ?? {}).length } });
+    res.json({ ok: true, key: input.key, model: modelByKey(input.key) });
+  });
+
+  /** Remove a model this laboratory added. */
+  router.delete('/models/:key', requirePermission(MODULE, 'edit'), (req, res) => {
+    const key = String(req.params.key ?? '').trim();
+    const model = modelByKey(key);
+    if (!model) return res.status(404).json({ error: 'No such model.' });
+    if ((model.origin ?? 'builtin') === 'builtin') {
+      return res.status(400).json({
+        error: 'This model ships with the system and cannot be removed. Its parameters can be changed on any link that uses it.',
+      });
+    }
+    const done = removeModel(getDb, key);
+    if (!done.ok) return res.status(400).json({ error: done.error });
+    audit(req, { action: 'delete', entity: 'analyser_models', entityId: key, oldValue: { label: model.label } });
+    res.json({ ok: true });
+  });
+
+  /** Change what a discipline's links start from when the analyser is not listed. */
+  router.put('/defaults/:discipline', requirePermission(MODULE, 'edit'), (req, res) => {
+    const discipline = String(req.params.discipline ?? '') as AnalyserDiscipline;
+    if (!(ANALYSER_DISCIPLINES as readonly string[]).includes(discipline)) {
+      return res.status(404).json({ error: 'No such discipline.' });
+    }
+    const body = req.body ?? {};
+    saveModel(getDb, {
+      key: defaultKey(discipline),
+      label: `${DISCIPLINE_LABELS[discipline]} — the set a not-listed analyser starts from`,
+      vendor: 'Not listed',
+      discipline,
+      protocol: 'auto',
+      kind: 'default',
+      analytes: body.analytes,
+      units: body.units,
+      notes: null,
+    }, (req as any).user?.id ?? null);
+    audit(req, { action: 'edit', entity: 'analyser_models', entityId: defaultKey(discipline),
+      newValue: { parameters: Object.keys(body.analytes ?? {}).length } });
+    res.json({ ok: true, ...disciplineDefault(discipline) });
+  });
+
+  /** Put a discipline's default back to what this system ships with. */
+  router.post('/defaults/:discipline/reset', requirePermission(MODULE, 'edit'), (req, res) => {
+    const discipline = String(req.params.discipline ?? '') as AnalyserDiscipline;
+    if (!(ANALYSER_DISCIPLINES as readonly string[]).includes(discipline)) {
+      return res.status(404).json({ error: 'No such discipline.' });
+    }
+    resetDefault(getDb, discipline);
+    audit(req, { action: 'edit', entity: 'analyser_models', entityId: defaultKey(discipline), newValue: { reset: true } });
+    res.json({ ok: true, ...disciplineDefault(discipline) });
   });
 
   /* ======================================================================
@@ -232,6 +390,28 @@ export function instrumentLinkRoutes() {
     if (!LINK_MODES.includes(v.mode as any)) return `The mode must be one of: ${LINK_MODES.join(', ')}.`;
     if (!LINK_PROTOCOLS.includes(v.protocol as any)) return `The protocol must be one of: ${LINK_PROTOCOLS.join(', ')}.`;
 
+    /*
+     * A polled analyser must be set to its own protocol, or nothing ever
+     * arrives and nothing says why.
+     *
+     * Every other protocol here waits to be spoken to, so getting the setting
+     * wrong still shows messages arriving that cannot be read — visible,
+     * diagnosable. The BT1500 is the opposite: it transmits only when asked,
+     * and only the BT1500 setting does the asking. Set to anything else, the
+     * link connects, sits in perfect silence for ever, and looks exactly like
+     * an analyser nobody switched on. So it is refused here, where somebody is
+     * looking at the screen.
+     */
+    {
+      const model = v.profileKey ? modelByKey(String(v.profileKey)) : null;
+      if (model?.protocol === 'bt1500' && v.protocol !== 'bt1500'
+        && (v.mode === 'server' || v.mode === 'client')) {
+        return `${model.label} transmits only when it is asked, and only the "${LINK_PROTOCOL_LABELS.bt1500}" `
+          + 'setting asks. Left as it is, this link would connect and then wait for a message the analyser is '
+          + 'never going to send on its own.';
+      }
+    }
+
     if (v.mode === 'server' && !v.listenPort) return 'A listening link needs the port the analyser will send to.';
     if (v.mode === 'client' && (!v.remoteHost || !v.remotePort)) return 'A dialling link needs the analyser\'s address and port.';
     if (v.mode === 'file_drop' && !v.watchPath) return 'A watched link needs the folder the analyser writes into.';
@@ -313,6 +493,26 @@ export function instrumentLinkRoutes() {
     const code = String(req.body?.linkCode ?? '').trim() || `LINK-${Date.now().toString(36).toUpperCase()}`;
     if (db.prepare('SELECT id FROM instrument_links WHERE link_code = ?').get(code)) {
       return res.status(409).json({ error: `A link with the code "${code}" already exists.` });
+    }
+
+    /*
+     * A new link starts in the scale its model keeps.
+     *
+     * Without this the units table opens on "Nothing is being rescaled", and a
+     * laboratory has to set two dozen scales by hand before a single reading
+     * is comparable with the one beside it. The model's own set is copied in
+     * once, here, and is the link's from then on — editable, and never
+     * rewritten behind somebody's back.
+     *
+     * Copying it cannot distort a reading. A rescale only ever happens between
+     * two spellings of the same physical quantity, and a conversion that would
+     * need to know the analyte, such as mg/dL to mmol/L, is refused outright
+     * and the number kept exactly as it arrived.
+     */
+    if (!v.unitMap) {
+      const model = v.profileKey ? modelByKey(String(v.profileKey)) : null;
+      const seed = model?.units ?? {};
+      if (Object.keys(seed).length) v.unitMap = JSON.stringify(seed);
     }
 
     const result = db.prepare(`INSERT INTO instrument_links

@@ -79,6 +79,7 @@ import { qrRoutes } from './routes/qr.js';
 import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
+import { installModelRegistry } from './services/instrumentModels.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
 import { requireMiddlewareOn } from './services/middlewareSwitch.js';
 import { seedDefaults } from './db/seed.js';
@@ -108,6 +109,14 @@ function resolveRendererDir(): string | null {
 export function createApiServer() {
   ensureDataDirs();
   seedDefaults();
+  /*
+   * Analyser models a laboratory keeps for itself — its own models and the
+   * edited discipline defaults — are read from the database rather than
+   * compiled in. Installing the registry here, before a single request is
+   * served, means every part of the system that asks what an analyser calls a
+   * parameter gets the same answer, including the bridge.
+   */
+  installModelRegistry(getDb);
   const app = express();
   // Microsoft Office's WebDAV handoff mounts FIRST, ahead of CORS and the JSON
   // body parser. Word speaks its own dialect here — OPTIONS to discover the

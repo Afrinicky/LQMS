@@ -19,6 +19,7 @@ import {
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
 import LiveTransmission from '../components/instruments/LiveTransmission';
+import AnalyserModels from '../components/instruments/AnalyserModels';
 import { IS_STANDALONE_MIDDLEWARE, PRODUCT } from '../constants/product';
 import { withProduct } from '../../shared/constants/product';
 
@@ -100,7 +101,12 @@ type Activity = {
   }>;
 };
 
-type Profile = { key: string; label: string; vendor: string; discipline: string; protocol: string; notes: string | null; analyteCount: number };
+type Profile = {
+  key: string; label: string; vendor: string; discipline: string; protocol: string;
+  notes: string | null; analyteCount: number;
+  /** Shipped with the system, a discipline's starting set, or one this laboratory described. */
+  origin?: 'builtin' | 'default' | 'custom';
+};
 type LhimsMap = { key: string; label: string; vendor: string; sourceConfig: string; measureCount: number };
 
 const EMPTY = {
@@ -322,6 +328,15 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
           {overview.forwardFailed > 0 && <OverviewStat label="LHIMS refused" value={overview.forwardFailed} tone="crit" />}
         </div>
       )}
+
+      {/*
+        * The models, above the links that use them.
+        *
+        * Closed by default: most days this is not the job. It is open on the
+        * day an analyser arrives that is not on the list, which used to be the
+        * day somebody discovered there was nothing they could do about it.
+        */}
+      <AnalyserModels canEdit={canEdit} />
 
       <div className="card">
         <div className="pp-head">
@@ -848,20 +863,51 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                 {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </label>
+            {/*
+              * Grouped, because the list now holds three different kinds of
+              * thing. The standard sets are what "not listed" used to mean,
+              * and they are a real choice rather than an absence of one: each
+              * loads every parameter this system knows for that discipline,
+              * which is the difference between a mapping screen somebody can
+              * work with and the empty one this replaced.
+              */}
             <label className="lf-wide"><span>Model</span>
               <select value={form.profileKey} onChange={e => {
                 const next = profiles.find(p => p.key === e.target.value);
                 setForm(f => ({ ...f, profileKey: e.target.value, protocol: (next?.protocol as LinkProtocol) ?? f.protocol }));
               }}>
-                <option value="">Not listed</option>
-                {profiles.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                <option value="">Not chosen — nothing will be understood</option>
+                <optgroup label="Analysers this system knows">
+                  {profiles.filter(p => (p.origin ?? 'builtin') === 'builtin' && !p.key.startsWith('generic_'))
+                    .map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                </optgroup>
+                {profiles.some(p => p.origin === 'custom') && (
+                  <optgroup label="Models this laboratory added">
+                    {profiles.filter(p => p.origin === 'custom')
+                      .map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                  </optgroup>
+                )}
+                <optgroup label="Not on the list — start from a standard set">
+                  {profiles.filter(p => p.key.startsWith('generic_'))
+                    .map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                </optgroup>
               </select>
             </label>
           </div>
-          {profile && (
+          {profile ? (
             <p className="lf-hint">
               <Check size={12} /> {profile.analyteCount} parameters already mapped for this model.
+              {profile.key.startsWith('generic_')
+                ? ' They are the standard set for this discipline, editable on this link and, for every future '
+                  + 'link, under Analyser models above.'
+                : null}
               {profile.notes ? <Why summary="What this model needs">{withProduct(profile.notes, PRODUCT)}</Why> : null}
+            </p>
+          ) : (
+            <p className="lf-hint">
+              <AlertTriangle size={12} /> Nothing this analyser sends will be understood until a model is chosen.
+              If it is not on the list, take the standard set for its discipline — it starts with every parameter
+              this system knows for that work.
             </p>
           )}
         </Section>

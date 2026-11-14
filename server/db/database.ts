@@ -6914,6 +6914,46 @@ CREATE TABLE IF NOT EXISTS instrument_links (
 );
 CREATE INDEX IF NOT EXISTS idx_instrument_links_active ON instrument_links(is_active, role);
 
+-- Analyser models a laboratory keeps for itself.
+--
+-- The models this system ships with are compiled in, which is right for them:
+-- they are read from the vendors' own interface documents and from this
+-- laboratory's LHIMS client configuration, and they should not drift. But two
+-- things cannot live in a release.
+--
+-- The first is the DEFAULT a link starts from when the analyser is not one of
+-- the listed models. Shipping that empty is what left a Parameter Mappings
+-- screen with nothing in it and no way to begin. It now starts as the union of
+-- every analyser of that discipline — and because a laboratory measures what
+-- it measures, that set is editable here, once, for every link that follows.
+--
+-- The second is an analyser nobody has written a model for. Adding one used to
+-- mean a code change; a row here is enough, and it appears in the Model list
+-- beside the built-in ones from the moment it is saved.
+--
+-- The key column is what a link stores in profile_key, so it must stay stable. A row
+-- whose key matches a built-in model overrides it, which is how a discipline
+-- default is edited without touching the release.
+CREATE TABLE IF NOT EXISTS analyser_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  vendor TEXT NOT NULL DEFAULT '',
+  discipline TEXT NOT NULL DEFAULT 'other',   -- haematology | chemistry | molecular | immunology | other
+  protocol TEXT NOT NULL DEFAULT 'astm',      -- astm | hl7 | bt1500 | delimited | auto
+  -- 'default' edits a discipline's starting set; 'custom' is an analyser this
+  -- laboratory added. Nothing else may be written here.
+  kind TEXT NOT NULL DEFAULT 'custom',
+  analytes TEXT NOT NULL DEFAULT '{}',        -- JSON: instrument mnemonic -> parameter
+  units TEXT NOT NULL DEFAULT '{}',           -- JSON: parameter -> the scale to keep it in
+  notes TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_analyser_models_kind ON analyser_models(kind, is_active);
+
 -- Everything an analyser has said, verbatim.
 --
 -- Kept whether or not it could be understood: the raw text of a message nobody
