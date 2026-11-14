@@ -7051,6 +7051,12 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       ['serial_stop_bits', 'serial_stop_bits INTEGER NOT NULL DEFAULT 1'],
       ['serial_parity', "serial_parity TEXT NOT NULL DEFAULT 'none'"],
       ['serial_flow', "serial_flow TEXT NOT NULL DEFAULT 'hardware'"],
+      // Who starts the conversation. 'listen' waits to be sent results, which
+      // is what a BT1500 does when somebody presses "send to RS232" in the
+      // analyser's own software; 'ask' runs the polled dialogue the service
+      // manual describes. Waiting is the safe default: it puts nothing on the
+      // wire, so it cannot disturb whatever is already there.
+      ['poll_mode', "poll_mode TEXT NOT NULL DEFAULT 'listen'"],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }

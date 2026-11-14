@@ -16,7 +16,7 @@ import {
   LINK_ROLES, LINK_ROLE_HINTS, LINK_ROLE_LABELS, LINK_STATE_LABELS,
   AFTER_TRANSMISSION_HINTS, AFTER_TRANSMISSION_LABELS, DEFAULT_CONTROL_PATTERNS, linkForwards, modeIsPassive,
   SERIAL_BAUD_RATES, SERIAL_DATA_BITS, SERIAL_DEFAULTS, SERIAL_FLOW_CONTROL, SERIAL_FLOW_LABELS,
-  SERIAL_PARITIES, SERIAL_STOP_BITS,
+  SERIAL_PARITIES, SERIAL_STOP_BITS, POLL_MODES, POLL_MODE_HINTS, POLL_MODE_LABELS, type PollMode,
   type LinkMode, type LinkProtocol, type LinkRole,
 } from '../../shared/constants/instruments';
 import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
@@ -60,6 +60,7 @@ type Link = {
   serial_path?: string | null; serial_baud?: number | null;
   serial_data_bits?: number | null; serial_stop_bits?: number | null;
   serial_parity?: string | null; serial_flow?: string | null;
+  poll_mode?: string | null;
   analyte_map: Record<string, string>; control_patterns: string[];
   measure_map: Record<string, number>;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
@@ -121,6 +122,7 @@ const EMPTY = {
   serialPath: '', serialBaud: String(SERIAL_DEFAULTS.baudRate), serialDataBits: String(SERIAL_DEFAULTS.dataBits),
   serialStopBits: String(SERIAL_DEFAULTS.stopBits), serialParity: SERIAL_DEFAULTS.parity as string,
   serialFlow: SERIAL_DEFAULTS.flowControl as string,
+  pollMode: 'listen' as PollMode,
   controlPatterns: DEFAULT_CONTROL_PATTERNS.join(', '),
   forwardEnabled: false, forwardHost: '', forwardPort: '', closeAfterMessage: false,
   forwardTarget: 'lhims_api',
@@ -479,6 +481,7 @@ function formFrom(link: Link) {
     serialStopBits: String(link.serial_stop_bits ?? SERIAL_DEFAULTS.stopBits),
     serialParity: link.serial_parity ?? SERIAL_DEFAULTS.parity,
     serialFlow: link.serial_flow ?? SERIAL_DEFAULTS.flowControl,
+    pollMode: (link.poll_mode ?? 'listen') as PollMode,
     controlPatterns: (link.control_patterns ?? []).join(', '),
     closeAfterMessage: Boolean(link.close_after_message),
     forwardEnabled: Boolean(link.forward_enabled),
@@ -956,6 +959,25 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
               </select>
             </label>
           </div>
+
+          {/*
+            * Which way round the conversation goes. Only the BT1500 can work
+            * both ways, and only it has no interface of its own to make the
+            * answer obvious, so the question is asked exactly where that is
+            * the case rather than on every link.
+            */}
+          {form.protocol === 'bt1500' && (
+            <>
+              <label className="lf-full"><span>How results arrive</span>
+                <select value={form.pollMode} onChange={e => set('pollMode', e.target.value as PollMode)}>
+                  {POLL_MODES.map(m => (
+                    <option key={m} value={m}>{withProduct(POLL_MODE_LABELS[m], PRODUCT)}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="lf-hint">{withProduct(POLL_MODE_HINTS[form.pollMode], PRODUCT)}</p>
+            </>
+          )}
 
           {willNeverOpen ? (
             <p className="lf-alert">
@@ -1541,8 +1563,25 @@ function SerialFields({ form, set }: {
           ? <>This computer reports {ports.map(p => p.path).join(', ')}. </>
           : null}
         {note}
-        {' '}Every setting here must match the analyser's own service menu exactly. A BT1500 leaves the factory at
+        {' '}Every setting here must match the sending software exactly. A BT1500 leaves the factory at
         9600, 8 data bits, no parity, 1 stop bit, hardware handshake.
+        <Why summary="If the port is already in use">
+          <p>
+            A serial port carries one program at each end, and what a program sends out of it goes down the cable —
+            not to anything else on the same computer. So {PRODUCT} cannot read the port the analyser's own software
+            is sending from, if both are on that one machine.
+          </p>
+          <p>
+            <strong>Two computers.</strong> Run a cable from the analyser PC's serial port to a serial port on this
+            one. The analyser software sends on its port, this link reads on ours, and neither has to share
+            anything. Nothing extra to install.
+          </p>
+          <p>
+            <strong>One computer.</strong> Install a linked pair of virtual serial ports, point the analyser's
+            software at one of the pair and this link at the other. Whatever is sent into one comes out of the
+            other, which is the same arrangement as the cable without the cable.
+          </p>
+        </Why>
       </p>
     </>
   );

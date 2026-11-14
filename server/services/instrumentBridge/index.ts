@@ -249,6 +249,8 @@ interface LinkRow {
   serial_path?: string | null; serial_baud?: number | null;
   serial_data_bits?: number | null; serial_stop_bits?: number | null;
   serial_parity?: string | null; serial_flow?: string | null;
+  // 'listen' waits to be sent results; 'ask' runs the polled dialogue.
+  poll_mode?: string | null;
   // Fetching, for the modes that can be asked rather than only pushed to.
   fetch_enabled: number; fetch_interval_seconds: number | null;
   file_pattern: string | null; archive_path: string | null; delete_after_read: number;
@@ -600,8 +602,27 @@ class Link {
          * is much the commoner of the two, and it looks identical to a wiring
          * fault unless it is said outright.
          */
-        const text = /access denied|resource busy|cannot open/i.test(error.message)
-          ? `${path} is open in another program. The analyser's own software usually holds it — close that, or give this link a different port.`
+        /*
+         * The fault this arrangement actually produces, and what to do about
+         * it — because "access denied" on its own sends somebody looking at
+         * permissions, which is never the answer here.
+         *
+         * A BT1500 has no interface of its own. Biotecnica's software on the
+         * attached PC holds the serial port it sends out of, and a serial port
+         * carries one program at each end. Two programs on ONE computer cannot
+         * share it: what that software transmits goes down the cable, not to
+         * anything else on the same machine. So either this link runs on
+         * another computer at the far end of that cable, or the PC is given a
+         * pair of linked virtual ports so the software can send into one while
+         * this link reads the other.
+         */
+        const text = /access denied|resource busy|cannot open|busy/i.test(error.message)
+          ? `${path} is already open in another program — on a BT1500 PC that is almost always the analyser's own `
+            + 'software, which holds the port it sends results out of. A serial port cannot be shared by two '
+            + 'programs on one computer: what that software transmits goes down the cable, not to anything else on '
+            + 'this machine. Either run this link on the computer at the other end of that cable, or install a '
+            + 'linked pair of virtual ports on this one and have the analyser software send into one while this '
+            + 'link reads the other.'
           : `${path} could not be opened: ${error.message}`;
         this.setState('error', text, error.message);
         if (!this.stopping) this.reconnectTimer = setTimeout(() => { void open(); }, LINK_RECONNECT_MS);
@@ -1110,7 +1131,17 @@ class Link {
         return { ok: false, read: 0, note: 'Not connected to the analyser at the moment, so it cannot be asked. The link keeps retrying.' };
       }
       socket.write(Buffer.from([STX]));
-      return stamp('Asked the analyser for its next report. Anything it is holding will arrive in a moment.', 0);
+      /*
+       * Asking once, even on a link that is set to wait. That is the point of
+       * the button here: it is how a laboratory finds out which kind of
+       * installation it has without changing a setting and waiting to see.
+       */
+      return stamp(
+        String(this.row.poll_mode ?? 'listen') === 'ask'
+          ? 'Asked the analyser for its next report. Anything it is holding will arrive in a moment.'
+          : 'Asked the analyser once. This link is set to wait to be sent results, so if a report comes back now, '
+            + 'the analyser\'s software answers requests and the link can be switched to asking for them.',
+        0);
     }
     if (this.row.mode === 'client') {
       // Dialling out IS the fetch, so the honest answer is whether the
@@ -1200,7 +1231,19 @@ class Link {
      * the wire rather than of the timer. When the analyser answers that it has
      * nothing, the timer takes over again.
      */
-    const polled = framer instanceof Bt1500Framer ? framer : null;
+    /*
+     * Only ask if this link is set to ask.
+     *
+     * The BT1500 has no interface of its own: Biotecnica's software on the
+     * attached PC is what speaks to a LIS, and in most laboratories somebody
+     * presses "send to RS232" there and the results are pushed across. Sending
+     * STX at such an installation every fifteen seconds puts bytes into its
+     * receiver that it never asked for and cannot use. So a link waits unless
+     * it has been told to ask, and the framer still answers a handshake the
+     * analyser's software opens — which is how a pushed result arrives.
+     */
+    const asks = String(this.row.poll_mode ?? 'listen') === 'ask';
+    const polled = (framer instanceof Bt1500Framer && asks) ? framer : null;
     const askAgain = (why: string) => {
       if (!polled || socket.destroyed || this.stopping) return;
       const opening = polled.poll();

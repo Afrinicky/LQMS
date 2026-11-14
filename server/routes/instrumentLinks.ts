@@ -38,7 +38,7 @@ import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
   DEFAULT_CONTROL_PATTERNS, LINK_PROTOCOL_LABELS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
-  SERIAL_BAUD_RATES, SERIAL_DEFAULTS, SERIAL_FLOW_CONTROL, SERIAL_PARITIES,
+  SERIAL_BAUD_RATES, SERIAL_DEFAULTS, SERIAL_FLOW_CONTROL, SERIAL_PARITIES, POLL_MODES,
   linkForwards, linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
 import {
@@ -376,6 +376,8 @@ export function instrumentLinkRoutes() {
       serialStopBits: b.serialStopBits !== undefined ? parseIntNullable(b.serialStopBits) : (existing.serial_stop_bits ?? SERIAL_DEFAULTS.stopBits),
       serialParity: String(pick(b.serialParity, existing.serial_parity) ?? SERIAL_DEFAULTS.parity),
       serialFlow: String(pick(b.serialFlow, existing.serial_flow) ?? SERIAL_DEFAULTS.flowControl),
+      // Whether this link waits to be sent results or asks for them.
+      pollMode: String(pick(b.pollMode, existing.poll_mode) ?? 'listen'),
       analyteMap: b.analyteMap !== undefined ? JSON.stringify(b.analyteMap ?? {}) : (existing.analyte_map ?? null),
       unitMap: b.unitMap !== undefined ? JSON.stringify(b.unitMap ?? {}) : (existing.unit_map ?? null),
       outboundUnitMap: b.outboundUnitMap !== undefined
@@ -457,6 +459,7 @@ export function instrumentLinkRoutes() {
 
     if (v.mode === 'server' && !v.listenPort) return 'A listening link needs the port the analyser will send to.';
     if (v.mode === 'client' && (!v.remoteHost || !v.remotePort)) return 'A dialling link needs the analyser\'s address and port.';
+    if (!POLL_MODES.includes(v.pollMode as never)) return `How results arrive must be one of: ${POLL_MODES.join(', ')}.`;
     if (v.mode === 'serial') {
       if (!v.serialPath) return 'A cabled link needs the serial port this computer calls the analyser — COM1 on Windows, /dev/ttyUSB0 on Linux.';
       if (!SERIAL_BAUD_RATES.includes(v.serialBaud as never)) return `The baud rate must be one of: ${SERIAL_BAUD_RATES.join(', ')}.`;
@@ -576,16 +579,16 @@ export function instrumentLinkRoutes() {
     const result = db.prepare(`INSERT INTO instrument_links
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
          listen_host, listen_port, remote_host, remote_port, watch_path,
-         serial_path, serial_baud, serial_data_bits, serial_stop_bits, serial_parity, serial_flow,
+         serial_path, serial_baud, serial_data_bits, serial_stop_bits, serial_parity, serial_flow, poll_mode,
          analyte_map, unit_map, outbound_unit_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
          lhims_password, lhims_map_key, measure_map, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
          close_after_message, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath,
-        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow,
+        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow, v.pollMode,
         v.analyteMap, v.unitMap,
         v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
@@ -610,7 +613,7 @@ export function instrumentLinkRoutes() {
     db.prepare(`UPDATE instrument_links SET name = ?, equipment_id = ?, section_id = ?, profile_key = ?,
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
         watch_path = ?, serial_path = ?, serial_baud = ?, serial_data_bits = ?, serial_stop_bits = ?,
-        serial_parity = ?, serial_flow = ?,
+        serial_parity = ?, serial_flow = ?, poll_mode = ?,
         analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
@@ -618,7 +621,7 @@ export function instrumentLinkRoutes() {
         close_after_message = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath,
-        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow,
+        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow, v.pollMode,
         v.analyteMap, v.unitMap,
         v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
@@ -870,6 +873,19 @@ export function instrumentLinkRoutes() {
      * left in a manual.
      */
     if (link.protocol === 'bt1500') {
+      const waits = String(link.poll_mode ?? 'listen') !== 'ask';
+      add('bt1500_direction', 'Results leave the analyser the way this link expects',
+        Number(link.messages_received ?? 0) > 0 ? 'ok' : 'info',
+        Number(link.messages_received ?? 0) > 0
+          ? (waits ? 'Results are being sent to this link.' : 'Results are being collected by asking.')
+          : waits
+            ? 'This link waits to be sent results. On the analyser\'s PC, run a sample and press "send to RS232" '
+              + 'in the Biotecnica software — the results should appear here as it sends them.'
+            : 'This link asks for results over and over. If nothing ever comes back, the analyser\'s software may '
+              + 'only push when somebody presses "send to RS232", in which case set this link to wait instead.',
+        Number(link.messages_received ?? 0) > 0 ? undefined
+          : 'Press "Fetch" once to ask the analyser outright. A report coming back means its software answers '
+            + 'requests; silence means it only pushes, and this link should be left waiting.');
       add('bt1500_validate', 'Results are released on the analyser',
         Number(link.messages_received ?? 0) > 0 ? 'ok' : 'info',
         Number(link.messages_received ?? 0) > 0

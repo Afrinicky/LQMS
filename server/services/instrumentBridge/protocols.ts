@@ -1256,8 +1256,17 @@ export class Bt1500Framer implements Framer {
   private maxBytes: number;
   /** The command to send once the analyser answers our STX. */
   private command: string = BT1500_COMMANDS.next;
-  /** True between sending STX and getting the report or a NAK. */
-  private asking = false;
+  /**
+   * When we last opened an exchange, or 0 if we have not.
+   *
+   * A timestamp rather than a flag, because an exchange can go unanswered —
+   * press "Fetch now" against an installation that only ever pushes and the
+   * request is simply ignored. A flag would stay raised for ever, and the next
+   * time the analyser's software opened a conversation of its own we would not
+   * answer its handshake, having convinced ourselves we were mid-question. The
+   * question is therefore given a life: after it, we are listening again.
+   */
+  private askedAt = 0;
   /** Set when the analyser last said it had nothing. */
   lastWasEmpty = false;
 
@@ -1271,19 +1280,19 @@ export class Bt1500Framer implements Framer {
    */
   poll(which: keyof typeof BT1500_COMMANDS = 'next'): Buffer {
     this.command = BT1500_COMMANDS[which];
-    this.asking = true;
+    this.askedAt = Date.now();
     return Buffer.from([STX]);
   }
 
-  /** Is an exchange in flight? */
-  get busy(): boolean { return this.asking; }
+  /** Is an exchange in flight, and recent enough to still be waiting on? */
+  get busy(): boolean { return this.askedAt > 0 && Date.now() - this.askedAt < BT1500_ASK_TIMEOUT_MS; }
 
   push(chunk: Buffer): FramerOutput {
     const out: FramerOutput = { replies: [], messages: [] };
     this.buffer = Buffer.concat([this.buffer, chunk]);
     if (this.buffer.length > this.maxBytes) {
       this.buffer = Buffer.alloc(0);
-      this.asking = false;
+      this.askedAt = 0;
       return out;
     }
 
@@ -1294,12 +1303,12 @@ export class Bt1500Framer implements Framer {
     for (const byte of bytes) {
       if (byte === ACK) {
         // Our STX was accepted. Ask for the report.
-        if (this.asking) out.replies.push(Buffer.from(`${this.command}`, 'ascii'), Buffer.from([EOT]));
+        if (this.busy) out.replies.push(Buffer.from(`${this.command}`, 'ascii'), Buffer.from([EOT]));
         continue;
       }
       if (byte === NAK) {
         // Nothing is waiting. Not an error, and much the commonest answer.
-        this.asking = false;
+        this.askedAt = 0;
         this.lastWasEmpty = true;
         keep = [];
         continue;
@@ -1307,7 +1316,7 @@ export class Bt1500Framer implements Framer {
       if (byte === EOT) {
         const text = Buffer.from(keep).toString('latin1');
         keep = [];
-        this.asking = false;
+        this.askedAt = 0;
         if (text.trim()) {
           this.lastWasEmpty = false;
           out.messages.push(text);
@@ -1320,7 +1329,7 @@ export class Bt1500Framer implements Framer {
          * no reason to, but the courteous answer is the one the protocol
          * defines, and refusing to answer would strand whatever it is doing.
          */
-        if (!this.asking) out.replies.push(Buffer.from([ACK]));
+        if (!this.busy) out.replies.push(Buffer.from([ACK]));
         continue;
       }
       keep.push(byte);
@@ -1342,7 +1351,7 @@ export class Bt1500Framer implements Framer {
   flush(): string | null {
     const text = this.buffer.toString('latin1');
     this.buffer = Buffer.alloc(0);
-    this.asking = false;
+    this.askedAt = 0;
     return text.trim() ? text : null;
   }
 }
@@ -1406,6 +1415,15 @@ export function framerFor(protocol: string, maxBytes?: number): Framer {
 export const BT1500_CODE_WIDTH = 4;
 export const BT1500_VALUE_WIDTH = 7;
 const BT1500_CHECKSUM_WIDTH = 3;
+
+/**
+ * How long an unanswered request stays a request.
+ *
+ * Long enough that a slow analyser is not cut off mid-answer, short enough
+ * that a request nobody was listening for does not leave this end deaf to the
+ * next thing the analyser's software says.
+ */
+const BT1500_ASK_TIMEOUT_MS = 10_000;
 
 /** The poll commands, in the manual's own letters. */
 export const BT1500_COMMANDS = { next: 'R', again: 'L', fromFirst: 'A' } as const;

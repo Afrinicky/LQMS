@@ -125,6 +125,47 @@ export const SERIAL_DEFAULTS = {
   flowControl: 'hardware',
 } as const;
 
+/* ----------------------------------------------------------------------------
+   Who starts the conversation
+   ----------------------------------------------------------------------------
+   Every other analyser in this system transmits when it has something. The
+   BT1500 can work either way, and which way depends on something that is not
+   visible from here.
+
+   The analyser itself has no interface. It is driven by Biotecnica's software
+   on an attached PC, and that software is what actually speaks to a LIS. Press
+   "send to RS232" there and it pushes the results out of a serial port; that is
+   how most laboratories use it, and while it is doing that nothing should be
+   sending it anything. But the protocol in the service manual is the other way
+   round — the host asks, with STX, ACK and a one-letter request — and a
+   laboratory whose software answers requests can have results collected without
+   anybody pressing anything.
+
+   Guessing wrong is not harmless in either direction. Asking an installation
+   that only pushes puts bytes into its receiver for no reason; waiting for an
+   installation that only answers means waiting for ever. So it is a setting,
+   and "Fetch now" asks once whatever the setting says — which is how you find
+   out which one you have without changing anything.
+   -------------------------------------------------------------------------- */
+export const POLL_MODES = ['listen', 'ask'] as const;
+export type PollMode = (typeof POLL_MODES)[number];
+
+export const POLL_MODE_LABELS: Record<PollMode, string> = {
+  listen: 'The analyser’s software sends them — {PRODUCT} waits',
+  ask: '{PRODUCT} asks for them, over and over',
+};
+
+export const POLL_MODE_HINTS: Record<PollMode, string> = {
+  listen:
+    'The usual arrangement for a BT1500. Somebody presses "send to RS232" in the analyser’s own software and the '
+    + 'results come across; {PRODUCT} stays silent, answers the handshake and takes what arrives. Nothing is ever '
+    + 'sent to the analyser’s software, so it cannot be disturbed by this link.',
+  ask:
+    'The dialogue the service manual describes: {PRODUCT} sends STX, waits for the analyser to answer, asks for the '
+    + 'next report, and repeats until it is told there are none left. Only switch this on for an installation that '
+    + 'answers requests — press "Fetch now" once to find out, and watch whether a report or a refusal comes back.',
+};
+
 /** Does this mode speak over a serial cable rather than the network? */
 export function modeIsSerial(mode?: string | null): boolean {
   return mode === 'serial';
