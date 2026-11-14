@@ -65,6 +65,13 @@ export interface AnalyserMessage {
   controlHint: boolean | null;
   /** Everything received, verbatim, for the audit trail and for mapping later. */
   raw: string;
+  /**
+   * What the message's own check digits said, where the protocol carries any.
+   *
+   * Only the BT1500 fills this in today. It is a note rather than a verdict
+   * because a result is not discarded over it — see the BT1500 section for why.
+   */
+  checksumNote?: string | null;
 }
 
 function blankMessage(instrument: string | null, raw: string): AnalyserMessage {
@@ -286,13 +293,21 @@ export function cleanHl7(source: string): string {
    the shape of the records, not the make of the machine. An analyser nobody
    has ever heard of is read correctly on its first message.
    ========================================================================= */
-export function detectProtocol(source: string): 'astm' | 'hl7' | 'delimited' | null {
+export function detectProtocol(source: string): 'astm' | 'hl7' | 'delimited' | 'bt1500' | null {
   const text = String(source ?? '');
   if (!text.trim()) return null;
   if (/(^|[\r\n\x0b])\s*MSH\s*[|^]/.test(text)) return 'hl7';
   const clean = cleanTransmission(text);
   // An ASTM record is a single letter, a pipe, and a sequence number.
   if (/(^|[\r\n])[HPOQRCLMS]\|/.test(clean)) return 'astm';
+  /*
+   * The BT1500 is asked before delimited text, and asked by PARSING rather
+   * than by pattern. Its reports carry no delimiter at all, so a loose regex
+   * would either miss them or claim half the plain-text formats in the world.
+   * Reading the columns and seeing the declared count account for every
+   * character is a test nothing else passes by accident.
+   */
+  if (looksLikeBt1500(text)) return 'bt1500';
   if (/[,;\t]/.test(clean) || /^[^\r\n]+\s*[:=]\s*\S/m.test(clean)) return 'delimited';
   return null;
 }
@@ -1215,16 +1230,343 @@ class AutoFramer implements Framer {
   flush(): string | null { return this.inner ? this.inner.flush() : null; }
 }
 
+
+/* ----------------------------------------------------------------------------
+   The BT1500 dialogue, as the host side of it
+   ----------------------------------------------------------------------------
+   Every other framer in this file is passive: the analyser talks and we
+   acknowledge. This one is the opposite, because the BT1500 never volunteers
+   anything. Collecting a result means asking for it:
+
+       us        STX
+       analyser  ACK
+       us        R  EOT
+       analyser  the report, ending EOT        — or NAK, meaning none waiting
+
+   The ask is driven from the link, which calls `poll()` when the connection
+   opens and on a timer after that. Everything that follows is a reply to a
+   byte we have just been sent, so it belongs here with the rest of the framing.
+
+   After a report is taken the next poll goes out immediately rather than
+   waiting for the timer: the analyser holds a queue, and a run of twenty
+   samples should not take twenty times the poll interval to come across.
+   -------------------------------------------------------------------------- */
+export class Bt1500Framer implements Framer {
+  private buffer = Buffer.alloc(0);
+  private maxBytes: number;
+  /** The command to send once the analyser answers our STX. */
+  private command: string = BT1500_COMMANDS.next;
+  /**
+   * When we last opened an exchange, or 0 if we have not.
+   *
+   * A timestamp rather than a flag, because an exchange can go unanswered —
+   * press "Fetch now" against an installation that only ever pushes and the
+   * request is simply ignored. A flag would stay raised for ever, and the next
+   * time the analyser's software opened a conversation of its own we would not
+   * answer its handshake, having convinced ourselves we were mid-question. The
+   * question is therefore given a life: after it, we are listening again.
+   */
+  private askedAt = 0;
+  /** Set when the analyser last said it had nothing. */
+  lastWasEmpty = false;
+
+  constructor(maxBytes = 512 * 1024) { this.maxBytes = maxBytes; }
+
+  /**
+   * Begin one exchange. The bytes to put on the wire.
+   *
+   * `which` is the manual's own letter: the next uncollected report by
+   * default, the last one again, or everything from the first.
+   */
+  poll(which: keyof typeof BT1500_COMMANDS = 'next'): Buffer {
+    this.command = BT1500_COMMANDS[which];
+    this.askedAt = Date.now();
+    return Buffer.from([STX]);
+  }
+
+  /** Is an exchange in flight, and recent enough to still be waiting on? */
+  get busy(): boolean { return this.askedAt > 0 && Date.now() - this.askedAt < BT1500_ASK_TIMEOUT_MS; }
+
+  push(chunk: Buffer): FramerOutput {
+    const out: FramerOutput = { replies: [], messages: [] };
+    this.buffer = Buffer.concat([this.buffer, chunk]);
+    if (this.buffer.length > this.maxBytes) {
+      this.buffer = Buffer.alloc(0);
+      this.askedAt = 0;
+      return out;
+    }
+
+    let keep: number[] = [];
+    const bytes = [...this.buffer];
+    this.buffer = Buffer.alloc(0);
+
+    for (const byte of bytes) {
+      if (byte === ACK) {
+        // Our STX was accepted. Ask for the report.
+        if (this.busy) out.replies.push(Buffer.from(`${this.command}`, 'ascii'), Buffer.from([EOT]));
+        continue;
+      }
+      if (byte === NAK) {
+        // Nothing is waiting. Not an error, and much the commonest answer.
+        this.askedAt = 0;
+        this.lastWasEmpty = true;
+        keep = [];
+        continue;
+      }
+      if (byte === EOT) {
+        const text = Buffer.from(keep).toString('latin1');
+        keep = [];
+        this.askedAt = 0;
+        if (text.trim()) {
+          this.lastWasEmpty = false;
+          out.messages.push(text);
+        }
+        continue;
+      }
+      if (byte === STX) {
+        /*
+         * The analyser opening a conversation of its own. The manual gives it
+         * no reason to, but the courteous answer is the one the protocol
+         * defines, and refusing to answer would strand whatever it is doing.
+         */
+        if (!this.busy) out.replies.push(Buffer.from([ACK]));
+        continue;
+      }
+      keep.push(byte);
+    }
+
+    this.buffer = Buffer.from(keep);
+    return out;
+  }
+
+  /**
+   * Nothing is taken on a pause.
+   *
+   * A report that has not reached its EOT is a report still arriving. Taking
+   * it early would file a sample with half its results, which is worse than
+   * filing it a second later.
+   */
+  needsIdleFlush(): boolean { return false; }
+
+  flush(): string | null {
+    const text = this.buffer.toString('latin1');
+    this.buffer = Buffer.alloc(0);
+    this.askedAt = 0;
+    return text.trim() ? text : null;
+  }
+}
+
 export function framerFor(protocol: string, maxBytes?: number): Framer {
   if (protocol === 'hl7') return new Hl7Framer(maxBytes);
+  if (protocol === 'bt1500') return new Bt1500Framer(maxBytes);
   if (protocol === 'delimited') return new LineFramer(maxBytes);
   if (protocol === 'auto') return new AutoFramer(maxBytes);
   return new AstmFramer(maxBytes);
 }
 
+
+/* ============================================================================
+   BT1500: fixed-width ASCII over a host-polled link
+   ----------------------------------------------------------------------------
+   The Biotecnica BT1500 speaks neither ASTM nor HL7. Its service manual
+   (Section IV, 4-1 to 4-4) describes a fixed-width ASCII dialogue in which the
+   HOST always speaks first — the analyser never pushes a result. To collect
+   one, the host sends STX, waits for ACK, sends a one-letter command, sends
+   EOT, and reads what comes back:
+
+       R   the next report that has not been collected
+       L   the last report again, when a reception went wrong
+       A   from the first report again, to re-collect everything
+
+   The answer is either NAK (0x15), meaning there is nothing waiting, or one
+   report laid out in fixed columns and ended with EOT:
+
+       patient code      15
+       list type          1     T routine, R stat
+       sample type        1     S serum, U urine
+       number of results  3
+       then, that many times:
+         analysis code    4     space padded, e.g. "GLU "
+         result           7     zero padded, e.g. "0010.10"
+       check digits       3
+
+   Two things in the manual disagree, and both are handled rather than guessed:
+
+   1. The worked example in 4-3 carries BOTH a list type and a sample type
+      (15 + 2 + 3), while the standard transmission script printed three pages
+      later carries only the sample type (15 + 1 + 3). A laboratory may also
+      have edited the script — that is what the Variable Serial Protocol is
+      for. So the layout is not assumed: it is DEDUCED, by taking the declared
+      number of results and seeing which arrangement accounts for every
+      character of the report exactly. A report that fits neither is kept whole
+      and parsed as nothing, which leaves the evidence rather than inventing a
+      reading.
+
+   2. 4-4 defines the check digits as the ASCII sum of the message modulo 256,
+      but both worked examples in the manual come out exactly 8 below that sum.
+      Two independent examples wrong by the same amount means the prose and the
+      firmware do not agree, and until a real transmission settles it, neither
+      number can be trusted to reject a patient result. So the sum is computed
+      and recorded — expected against received, on every message — and a
+      mismatch NEVER discards the reading. Throwing away a real result over
+      arithmetic the manual contradicts would be the worse failure by far, and
+      the first genuine transmission will show which rule the machine uses.
+   ========================================================================= */
+export const BT1500_CODE_WIDTH = 4;
+export const BT1500_VALUE_WIDTH = 7;
+const BT1500_CHECKSUM_WIDTH = 3;
+
+/**
+ * How long an unanswered request stays a request.
+ *
+ * Long enough that a slow analyser is not cut off mid-answer, short enough
+ * that a request nobody was listening for does not leave this end deaf to the
+ * next thing the analyser's software says.
+ */
+const BT1500_ASK_TIMEOUT_MS = 10_000;
+
+/** The poll commands, in the manual's own letters. */
+export const BT1500_COMMANDS = { next: 'R', again: 'L', fromFirst: 'A' } as const;
+
+/**
+ * The check digits for a BT1500 body: the ASCII sum, modulo 256.
+ *
+ * Exactly as 4-4 states it. See the note above about the manual's examples.
+ */
+export function bt1500Checksum(body: string): number {
+  let total = 0;
+  for (let i = 0; i < body.length; i++) total += body.charCodeAt(i) & 0xff;
+  return total % 256;
+}
+
+/** One way the fixed columns could be arranged. */
+interface Bt1500Layout {
+  /** Characters before the result count: 15 + the one or two type characters. */
+  header: number;
+  /** Does the report end with three check digits? */
+  checksum: boolean;
+  listType: boolean;
+}
+
+const BT1500_LAYOUTS: Bt1500Layout[] = [
+  { header: 17, checksum: true, listType: true },    // the manual's 4-3 example
+  { header: 16, checksum: true, listType: false },   // the manual's standard script
+  { header: 17, checksum: false, listType: true },   // check digits omitted (4-6 note a)
+  { header: 16, checksum: false, listType: false },
+];
+
+/**
+ * A value as the analyser writes it, as a number a person would recognise.
+ *
+ * "0010.10" is ten point one. The leading zeros are padding to the column
+ * width and carry no meaning, so they come off — but the analyser's own
+ * decimals stay exactly as sent, because the number of places it reports to is
+ * a statement about the method and not ours to round.
+ */
+function bt1500Value(raw: string): string {
+  const text = raw.trim();
+  if (!text) return '';
+  const match = /^([+-]?)0*(\d*\.?\d*)$/.exec(text);
+  if (!match) return text;                 // not a number: kept exactly as sent
+  const sign = match[1] === '-' ? '-' : '';
+  const digits = match[2] === '' || match[2].startsWith('.') ? `0${match[2]}` : match[2];
+  return `${sign}${digits}`;
+}
+
+/** Strip the dialogue's envelope, leaving the report itself. */
+function bt1500Body(chunk: string): string {
+  return chunk
+    .replace(/[\x02\x06\x05\x15\x04\r\n]/g, '')   // STX ACK ENQ NAK EOT and line ends
+    .replace(/^[RLA](?=\d)/, '');                 // a command echoed back at us
+}
+
+/**
+ * Read one BT1500 report.
+ *
+ * Returns null when the text is not a report at all — a bare NAK, an
+ * acknowledgement, or anything whose columns do not add up.
+ */
+export function parseBt1500Report(chunk: string): AnalyserMessage | null {
+  const raw = String(chunk ?? '');
+  const body = bt1500Body(raw);
+  if (body.length < 19) return null;
+
+  for (const layout of BT1500_LAYOUTS) {
+    const countAt = layout.header;
+    const count = Number(body.slice(countAt, countAt + 3));
+    if (!Number.isInteger(count) || count < 0 || count > 99) continue;
+
+    const per = BT1500_CODE_WIDTH + BT1500_VALUE_WIDTH;
+    const expected = countAt + 3 + (count * per) + (layout.checksum ? BT1500_CHECKSUM_WIDTH : 0);
+    if (expected !== body.length) continue;
+
+    const sampleId = body.slice(0, 15).trim();
+    // The sample type is the character immediately before the count; the list
+    // type, where this layout has one, sits before that.
+    const sampleType = body.charAt(countAt - 1).toUpperCase();
+    const results: AstmResult[] = [];
+    let at = countAt + 3;
+    for (let i = 0; i < count; i++) {
+      const code = body.slice(at, at + BT1500_CODE_WIDTH).trim();
+      const value = bt1500Value(body.slice(at + BT1500_CODE_WIDTH, at + per));
+      at += per;
+      if (code) results.push({ code, value, unit: null, flag: null, completedAt: null });
+    }
+
+    let checksumNote: string | null = null;
+    if (layout.checksum) {
+      const received = body.slice(body.length - BT1500_CHECKSUM_WIDTH);
+      const over = body.slice(0, body.length - BT1500_CHECKSUM_WIDTH);
+      const computed = bt1500Checksum(over);
+      checksumNote = Number(received) === computed
+        ? `check digits agree (${computed})`
+        : `check digits were ${received.trim()}; the sum of the message is ${computed}. `
+          + 'The reading was kept — the manual’s own worked examples disagree with its formula.';
+    }
+
+    return {
+      sampleId: sampleId || null,
+      lotNumber: null,
+      instrument: 'BT1500',
+      runAt: null,
+      results,
+      // The standard report carries no control field at all; only a laboratory
+      // that has edited the transmission script can send one. So nothing is
+      // claimed either way here, and the link's own sample-identifier patterns
+      // decide, exactly as they do for any other analyser.
+      controlHint: null,
+      raw,
+      checksumNote,
+    };
+  }
+
+  // No arrangement accounted for every character, so this is not a report.
+  return null;
+}
+
+/** Every report in a captured BT1500 exchange. */
+export function parseBt1500(text: string): AnalyserMessage[] {
+  const source = String(text ?? '');
+  if (!source.trim()) return [];
+  const out: AnalyserMessage[] = [];
+  // EOT ends each report. A capture may hold several, one after another.
+  for (const chunk of source.split('\x04')) {
+    if (!chunk.trim()) continue;
+    const message = parseBt1500Report(chunk);
+    if (message) out.push(message);
+  }
+  return out;
+}
+
+/** Does this text look like a BT1500 report? */
+export function looksLikeBt1500(text: string): boolean {
+  return parseBt1500(text).length > 0;
+}
+
 export function parseFor(protocol: string, text: string): AnalyserMessage[] {
   const kind = (!protocol || protocol === 'auto') ? (detectProtocol(text) ?? 'astm') : protocol;
   if (kind === 'hl7') return parseHl7(text);
+  if (kind === 'bt1500') return parseBt1500(text);
   if (kind === 'delimited') return parseDelimited(text);
   return parseAstm(text);
 }
@@ -1260,6 +1602,19 @@ export function splitTransmissions(
   // the setting. Nothing is lost by being right: the message is still parsed
   // by whatever the link says, and the checklist names the mismatch.
   if (resolved !== 'hl7' && detectProtocol(text) === 'hl7') resolved = 'hl7';
+
+  /*
+   * The BT1500 ends every report with EOT, which makes the boundary explicit —
+   * no record type to look for and no guessing. Anything after the last EOT is
+   * a report still arriving, so it is held back.
+   */
+  if (resolved === 'bt1500') {
+    const parts = text.split('\x04');
+    const tail = parts.pop() ?? '';
+    const complete = parts.map(part => `${part}\x04`).filter(part => part.replace(/[\x02\x06\x04\r\n]/g, '').trim());
+    if (options.final && tail.replace(/[\x02\x06\x04\r\n]/g, '').trim()) complete.push(tail);
+    return { complete, remainder: options.final ? '' : tail };
+  }
 
   if (resolved === 'hl7') {
     // Each message starts at an MSH. A new MSH means the previous one finished.

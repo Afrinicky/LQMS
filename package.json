@@ -125,6 +125,7 @@
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
+    "serialport": "^13.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -173,6 +174,7 @@
     "publish": null,
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*",
+      "node_modules/@serialport/bindings-cpp/**/*",
       "dist/**/*"
     ],
     "win": {

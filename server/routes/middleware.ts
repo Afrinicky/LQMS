@@ -62,6 +62,7 @@ import {
   type DennisTool, type RouteCriteria,
 } from '../../shared/constants/middleware.js';
 import { INSTRUMENT_PROFILES, LINK_STATE_LABELS } from '../../shared/constants/instruments.js';
+import { allModels } from '../services/instrumentModels.js';
 import { getEngine } from '../services/middleware/engine.js';
 import { diagnoseDestination, diagnoseLink, diagnoseSystem, lanAddresses } from '../services/middleware/diagnostics.js';
 import { discoveryEndpoints, discoveryHistory, runDiscovery } from '../services/middleware/discovery.js';
@@ -137,7 +138,7 @@ export function middlewareRoutes() {
       diagnosticLayers: DIAGNOSTIC_LAYER_LABELS,
       linkStates: LINK_STATE_LABELS,
       dennisTools: DENNIS_TOOLS.map(key => ({ key, label: DENNIS_TOOL_LABELS[key] })),
-      profiles: INSTRUMENT_PROFILES.map(p => ({ key: p.key, label: p.label, vendor: p.vendor, protocol: p.protocol, discipline: p.discipline })),
+      profiles: allModels().map(p => ({ key: p.key, label: p.label, vendor: p.vendor, protocol: p.protocol, discipline: p.discipline })),
       discoveryPorts: DISCOVERY_DEFAULT_PORTS,
       activatableStates: ACTIVATABLE_STATES,
     });
@@ -1087,9 +1088,15 @@ export function middlewareRoutes() {
       })),
       // What each model is already understood to send, so a laboratory adds a
       // name only where its own machine disagrees with the book.
-      profiles: INSTRUMENT_PROFILES.map(p => ({
+      /*
+       * The laboratory's own models included. A link pointing at a model
+       * somebody added here must show that model's parameters on this screen,
+       * or the screen would be empty for exactly the analysers it was added
+       * for.
+       */
+      profiles: allModels({ includeHidden: true }).map(p => ({
         key: p.key, label: p.label, vendor: p.vendor, discipline: p.discipline,
-        analytes: p.analytes,
+        analytes: p.analytes, units: p.units ?? {}, origin: p.origin ?? 'builtin',
       })),
       // The units this system can do arithmetic with, so the screen offers a
       // choice rather than a free-text box nobody can validate.

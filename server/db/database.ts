@@ -6914,6 +6914,46 @@ CREATE TABLE IF NOT EXISTS instrument_links (
 );
 CREATE INDEX IF NOT EXISTS idx_instrument_links_active ON instrument_links(is_active, role);
 
+-- Analyser models a laboratory keeps for itself.
+--
+-- The models this system ships with are compiled in, which is right for them:
+-- they are read from the vendors' own interface documents and from this
+-- laboratory's LHIMS client configuration, and they should not drift. But two
+-- things cannot live in a release.
+--
+-- The first is the DEFAULT a link starts from when the analyser is not one of
+-- the listed models. Shipping that empty is what left a Parameter Mappings
+-- screen with nothing in it and no way to begin. It now starts as the union of
+-- every analyser of that discipline — and because a laboratory measures what
+-- it measures, that set is editable here, once, for every link that follows.
+--
+-- The second is an analyser nobody has written a model for. Adding one used to
+-- mean a code change; a row here is enough, and it appears in the Model list
+-- beside the built-in ones from the moment it is saved.
+--
+-- The key column is what a link stores in profile_key, so it must stay stable. A row
+-- whose key matches a built-in model overrides it, which is how a discipline
+-- default is edited without touching the release.
+CREATE TABLE IF NOT EXISTS analyser_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  vendor TEXT NOT NULL DEFAULT '',
+  discipline TEXT NOT NULL DEFAULT 'other',   -- haematology | chemistry | molecular | immunology | other
+  protocol TEXT NOT NULL DEFAULT 'astm',      -- astm | hl7 | bt1500 | delimited | auto
+  -- 'default' edits a discipline's starting set; 'custom' is an analyser this
+  -- laboratory added. Nothing else may be written here.
+  kind TEXT NOT NULL DEFAULT 'custom',
+  analytes TEXT NOT NULL DEFAULT '{}',        -- JSON: instrument mnemonic -> parameter
+  units TEXT NOT NULL DEFAULT '{}',           -- JSON: parameter -> the scale to keep it in
+  notes TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_analyser_models_kind ON analyser_models(kind, is_active);
+
 -- Everything an analyser has said, verbatim.
 --
 -- Kept whether or not it could be understood: the raw text of a message nobody
@@ -7001,6 +7041,22 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
       ['outbound_unit_map', 'outbound_unit_map TEXT'],
       ['tap_path', 'tap_path TEXT'],
       ['tap_offset', 'tap_offset INTEGER NOT NULL DEFAULT 0'],
+      // An analyser wired to this computer by an RS-232 cable rather than the
+      // network. Both ends must agree on every one of these or the bytes
+      // arrive as plausible-looking rubbish, so each is recorded rather than
+      // assumed. The defaults are the BT1500's, from its service manual.
+      ['serial_path', 'serial_path TEXT'],
+      ['serial_baud', 'serial_baud INTEGER NOT NULL DEFAULT 9600'],
+      ['serial_data_bits', 'serial_data_bits INTEGER NOT NULL DEFAULT 8'],
+      ['serial_stop_bits', 'serial_stop_bits INTEGER NOT NULL DEFAULT 1'],
+      ['serial_parity', "serial_parity TEXT NOT NULL DEFAULT 'none'"],
+      ['serial_flow', "serial_flow TEXT NOT NULL DEFAULT 'hardware'"],
+      // Who starts the conversation. 'listen' waits to be sent results, which
+      // is what a BT1500 does when somebody presses "send to RS232" in the
+      // analyser's own software; 'ask' runs the polled dialogue the service
+      // manual describes. Waiting is the safe default: it puts nothing on the
+      // wire, so it cannot disturb whatever is already there.
+      ['poll_mode', "poll_mode TEXT NOT NULL DEFAULT 'listen'"],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }

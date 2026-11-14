@@ -37,9 +37,19 @@ import { diagnoseWatchPathAsync, forgetWatchPath } from '../services/instrumentB
 import { cleanTransmission, detectProtocol, effectiveProtocol, parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
+  DEFAULT_CONTROL_PATTERNS, LINK_PROTOCOL_LABELS, classifyMessage, mapAnalyte, modeIsPassive, profileByKey,
+  SERIAL_BAUD_RATES, SERIAL_DEFAULTS, SERIAL_FLOW_CONTROL, SERIAL_PARITIES, POLL_MODES,
   linkForwards, linkIsOurs, LINK_STATE_LABELS,
 } from '../../shared/constants/instruments.js';
+import {
+  ANALYSER_DISCIPLINES, DISCIPLINE_LABELS, DEFAULT_PARAMETER_SETS, DEFAULT_UNIT_SETS,
+  type AnalyserDiscipline,
+} from '../../shared/constants/instruments.js';
+import {
+  allModels, checkModel, defaultKey, disciplineDefault, linksUsingModel,
+  modelByKey, removeModel, resetDefault, saveModel,
+} from '../services/instrumentModels.js';
+import { knownUnits } from '../../shared/constants/units.js';
 import { withProduct } from '../../shared/constants/product.js';
 import { serverProductName } from '../services/productName.js';
 import {
@@ -88,9 +98,16 @@ export function instrumentLinkRoutes() {
      ==================================================================== */
   router.get('/profiles', requirePermission(MODULE, 'view'), (_req, res) => {
     res.json({
-      profiles: INSTRUMENT_PROFILES.map(p => ({
+      /*
+       * Built-in models and the laboratory's own, in one list and told apart
+       * only by `origin`. A model somebody added here is chosen in exactly the
+       * same way as one that ships with the system, which is the whole point
+       * of being able to add one.
+       */
+      profiles: allModels().map(p => ({
         key: p.key, label: p.label, vendor: p.vendor, discipline: p.discipline,
         protocol: p.protocol, notes: p.notes ?? null,
+        origin: p.origin ?? 'builtin',
         analyteCount: Object.keys(p.analytes).length,
       })),
       roles: LINK_ROLES.map(r => ({ key: r, label: withProduct(LINK_ROLE_LABELS[r], serverProductName()) })),
@@ -106,10 +123,187 @@ export function instrumentLinkRoutes() {
     });
   });
 
+  /**
+   * The serial ports this computer can see.
+   *
+   * "Is it COM3 or COM4" is the single thing people get wrong about a cabled
+   * analyser, and it is not knowable from anywhere else — so the list is read
+   * from the operating system and offered. It is a suggestion, never a
+   * restriction: a port that appears only once the analyser is powered on
+   * would otherwise be impossible to choose, so the field stays typeable.
+   */
+  router.get('/serial-ports', requirePermission(MODULE, 'view'), async (_req, res) => {
+    try {
+      const { SerialPort } = await import('serialport');
+      const ports = await SerialPort.list();
+      res.json({
+        ports: ports.map(port => ({
+          path: port.path,
+          // friendlyName is Windows' own description of the device — "USB
+          // Serial Port (COM3)" — and is the thing that tells one identical
+          // adaptor from another. It is not on every platform's port record,
+          // which is why it is read defensively rather than declared.
+          label: [port.manufacturer, (port as { friendlyName?: string }).friendlyName ?? port.pnpId]
+            .filter(Boolean).join(' · ') || null,
+        })),
+        note: ports.length ? null : 'This computer reports no serial ports. Type the port in if the analyser is not powered on yet.',
+      });
+    } catch (error) {
+      /*
+       * Not an error the screen should shout about. A host with no serial
+       * driver, or one whose operating system will not enumerate ports, can
+       * still run a cabled link — the port is simply typed in.
+       */
+      res.json({ ports: [], note: `The port list could not be read here (${(error as Error).message}). Type the port in instead.` });
+    }
+  });
+
   router.get('/profiles/:key/analytes', requirePermission(MODULE, 'view'), (req, res) => {
     const profile = profileByKey(req.params.key);
     if (!profile) return res.status(404).json({ error: 'Unknown analyser profile' });
     res.json(profile.analytes);
+  });
+
+  /* ======================================================================
+     Models a laboratory keeps for itself
+     ----------------------------------------------------------------------
+     Two things live here, and they are deliberately the same shape.
+
+     A DISCIPLINE DEFAULT is what a link starts from when the analyser is not
+     one of the listed models. It ships as the union of every analyser of that
+     discipline this system knows, and is edited here when a laboratory
+     measures something else — once, for every link that follows.
+
+     A CUSTOM MODEL is an analyser nobody wrote a model for. Saved here, it
+     appears in the Model list beside the built-in ones from that moment, and
+     behaves identically everywhere else.
+
+     None of this touches a connection. A model says what a code is READ AS;
+     changing one affects messages arriving from then on and nothing else, so
+     no link is restarted and no analyser notices.
+     ==================================================================== */
+
+  /** Everything the models screen reads, in one request. */
+  router.get('/models', requirePermission(MODULE, 'view'), (_req, res) => {
+    res.json({
+      models: allModels().map(profile => ({
+        key: profile.key,
+        label: profile.label,
+        vendor: profile.vendor,
+        discipline: profile.discipline,
+        protocol: profile.protocol,
+        notes: profile.notes ?? null,
+        origin: profile.origin ?? 'builtin',
+        analytes: profile.analytes,
+        units: profile.units ?? {},
+        analyteCount: Object.keys(profile.analytes).length,
+        // Named so that a model cannot be removed from under a working link
+        // without somebody being told which links those are.
+        usedBy: linksUsingModel(getDb, profile.key),
+      })),
+      defaults: ANALYSER_DISCIPLINES.map(discipline => {
+        const current = disciplineDefault(discipline);
+        return {
+          discipline,
+          label: DISCIPLINE_LABELS[discipline],
+          key: defaultKey(discipline),
+          analytes: current.analytes,
+          units: current.units,
+          edited: current.edited,
+          shippedCount: Object.keys(DEFAULT_PARAMETER_SETS[discipline] ?? {}).length,
+        };
+      }),
+      disciplines: ANALYSER_DISCIPLINES.map(d => ({ key: d, label: DISCIPLINE_LABELS[d] })),
+      protocols: LINK_PROTOCOLS,
+      units: knownUnits(),
+    });
+  });
+
+  /** Add a model, or change one this laboratory added. */
+  router.post('/models', requirePermission(MODULE, 'edit'), (req, res) => {
+    const body = req.body ?? {};
+    const existingKey = typeof body.existingKey === 'string' ? body.existingKey.trim() : undefined;
+    const input = {
+      key: String(body.key ?? '').trim().toLowerCase(),
+      label: String(body.label ?? ''),
+      vendor: String(body.vendor ?? ''),
+      discipline: String(body.discipline ?? 'other'),
+      protocol: String(body.protocol ?? 'astm'),
+      kind: 'custom' as const,
+      analytes: body.analytes,
+      units: body.units,
+      notes: body.notes ?? null,
+    };
+    const check = checkModel(input, existingKey);
+    if (!check.ok) return res.status(400).json({ error: check.error });
+
+    // Renaming the key of a model links already point at would strand them.
+    if (existingKey && existingKey !== input.key) {
+      const stranded = linksUsingModel(getDb, existingKey);
+      if (stranded.length) {
+        return res.status(400).json({
+          error: `${stranded.join(', ')} ${stranded.length === 1 ? 'is' : 'are'} set to this model, so its key cannot be changed. `
+            + 'Everything else about it can be.',
+        });
+      }
+      removeModel(getDb, existingKey);
+    }
+
+    saveModel(getDb, input, (req as any).user?.id ?? null);
+    audit(req, { action: existingKey ? 'edit' : 'create', entity: 'analyser_models', entityId: input.key,
+      newValue: { label: input.label, discipline: input.discipline, protocol: input.protocol,
+        parameters: Object.keys(input.analytes ?? {}).length } });
+    res.json({ ok: true, key: input.key, model: modelByKey(input.key) });
+  });
+
+  /** Remove a model this laboratory added. */
+  router.delete('/models/:key', requirePermission(MODULE, 'edit'), (req, res) => {
+    const key = String(req.params.key ?? '').trim();
+    const model = modelByKey(key);
+    if (!model) return res.status(404).json({ error: 'No such model.' });
+    if ((model.origin ?? 'builtin') === 'builtin') {
+      return res.status(400).json({
+        error: 'This model ships with the system and cannot be removed. Its parameters can be changed on any link that uses it.',
+      });
+    }
+    const done = removeModel(getDb, key);
+    if (!done.ok) return res.status(400).json({ error: done.error });
+    audit(req, { action: 'delete', entity: 'analyser_models', entityId: key, oldValue: { label: model.label } });
+    res.json({ ok: true });
+  });
+
+  /** Change what a discipline's links start from when the analyser is not listed. */
+  router.put('/defaults/:discipline', requirePermission(MODULE, 'edit'), (req, res) => {
+    const discipline = String(req.params.discipline ?? '') as AnalyserDiscipline;
+    if (!(ANALYSER_DISCIPLINES as readonly string[]).includes(discipline)) {
+      return res.status(404).json({ error: 'No such discipline.' });
+    }
+    const body = req.body ?? {};
+    saveModel(getDb, {
+      key: defaultKey(discipline),
+      label: `${DISCIPLINE_LABELS[discipline]} — the set a not-listed analyser starts from`,
+      vendor: 'Not listed',
+      discipline,
+      protocol: 'auto',
+      kind: 'default',
+      analytes: body.analytes,
+      units: body.units,
+      notes: null,
+    }, (req as any).user?.id ?? null);
+    audit(req, { action: 'edit', entity: 'analyser_models', entityId: defaultKey(discipline),
+      newValue: { parameters: Object.keys(body.analytes ?? {}).length } });
+    res.json({ ok: true, ...disciplineDefault(discipline) });
+  });
+
+  /** Put a discipline's default back to what this system ships with. */
+  router.post('/defaults/:discipline/reset', requirePermission(MODULE, 'edit'), (req, res) => {
+    const discipline = String(req.params.discipline ?? '') as AnalyserDiscipline;
+    if (!(ANALYSER_DISCIPLINES as readonly string[]).includes(discipline)) {
+      return res.status(404).json({ error: 'No such discipline.' });
+    }
+    resetDefault(getDb, discipline);
+    audit(req, { action: 'edit', entity: 'analyser_models', entityId: defaultKey(discipline), newValue: { reset: true } });
+    res.json({ ok: true, ...disciplineDefault(discipline) });
   });
 
   /* ======================================================================
@@ -175,6 +369,15 @@ export function instrumentLinkRoutes() {
       remoteHost: pick(b.remoteHost, existing.remote_host) ?? null,
       remotePort: b.remotePort !== undefined ? parseIntNullable(b.remotePort) : (existing.remote_port ?? null),
       watchPath: pick(b.watchPath, existing.watch_path) ?? null,
+      // The cable, for an analyser wired straight into this computer.
+      serialPath: pick(b.serialPath, existing.serial_path) ?? null,
+      serialBaud: b.serialBaud !== undefined ? parseIntNullable(b.serialBaud) : (existing.serial_baud ?? SERIAL_DEFAULTS.baudRate),
+      serialDataBits: b.serialDataBits !== undefined ? parseIntNullable(b.serialDataBits) : (existing.serial_data_bits ?? SERIAL_DEFAULTS.dataBits),
+      serialStopBits: b.serialStopBits !== undefined ? parseIntNullable(b.serialStopBits) : (existing.serial_stop_bits ?? SERIAL_DEFAULTS.stopBits),
+      serialParity: String(pick(b.serialParity, existing.serial_parity) ?? SERIAL_DEFAULTS.parity),
+      serialFlow: String(pick(b.serialFlow, existing.serial_flow) ?? SERIAL_DEFAULTS.flowControl),
+      // Whether this link waits to be sent results or asks for them.
+      pollMode: String(pick(b.pollMode, existing.poll_mode) ?? 'listen'),
       analyteMap: b.analyteMap !== undefined ? JSON.stringify(b.analyteMap ?? {}) : (existing.analyte_map ?? null),
       unitMap: b.unitMap !== undefined ? JSON.stringify(b.unitMap ?? {}) : (existing.unit_map ?? null),
       outboundUnitMap: b.outboundUnitMap !== undefined
@@ -232,8 +435,46 @@ export function instrumentLinkRoutes() {
     if (!LINK_MODES.includes(v.mode as any)) return `The mode must be one of: ${LINK_MODES.join(', ')}.`;
     if (!LINK_PROTOCOLS.includes(v.protocol as any)) return `The protocol must be one of: ${LINK_PROTOCOLS.join(', ')}.`;
 
+    /*
+     * A polled analyser must be set to its own protocol, or nothing ever
+     * arrives and nothing says why.
+     *
+     * Every other protocol here waits to be spoken to, so getting the setting
+     * wrong still shows messages arriving that cannot be read — visible,
+     * diagnosable. The BT1500 is the opposite: it transmits only when asked,
+     * and only the BT1500 setting does the asking. Set to anything else, the
+     * link connects, sits in perfect silence for ever, and looks exactly like
+     * an analyser nobody switched on. So it is refused here, where somebody is
+     * looking at the screen.
+     */
+    {
+      const model = v.profileKey ? modelByKey(String(v.profileKey)) : null;
+      if (model?.protocol === 'bt1500' && v.protocol !== 'bt1500'
+        && (v.mode === 'server' || v.mode === 'client')) {
+        return `${model.label} transmits only when it is asked, and only the "${LINK_PROTOCOL_LABELS.bt1500}" `
+          + 'setting asks. Left as it is, this link would connect and then wait for a message the analyser is '
+          + 'never going to send on its own.';
+      }
+    }
+
     if (v.mode === 'server' && !v.listenPort) return 'A listening link needs the port the analyser will send to.';
     if (v.mode === 'client' && (!v.remoteHost || !v.remotePort)) return 'A dialling link needs the analyser\'s address and port.';
+    if (!POLL_MODES.includes(v.pollMode as never)) return `How results arrive must be one of: ${POLL_MODES.join(', ')}.`;
+    if (v.mode === 'serial') {
+      if (!v.serialPath) return 'A cabled link needs the serial port this computer calls the analyser — COM1 on Windows, /dev/ttyUSB0 on Linux.';
+      if (!SERIAL_BAUD_RATES.includes(v.serialBaud as never)) return `The baud rate must be one of: ${SERIAL_BAUD_RATES.join(', ')}.`;
+      if (!SERIAL_PARITIES.includes(v.serialParity as never)) return `Parity must be one of: ${SERIAL_PARITIES.join(', ')}.`;
+      if (!SERIAL_FLOW_CONTROL.includes(v.serialFlow as never)) return `Handshake must be one of: ${SERIAL_FLOW_CONTROL.join(', ')}.`;
+      /*
+       * Two links on one cable is not a configuration, it is two programs
+       * fighting over a port — and the one that loses reports nothing rather
+       * than failing, which is the hardest kind of fault to find.
+       */
+      const taken = db.prepare(`SELECT name FROM instrument_links
+          WHERE mode = 'serial' AND is_active = 1 AND serial_path = ? AND (? IS NULL OR id != ?)`)
+        .get(v.serialPath, id, id) as any;
+      if (taken) return `${v.serialPath} is already used by "${taken.name}". A serial port carries one analyser.`;
+    }
     if (v.mode === 'file_drop' && !v.watchPath) return 'A watched link needs the folder the analyser writes into.';
     if (v.mode === 'lhims_tap' && !v.tapPath) {
       return `Following the LHIMS client needs the path to its ${LHIMS_TAP_FILENAME}, or to the folder holding it. Set WRITE_TO_FILE = Yes in the client first, then point this at the file it writes.`;
@@ -315,16 +556,40 @@ export function instrumentLinkRoutes() {
       return res.status(409).json({ error: `A link with the code "${code}" already exists.` });
     }
 
+    /*
+     * A new link starts in the scale its model keeps.
+     *
+     * Without this the units table opens on "Nothing is being rescaled", and a
+     * laboratory has to set two dozen scales by hand before a single reading
+     * is comparable with the one beside it. The model's own set is copied in
+     * once, here, and is the link's from then on — editable, and never
+     * rewritten behind somebody's back.
+     *
+     * Copying it cannot distort a reading. A rescale only ever happens between
+     * two spellings of the same physical quantity, and a conversion that would
+     * need to know the analyte, such as mg/dL to mmol/L, is refused outright
+     * and the number kept exactly as it arrived.
+     */
+    if (!v.unitMap) {
+      const model = v.profileKey ? modelByKey(String(v.profileKey)) : null;
+      const seed = model?.units ?? {};
+      if (Object.keys(seed).length) v.unitMap = JSON.stringify(seed);
+    }
+
     const result = db.prepare(`INSERT INTO instrument_links
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
-         listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, unit_map, outbound_unit_map, control_patterns,
+         listen_host, listen_port, remote_host, remote_port, watch_path,
+         serial_path, serial_baud, serial_data_bits, serial_stop_bits, serial_parity, serial_flow, poll_mode,
+         analyte_map, unit_map, outbound_unit_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
          lhims_password, lhims_map_key, measure_map, tap_path,
          fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
          close_after_message, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath,
+        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow, v.pollMode,
+        v.analyteMap, v.unitMap,
         v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
@@ -347,13 +612,17 @@ export function instrumentLinkRoutes() {
 
     db.prepare(`UPDATE instrument_links SET name = ?, equipment_id = ?, section_id = ?, profile_key = ?,
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
-        watch_path = ?, analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
+        watch_path = ?, serial_path = ?, serial_baud = ?, serial_data_bits = ?, serial_stop_bits = ?,
+        serial_parity = ?, serial_flow = ?, poll_mode = ?,
+        analyte_map = ?, unit_map = ?, outbound_unit_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
         fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
         close_after_message = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
-        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.unitMap,
+        v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath,
+        v.serialPath, v.serialBaud, v.serialDataBits, v.serialStopBits, v.serialParity, v.serialFlow, v.pollMode,
+        v.analyteMap, v.unitMap,
         v.outboundUnitMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
@@ -563,6 +832,16 @@ export function instrumentLinkRoutes() {
       add('address', 'SECHLIMS can reach the analyser', link.messages_received > 0 ? 'ok' : 'todo',
         link.remote_host ? `It dials ${link.remote_host}:${link.remote_port ?? '—'}.` : 'No analyser address is set.',
         link.remote_host ? undefined : 'Give the link the analyser\'s address and port.');
+    } else if (link.mode === 'serial') {
+      add('address', 'The cable is open', link.messages_received > 0 ? 'ok' : 'todo',
+        link.serial_path
+          ? `${link.serial_path} at ${link.serial_baud ?? 9600} baud, ${link.serial_data_bits ?? 8} data bits, `
+            + `${link.serial_parity ?? 'none'} parity, ${link.serial_stop_bits ?? 1} stop bit, `
+            + `${String(link.serial_flow ?? 'hardware')} handshake. Every one of these must match the analyser's own service menu.`
+          : 'No serial port is set, so there is nothing to open.',
+        link.serial_path
+          ? undefined
+          : 'Give the link the port this computer calls the analyser — COM1 on Windows, /dev/ttyUSB0 on Linux.');
     } else if (link.mode === 'file_drop') {
       // Which of the half-dozen reasons it is decides what somebody does next,
       // and the one most often true — a path read off the analyser's own
@@ -581,6 +860,41 @@ export function instrumentLinkRoutes() {
         link.tap_path ? target.note : `No path to ${LHIMS_TAP_FILENAME} is set.`,
         target.file ? undefined
           : `Switch WRITE_TO_FILE on in the client and point the link at the ${LHIMS_TAP_FILENAME} it writes, or at the folder holding it.`);
+    }
+
+    /*
+     * The BT1500's own precondition, which is not visible from this end.
+     *
+     * It holds a result back until somebody accepts it on the analyser, so a
+     * link can be perfectly configured, perfectly connected, politely asking
+     * every fifteen seconds, and still collect nothing at all — because there
+     * is genuinely nothing to collect. That looks exactly like a broken link
+     * and is the first thing to rule out, so it is stated here rather than
+     * left in a manual.
+     */
+    if (link.protocol === 'bt1500') {
+      const waits = String(link.poll_mode ?? 'listen') !== 'ask';
+      add('bt1500_direction', 'Results leave the analyser the way this link expects',
+        Number(link.messages_received ?? 0) > 0 ? 'ok' : 'info',
+        Number(link.messages_received ?? 0) > 0
+          ? (waits ? 'Results are being sent to this link.' : 'Results are being collected by asking.')
+          : waits
+            ? 'This link waits to be sent results. On the analyser\'s PC, run a sample and press "send to RS232" '
+              + 'in the Biotecnica software — the results should appear here as it sends them.'
+            : 'This link asks for results over and over. If nothing ever comes back, the analyser\'s software may '
+              + 'only push when somebody presses "send to RS232", in which case set this link to wait instead.',
+        Number(link.messages_received ?? 0) > 0 ? undefined
+          : 'Press "Fetch" once to ask the analyser outright. A report coming back means its software answers '
+            + 'requests; silence means it only pushes, and this link should be left waiting.');
+      add('bt1500_validate', 'Results are released on the analyser',
+        Number(link.messages_received ?? 0) > 0 ? 'ok' : 'info',
+        Number(link.messages_received ?? 0) > 0
+          ? 'Reports are being collected, so results are being released.'
+          : 'The BT1500 offers a report only once it has been accepted. Until then it answers every request with '
+            + '"nothing waiting", which is indistinguishable from a quiet analyser.',
+        'On the analyser, either accept each run under Utility, RS232, "Accept result to be sent" — or switch it '
+        + 'off altogether under Utility, Setup Analyzer, Serial, with "All results must be sent automatically '
+        + '(without validate)" at the foot of the page.');
     }
 
     /* 4 — has anything ever actually arrived? */

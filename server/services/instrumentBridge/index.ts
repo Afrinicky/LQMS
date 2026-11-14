@@ -41,8 +41,18 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   decodeExport, detectProtocol, drainFramer, effectiveProtocol, framerFor, parseFor, printableBytes,
-  splitTransmissions, type Framer, type AnalyserMessage,
+  splitTransmissions, Bt1500Framer, STX, type Framer, type AnalyserMessage,
 } from './protocols.js';
+
+/**
+ * How often to ask a polled analyser whether it has anything.
+ *
+ * Fifteen seconds is a compromise between a bench waiting for a result and a
+ * serial line carrying needless traffic. It only sets the floor: a report
+ * always triggers the next request immediately, so a batch arrives at the
+ * speed of the connection rather than one every fifteen seconds.
+ */
+const BT1500_POLL_MS = 15_000;
 import {
   LINK_CLOSE_AFTER_MS, LINK_FOLDER_POLL_MS, LINK_IDLE_FLUSH_MS, LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS,
   classifyMessage, linkForwards, linkIsOurs, mapAnalyte, modeIsPassive,
@@ -235,6 +245,12 @@ interface LinkRow {
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
   lhims_map_key: string | null; measure_map: string | null; outbound_unit_map: string | null;
   tap_path: string | null; tap_offset: number | null;
+  // An analyser on the other end of an RS-232 cable rather than the network.
+  serial_path?: string | null; serial_baud?: number | null;
+  serial_data_bits?: number | null; serial_stop_bits?: number | null;
+  serial_parity?: string | null; serial_flow?: string | null;
+  // 'listen' waits to be sent results; 'ask' runs the polled dialogue.
+  poll_mode?: string | null;
   // Fetching, for the modes that can be asked rather than only pushed to.
   fetch_enabled: number; fetch_interval_seconds: number | null;
   file_pattern: string | null; archive_path: string | null; delete_after_read: number;
@@ -301,6 +317,15 @@ class Link {
   private server: net.Server | null = null;
   private socket: net.Socket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  /**
+   * The BT1500 asks for nothing and offers nothing until it is asked.
+   *
+   * Every other analyser here transmits when it has something; this one holds
+   * its reports until a host collects them, so the link has to keep asking.
+   * The timer does that while a connection is up, and is cleared with the rest
+   * when the link stops.
+   */
+  private pollTimer: NodeJS.Timeout | null = null;
   private idleTimers = new Map<net.Socket, NodeJS.Timeout>();
   private watcher: fs.FSWatcher | null = null;
   /** Only set when the folder could not be watched and must be polled instead. */
@@ -413,6 +438,7 @@ class Link {
     if (this.row.mode === 'lhims_tap') return this.startTap();
     if (this.row.mode === 'file_drop') return this.startWatcher();
     if (this.row.mode === 'client') return this.startClient();
+    if (this.row.mode === 'serial') return this.startSerial();
     return this.startServer();
   }
 
@@ -506,6 +532,139 @@ class Link {
       this.socket = socket;
     };
     connect();
+  }
+
+
+  /* ---------------------------------------------------------------- serial */
+  /**
+   * An analyser wired to this computer by an RS-232 cable.
+   *
+   * Everything else here reaches an analyser across the network. This one does
+   * not touch the network at all: the instrument is on the other end of a
+   * cable, and the operating system presents it as a port — COM1 on Windows,
+   * /dev/ttyUSB0 on Linux. A Biotecnica BT1500 connects this way.
+   *
+   * The serial driver is loaded only when a link actually needs it. It is a
+   * native module, and a host that has never wired an analyser directly should
+   * not fail to start because a package it has no use for would not build. If
+   * it is missing the link says so in words somebody can act on, and every
+   * other link on the host carries on untouched.
+   *
+   * Once the port is open it is handed to the same `attach` every network link
+   * uses, through a small adapter, so framing, acknowledgement, the idle
+   * flush, the silence report and BT1500 polling all behave identically. A
+   * serial link is a different wire, not a different protocol stack.
+   */
+  private startSerial(): void {
+    const path = this.row.serial_path?.trim();
+    if (!path) {
+      this.setState('error', 'No serial port set for this link.', 'No serial port set');
+      this.opened = false;
+      return;
+    }
+
+    const settings = {
+      path,
+      baudRate: Number(this.row.serial_baud) || 9600,
+      dataBits: (Number(this.row.serial_data_bits) || 8) as 7 | 8,
+      stopBits: (Number(this.row.serial_stop_bits) || 1) as 1 | 2,
+      parity: String(this.row.serial_parity || 'none') as 'none' | 'even' | 'odd',
+      rtscts: String(this.row.serial_flow || 'hardware') === 'hardware',
+      xon: String(this.row.serial_flow) === 'software',
+      xoff: String(this.row.serial_flow) === 'software',
+      autoOpen: false,
+    };
+    const described = `${path} at ${settings.baudRate} ${settings.dataBits}${settings.parity[0].toUpperCase()}${settings.stopBits}`;
+
+    const open = async () => {
+      if (this.stopping) return;
+      this.setState('connecting', `Opening ${described}`);
+
+      let SerialPort: any;
+      try {
+        ({ SerialPort } = await import('serialport'));
+      } catch {
+        this.setState('error',
+          'The serial driver is not installed on this computer, so a cabled analyser cannot be opened. '
+          + 'Install the application\'s dependencies (npm install) and start it again. Nothing else on this host is affected.',
+          'Serial driver not installed');
+        this.opened = false;
+        return;
+      }
+
+      const port = new SerialPort(settings);
+      port.open((error: Error | null) => {
+        if (!error) return;
+        /*
+         * The two faults worth telling apart, because they need opposite
+         * actions: a port that is not there at all, and one another program
+         * already has. On Windows the analyser's own software holding the port
+         * is much the commoner of the two, and it looks identical to a wiring
+         * fault unless it is said outright.
+         */
+        /*
+         * The fault this arrangement actually produces, and what to do about
+         * it — because "access denied" on its own sends somebody looking at
+         * permissions, which is never the answer here.
+         *
+         * A BT1500 has no interface of its own. Biotecnica's software on the
+         * attached PC holds the serial port it sends out of, and a serial port
+         * carries one program at each end. Two programs on ONE computer cannot
+         * share it: what that software transmits goes down the cable, not to
+         * anything else on the same machine. So either this link runs on
+         * another computer at the far end of that cable, or the PC is given a
+         * pair of linked virtual ports so the software can send into one while
+         * this link reads the other.
+         */
+        const text = /access denied|resource busy|cannot open|busy/i.test(error.message)
+          ? `${path} is already open in another program — on a BT1500 PC that is almost always the analyser's own `
+            + 'software, which holds the port it sends results out of. A serial port cannot be shared by two '
+            + 'programs on one computer: what that software transmits goes down the cable, not to anything else on '
+            + 'this machine. Either run this link on the computer at the other end of that cable, or install a '
+            + 'linked pair of virtual ports on this one and have the analyser software send into one while this '
+            + 'link reads the other.'
+          : `${path} could not be opened: ${error.message}`;
+        this.setState('error', text, error.message);
+        if (!this.stopping) this.reconnectTimer = setTimeout(() => { void open(); }, LINK_RECONNECT_MS);
+      });
+
+      port.on('open', () => {
+        this.setState('connected', `Open on ${described}`);
+        try {
+          this.getDb().prepare('UPDATE instrument_links SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?').run(this.id);
+        } catch { /* not worth dropping a link over */ }
+      });
+
+      /*
+       * The adapter. `attach` wants the handful of things a socket does, and a
+       * serial port does all of them under other names or not at all —
+       * keep-alive and a peer address mean nothing on a cable. Rather than
+       * reshape the code path that carries results for every working analyser
+       * on this host, the port is given the shape that path already expects.
+       */
+      const line: any = {
+        setKeepAlive: () => undefined,
+        remoteAddress: undefined,
+        remotePort: undefined,
+        get destroyed() { return !port.isOpen; },
+        write: (chunk: Buffer) => { try { port.write(chunk); } catch { /* the close handler reports it */ } },
+        end: () => { try { port.close(() => undefined); } catch { /* already gone */ } },
+        destroy: () => { try { port.close(() => undefined); } catch { /* already gone */ } },
+        on: (event: string, handler: (...args: any[]) => void) => { port.on(event, handler); return line; },
+      };
+
+      this.attach(line as unknown as net.Socket, described);
+      this.socket = line as unknown as net.Socket;
+
+      port.on('close', () => {
+        this.socket = null;
+        if (this.stopping) return;
+        this.setState('connecting', `The serial port closed; reopening every ${Math.round(LINK_RECONNECT_MS / 1000)}s`);
+        this.reconnectTimer = setTimeout(() => { void open(); }, LINK_RECONNECT_MS);
+      });
+    };
+
+    void open();
   }
 
   /* ------------------------------------------------------- the LHIMS tap */
@@ -961,6 +1120,29 @@ class Link {
           : 'Nothing new in the log.',
         messages);
     }
+    /*
+     * A polled analyser is the one case where "fetch now" does something real
+     * over a socket: the BT1500 is holding its reports until it is asked, so
+     * asking is exactly what this button is for.
+     */
+    if (this.row.protocol === 'bt1500') {
+      const socket = this.socket;
+      if (!socket || socket.destroyed) {
+        return { ok: false, read: 0, note: 'Not connected to the analyser at the moment, so it cannot be asked. The link keeps retrying.' };
+      }
+      socket.write(Buffer.from([STX]));
+      /*
+       * Asking once, even on a link that is set to wait. That is the point of
+       * the button here: it is how a laboratory finds out which kind of
+       * installation it has without changing a setting and waiting to see.
+       */
+      return stamp(
+        String(this.row.poll_mode ?? 'listen') === 'ask'
+          ? 'Asked the analyser for its next report. Anything it is holding will arrive in a moment.'
+          : 'Asked the analyser once. This link is set to wait to be sent results, so if a report comes back now, '
+            + 'the analyser\'s software answers requests and the link can be switched to asking for them.',
+        0);
+    }
     if (this.row.mode === 'client') {
       // Dialling out IS the fetch, so the honest answer is whether the
       // connection is up — not a pretence that a message was pulled.
@@ -1041,6 +1223,43 @@ class Link {
       }, LINK_CLOSE_AFTER_MS);
     };
 
+    /*
+     * Asking the BT1500 for what it is holding.
+     *
+     * One exchange collects at most one report, so after a report arrives the
+     * next request goes out straight away and the queue drains at the speed of
+     * the wire rather than of the timer. When the analyser answers that it has
+     * nothing, the timer takes over again.
+     */
+    /*
+     * Only ask if this link is set to ask.
+     *
+     * The BT1500 has no interface of its own: Biotecnica's software on the
+     * attached PC is what speaks to a LIS, and in most laboratories somebody
+     * presses "send to RS232" there and the results are pushed across. Sending
+     * STX at such an installation every fifteen seconds puts bytes into its
+     * receiver that it never asked for and cannot use. So a link waits unless
+     * it has been told to ask, and the framer still answers a handshake the
+     * analyser's software opens — which is how a pushed result arrives.
+     */
+    const asks = String(this.row.poll_mode ?? 'listen') === 'ask';
+    const polled = (framer instanceof Bt1500Framer && asks) ? framer : null;
+    const askAgain = (why: string) => {
+      if (!polled || socket.destroyed || this.stopping) return;
+      const opening = polled.poll();
+      socket.write(opening);
+      this.emit('out', `Asked ${peer} for the next report (${why})`, printableBytes(opening));
+    };
+    if (polled) {
+      askAgain('the connection opened');
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      this.pollTimer = setInterval(() => {
+        if (socket.destroyed) return;
+        // Never interrupt an exchange already in flight.
+        if (!polled.busy) askAgain('routine poll');
+      }, BT1500_POLL_MS);
+    }
+
     socket.on('data', chunk => {
       bytes += chunk.length;
       if (!firstBytes) firstBytes = Buffer.from(chunk.subarray(0, 400));
@@ -1052,7 +1271,7 @@ class Link {
         // it spends waiting.
         answer(replies);
         for (const message of messages) { taken++; this.ingest(message, peer); }
-        if (messages.length) closeWhenQuiet();
+        if (messages.length) { closeWhenQuiet(); askAgain('a report was collected'); }
       } catch (error) {
         this.setState('error', `Reading from ${peer}: ${(error as Error).message}`, (error as Error).message);
       }
@@ -1061,6 +1280,7 @@ class Link {
 
     socket.on('close', () => {
       if (hangUp) { clearTimeout(hangUp); hangUp = null; }
+      if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
       this.clearIdle(socket);
       // Whatever arrived but was never terminated is still a record. A link
       // that drops mid-transmission should not silently lose the sample.
@@ -1491,6 +1711,7 @@ class Link {
     this.stopping = true;
     this.opened = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.tapTimer) { clearInterval(this.tapTimer); this.tapTimer = null; }
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();
