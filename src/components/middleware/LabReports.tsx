@@ -567,6 +567,10 @@ function Design({ template, reference, mayDesign, busy, setBusy, onError, onNoti
             <Switch label="Crest or logo" checked={draft.showLogo} onChange={v => set({ showLogo: v })} />
             <Switch label="Flag legend" checked={draft.showFlagLegend} onChange={v => set({ showFlagLegend: v })} />
             <Switch label="Analyser messages" checked={draft.showInstrumentMessages} onChange={v => set({ showInstrumentMessages: v })} />
+            {/* Only ever draws a channel that carried a picture, so switching
+                it on costs nothing on an analyser that sends none. */}
+            <Switch label="Scattergrams and histograms" checked={draft.showScattergrams}
+              onChange={v => set({ showScattergrams: v })} />
             <Switch label="Signature block" checked={draft.showSignature} onChange={v => set({ showSignature: v })} />
             <Switch label="Delivery state" checked={draft.showDeliveryState} onChange={v => set({ showDeliveryState: v })} />
             <Switch label="Say who a range was set for" checked={draft.showRangePopulation}

@@ -90,6 +90,13 @@ export interface ReportTemplate {
   showLogo: boolean;
   showFlagLegend: boolean;
   showInstrumentMessages: boolean;
+  /**
+   * Print the analyser's scattergrams and histograms.
+   *
+   * Only ever draws a channel that actually carried a picture, so switching it
+   * on costs nothing on an analyser that is not configured to transmit them.
+   */
+  showScattergrams: boolean;
   showSignature: boolean;
   signatureLine: string;
   showDeliveryState: boolean;
@@ -128,6 +135,7 @@ export const DEFAULT_TEMPLATE: ReportTemplate = {
   showLogo: true,
   showFlagLegend: true,
   showInstrumentMessages: true,
+  showScattergrams: false,
   showSignature: true,
   signatureLine: 'Authorised by',
   showDeliveryState: false,
@@ -170,20 +178,44 @@ export function flagMeaning(flag: unknown): FlagMeaning {
 }
 
 /**
+ * A limit, or nothing at all.
+ *
+ * `Number(null)` is 0, and 0 is a perfectly finite number — so a parameter
+ * with no upper limit on file was read as having an upper limit of zero, and
+ * every value above zero was therefore above range. Nothing showed it while
+ * the printed flag came from the analyser; the moment the flag was derived
+ * from the range instead, every unranged parameter on the report would have
+ * been marked high. An absent limit has to be absent, not zero.
+ */
+function limit(value: unknown): number | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Is this value outside the range the laboratory holds for it?
  *
- * Used only to EXPLAIN a printed value, never to flag one the analyser did not.
- * A laboratory's reference interval and an analyser's flag can legitimately
- * disagree — different population, different method — and this report shows
- * both rather than overruling either.
+ * This decides the flag the report prints, so that the flag and the range
+ * beside it can never contradict each other. Where the laboratory holds no
+ * range, it returns null and the report says nothing — an honest blank rather
+ * than a judgement nothing made.
  */
 export function outsideRange(value: unknown, lower: unknown, upper: unknown): 'high' | 'low' | null {
-  const v = Number(String(value ?? '').replace(/[^\d.+-]/g, ''));
-  if (!Number.isFinite(v)) return null;
-  const lo = Number(lower);
-  const hi = Number(upper);
-  if (Number.isFinite(hi) && v > hi) return 'high';
-  if (Number.isFinite(lo) && v < lo) return 'low';
+  /*
+   * A result with no digits in it is not a number, and must not be compared
+   * as one. "****" and "ERROR" strip to an empty string, which Number() reads
+   * as zero — and zero is below every lower limit, so an analyser's error
+   * marker was being reported as a low result.
+   */
+  const v = limit(String(value ?? '').replace(/[^\d.+-]/g, ''));
+  if (v === null) return null;
+  const lo = limit(lower);
+  const hi = limit(upper);
+  if (hi !== null && v > hi) return 'high';
+  if (lo !== null && v < lo) return 'low';
   return null;
 }
 

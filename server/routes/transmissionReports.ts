@@ -172,6 +172,7 @@ export function transmissionReportRoutes() {
       showLogo: body?.showLogo === false ? 0 : 1,
       showFlagLegend: body?.showFlagLegend === false ? 0 : 1,
       showInstrumentMessages: body?.showInstrumentMessages === false ? 0 : 1,
+      showScattergrams: body?.showScattergrams === true ? 1 : 0,
       showSignature: body?.showSignature === false ? 0 : 1,
       signatureLine: text(body?.signatureLine, 80) ?? 'Authorised by',
       showDeliveryState: body?.showDeliveryState ? 1 : 0,
@@ -192,26 +193,28 @@ export function transmissionReportRoutes() {
       db.prepare(`UPDATE rf_report_templates SET name = ?, organisation = ?, facility = ?, address_line = ?,
           contact_line = ?, report_title = ?, footer_text = ?, logo_data_uri = ?, accent_colour = ?, text_colour = ?,
           header_style = ?, font = ?, paper = ?, density = ?, margin_mm = ?, columns = ?, show_logo = ?,
-          show_flag_legend = ?, show_instrument_messages = ?, show_signature = ?, signature_line = ?,
+          show_flag_legend = ?, show_instrument_messages = ?, show_scattergrams = ?, show_signature = ?, signature_line = ?,
           show_delivery_state = ?, show_range_population = ?, watermark = ?, disclaimer = ?,
           updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(payload.name, payload.organisation, payload.facility, payload.addressLine, payload.contactLine,
           payload.reportTitle, payload.footerText, payload.logoDataUri, payload.accentColour, payload.textColour,
           payload.headerStyle, payload.font, payload.paper, payload.density, payload.marginMm, payload.columns,
-          payload.showLogo, payload.showFlagLegend, payload.showInstrumentMessages, payload.showSignature,
+          payload.showLogo, payload.showFlagLegend, payload.showInstrumentMessages, payload.showScattergrams,
+          payload.showSignature,
           payload.signatureLine, payload.showDeliveryState, payload.showRangePopulation, payload.watermark,
           payload.disclaimer, req.user!.id, existing.id);
     } else {
       db.prepare(`INSERT INTO rf_report_templates
           (template_code, name, organisation, facility, address_line, contact_line, report_title, footer_text,
            logo_data_uri, accent_colour, text_colour, header_style, font, paper, density, margin_mm, columns,
-           show_logo, show_flag_legend, show_instrument_messages, show_signature, signature_line,
+           show_logo, show_flag_legend, show_instrument_messages, show_scattergrams, show_signature, signature_line,
            show_delivery_state, show_range_population, watermark, disclaimer, is_default, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(code, payload.name, payload.organisation, payload.facility, payload.addressLine, payload.contactLine,
           payload.reportTitle, payload.footerText, payload.logoDataUri, payload.accentColour, payload.textColour,
           payload.headerStyle, payload.font, payload.paper, payload.density, payload.marginMm, payload.columns,
-          payload.showLogo, payload.showFlagLegend, payload.showInstrumentMessages, payload.showSignature,
+          payload.showLogo, payload.showFlagLegend, payload.showInstrumentMessages, payload.showScattergrams,
+          payload.showSignature,
           payload.signatureLine, payload.showDeliveryState, payload.showRangePopulation, payload.watermark,
           payload.disclaimer, code === 'DEFAULT' ? 1 : 0, req.user!.id);
     }
