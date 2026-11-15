@@ -80,6 +80,7 @@ import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { installModelRegistry } from './services/instrumentModels.js';
+import { seedShippedIntervals } from './services/resultFiller/referenceRanges.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
 import { requireMiddlewareOn } from './services/middlewareSwitch.js';
 import { seedDefaults } from './db/seed.js';
@@ -117,6 +118,17 @@ export function createApiServer() {
    * parameter gets the same answer, including the bridge.
    */
   installModelRegistry(getDb);
+  /*
+   * The reference intervals this system ships with, loaded once so a report
+   * has ranges the first time it is printed. It writes only where the
+   * laboratory holds nothing for that exact population, and never runs twice.
+   */
+  try {
+    const seeded = seedShippedIntervals(getDb(), null);
+    if (seeded.added) console.log(`[boot] ${seeded.added} reference interval(s) loaded; review them before releasing a report on them`);
+  } catch (error) {
+    console.warn('[boot] reference intervals were not loaded', (error as Error).message);
+  }
   const app = express();
   // Microsoft Office's WebDAV handoff mounts FIRST, ahead of CORS and the JSON
   // body parser. Word speaks its own dialect here — OPTIONS to discover the

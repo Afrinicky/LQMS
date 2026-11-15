@@ -34,6 +34,7 @@ import {
 import { rangeKey } from './resultFiller/referenceRanges.js';
 import { demographicsOf, type Demographics } from './resultFiller/demographics.js';
 import { readingsOf } from './resultFiller/pending.js';
+import { splitReferenceRange } from './instrumentBridge/protocols.js';
 import {
   KNOWN_GRAPHICS, MESSAGE_GROUP_LABELS, messageGroup, messageText, messageWasRaised,
   readingKind, type MessageGroup,
@@ -280,8 +281,25 @@ export function collectReport(db: DB, id: number): ReportData | null {
     // found for a result that arrived as Haemoglobin.
     const candidates = index.get(rangeKey(reading.analyte)) ?? index.get(rangeKey(reading.code)) ?? [];
     const reference = pickRange(candidates, patient);
-    const low = reference?.low ?? null;
-    const high = reference?.high ?? null;
+
+    /*
+     * Which range this result is read against, and why.
+     *
+     * The laboratory's own intervals are banded by age, so a transmission that
+     * carried no date of birth cannot be read against any of them — a band
+     * that excludes the patient is not an approximation, and one that ignores
+     * age is a different clinical statement. In that case the analyser's own
+     * transmitted range is the only range anybody has, so it is used and the
+     * report says so. Where the age IS known, the laboratory's interval is the
+     * one that belongs on its own report, and the analyser's is the fallback
+     * for a parameter the laboratory has not set one for.
+     */
+    const sent = splitReferenceRange(reading.referenceRange);
+    const sentRange = (sent.low !== null || sent.high !== null) ? sent : null;
+    const ageKnown = patient.ageDays != null;
+    const useSent = sentRange !== null && (ageKnown ? reference === null : true);
+    const low = useSent ? sentRange.low : (reference?.low ?? null);
+    const high = useSent ? sentRange.high : (reference?.high ?? null);
     const outside = outsideRange(reading.value, low, high);
     return {
       code: reading.code,
@@ -297,10 +315,18 @@ export function collectReport(db: DB, id: number): ReportData | null {
       analyserFlag: reading.flag,
       referenceLow: low,
       referenceHigh: high,
-      referenceText: reference?.textValue ?? null,
-      referencePopulation: reference && (reference.sex !== 'any' || reference.ageLabel)
-        ? [reference.sex !== 'any' ? reference.sex : '', reference.ageLabel ?? ''].filter(Boolean).join(' · ')
-        : null,
+      referenceText: useSent ? null : (reference?.textValue ?? null),
+      /*
+       * Who the range belongs to. A range taken from the analyser is marked as
+       * such, because a reader comparing this report with another one from the
+       * same laboratory is entitled to know that this result was not read
+       * against the laboratory's own interval.
+       */
+      referencePopulation: useSent
+        ? 'as transmitted by the analyser'
+        : reference && (reference.sex !== 'any' || reference.ageLabel)
+          ? [reference.sex !== 'any' ? reference.sex : '', reference.ageLabel ?? ''].filter(Boolean).join(' · ')
+          : null,
       outside,
     };
   });
