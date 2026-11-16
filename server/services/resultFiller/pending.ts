@@ -34,6 +34,8 @@ export interface Reading {
   value: string;
   unit: string | null;
   flag: string | null;
+  /** The reference range the analyser transmitted, verbatim, where it sent one. */
+  referenceRange?: string | null;
 }
 
 export interface Transmission {
@@ -102,6 +104,9 @@ export function readingsOf(row: any): Reading[] {
         value: String(value?.value ?? '').trim(),
         unit: value?.unit ? String(value.unit) : null,
         flag: value?.flag ? String(value.flag) : null,
+        // What the analyser said the range was. Used only where this
+        // laboratory cannot apply one of its own — see the report.
+        referenceRange: value?.referenceRange ? String(value.referenceRange) : null,
       } as Reading;
     })
     .filter((r): r is Reading => Boolean(r));

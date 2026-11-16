@@ -34,6 +34,11 @@ import {
 import { rangeKey } from './resultFiller/referenceRanges.js';
 import { demographicsOf, type Demographics } from './resultFiller/demographics.js';
 import { readingsOf } from './resultFiller/pending.js';
+import { splitReferenceRange } from './instrumentBridge/protocols.js';
+import {
+  KNOWN_GRAPHICS, MESSAGE_GROUP_LABELS, messageGroup, messageText, messageWasRaised,
+  readingKind, type MessageGroup,
+} from '../../shared/constants/analyserFlags.js';
 
 type DB = any;
 
@@ -45,7 +50,18 @@ export interface ReportParameter {
   analyte: string;
   value: string;
   unit: string | null;
+  /**
+   * The flag this report prints, derived from the range printed beside it.
+   *
+   * It used to be the analyser's own mark, which produced a report that
+   * contradicted itself: a haematocrit of 40.4 arrived flagged N, because the
+   * instrument holds 37-47, and was printed beside this laboratory's 42-52,
+   * where it is plainly low. Two honest numbers, one impossible document. The
+   * flag now follows the range on the page, so the two can never disagree.
+   */
   flag: string | null;
+  /** What the instrument itself marked it, kept on the record, not printed. */
+  analyserFlag: string | null;
   referenceLow: string | null;
   referenceHigh: string | null;
   referenceText: string | null;
@@ -73,6 +89,14 @@ export interface ReportData {
   parameters: ReportParameter[];
   /** The analyser's interpretive messages, as transmitted. */
   instrumentMessages: string[];
+  /**
+   * The interpretive messages the analyser actually raised, grouped as its own
+   * printout groups them. These are not measurements and are never printed as
+   * though they were: see shared/constants/analyserFlags.ts.
+   */
+  findings: Array<{ group: MessageGroup; label: string; text: string }>;
+  /** Scattergram and histogram channels this transmission named. */
+  graphics: Array<{ code: string; label: string; image: string | null }>;
 }
 
 const ROW_SQL = `SELECT m.id, m.sample_id, m.lot_number, m.kind, m.received_at, m.instrument_run_at,
@@ -173,6 +197,33 @@ function interpretiveMessages(demographics: Demographics, raw: string | null): s
   return found.filter(line => line.length > 1).slice(0, 16);
 }
 
+/**
+ * A picture, if the analyser sent one with the channel name.
+ *
+ * Sysmex transmits a scattergram as image data where it is configured to
+ * transmit one at all, and sends only the channel name where it is not. Both
+ * are normal, so this returns null rather than treating an absent picture as a
+ * fault — and accepts only what is already an image, because a report that
+ * renders arbitrary transmitted text as a source URL is a report that can be
+ * made to fetch whatever a sender likes.
+ */
+function imageFrom(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  if (/^data:image\/(png|jpeg|jpg|gif|bmp|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(text)) {
+    return text.replace(/\s+/g, '');
+  }
+  // Bare base64, which is how some analysers send it. PNG, JPEG and GIF are
+  // recognised by the bytes their encodings always begin with.
+  if (/^[A-Za-z0-9+/=\s]{64,}$/.test(text)) {
+    const flat = text.replace(/\s+/g, '');
+    if (flat.startsWith('iVBORw0KGgo')) return `data:image/png;base64,${flat}`;
+    if (flat.startsWith('/9j/')) return `data:image/jpeg;base64,${flat}`;
+    if (flat.startsWith('R0lGOD')) return `data:image/gif;base64,${flat}`;
+  }
+  return null;
+}
+
 export function collectReport(db: DB, id: number): ReportData | null {
   const row = db.prepare(`${ROW_SQL} WHERE m.id = ?`).get(id) as any;
   if (!row) return null;
@@ -183,27 +234,100 @@ export function collectReport(db: DB, id: number): ReportData | null {
     sex: demographics.sex,
     ageDays: ageInDays(demographics.birthDate, row.instrument_run_at ?? row.received_at),
   };
-  const parameters: ReportParameter[] = readingsOf(row).map(reading => {
+  /*
+   * One channel, three kinds of thing.
+   *
+   * An analyser sends measurements, interpretive messages and the names of its
+   * graphics down the same wire. Printing all three in a table headed RESULT
+   * put "Iron_Deficiency? 80" on a patient report beside a reference range,
+   * where 80 reads as a measured quantity and is nothing of the sort. They are
+   * separated here, once, so everything downstream gets the right kind.
+   */
+  const readings = readingsOf(row);
+  const findings: ReportData['findings'] = [];
+  const graphics: ReportData['graphics'] = [];
+  const measurements: typeof readings = [];
+  for (const reading of readings) {
+    const kind = readingKind(reading.code, reading.analyte);
+    if (kind === 'message') {
+      // Only what the analyser actually suspected. The XN transmits its whole
+      // panel every run with a zero against everything it did not.
+      if (messageWasRaised(reading.value)) {
+        const group = messageGroup(reading.code, reading.analyte);
+        findings.push({ group, label: MESSAGE_GROUP_LABELS[group], text: messageText(reading.code, reading.analyte) });
+      }
+      continue;
+    }
+    if (kind === 'graphic') {
+      /*
+       * The channel is recorded whether or not a picture came with it. An
+       * analyser that is not configured to transmit graphics still names them,
+       * and the report leaves the space out rather than printing an empty
+       * frame — but the name is what tells a laboratory the channel exists.
+       */
+      graphics.push({
+        code: reading.code,
+        label: messageText(reading.code, reading.analyte),
+        image: imageFrom(reading.value),
+      });
+      continue;
+    }
+    measurements.push(reading);
+  }
+
+  const parameters: ReportParameter[] = measurements.map(reading => {
     // Looked up by the analyser's own mnemonic, by this system's name for it,
     // and by what the dictionary calls it — so a range set once under HGB is
     // found for a result that arrived as Haemoglobin.
     const candidates = index.get(rangeKey(reading.analyte)) ?? index.get(rangeKey(reading.code)) ?? [];
     const reference = pickRange(candidates, patient);
-    const low = reference?.low ?? null;
-    const high = reference?.high ?? null;
+
+    /*
+     * Which range this result is read against, and why.
+     *
+     * The laboratory's own intervals are banded by age, so a transmission that
+     * carried no date of birth cannot be read against any of them — a band
+     * that excludes the patient is not an approximation, and one that ignores
+     * age is a different clinical statement. In that case the analyser's own
+     * transmitted range is the only range anybody has, so it is used and the
+     * report says so. Where the age IS known, the laboratory's interval is the
+     * one that belongs on its own report, and the analyser's is the fallback
+     * for a parameter the laboratory has not set one for.
+     */
+    const sent = splitReferenceRange(reading.referenceRange);
+    const sentRange = (sent.low !== null || sent.high !== null) ? sent : null;
+    const ageKnown = patient.ageDays != null;
+    const useSent = sentRange !== null && (ageKnown ? reference === null : true);
+    const low = useSent ? sentRange.low : (reference?.low ?? null);
+    const high = useSent ? sentRange.high : (reference?.high ?? null);
+    const outside = outsideRange(reading.value, low, high);
     return {
       code: reading.code,
       analyte: reading.analyte,
       value: reading.value,
       unit: reading.unit,
-      flag: reading.flag,
+      /*
+       * H or L against the range on this page, and nothing where there is no
+       * range to judge against — a blank is honest, an N would claim the
+       * result had been checked and found normal when nothing checked it.
+       */
+      flag: outside === 'high' ? 'H' : outside === 'low' ? 'L' : (low || high ? 'N' : null),
+      analyserFlag: reading.flag,
       referenceLow: low,
       referenceHigh: high,
-      referenceText: reference?.textValue ?? null,
-      referencePopulation: reference && (reference.sex !== 'any' || reference.ageLabel)
-        ? [reference.sex !== 'any' ? reference.sex : '', reference.ageLabel ?? ''].filter(Boolean).join(' · ')
-        : null,
-      outside: outsideRange(reading.value, low, high),
+      referenceText: useSent ? null : (reference?.textValue ?? null),
+      /*
+       * Who the range belongs to. A range taken from the analyser is marked as
+       * such, because a reader comparing this report with another one from the
+       * same laboratory is entitled to know that this result was not read
+       * against the laboratory's own interval.
+       */
+      referencePopulation: useSent
+        ? 'as transmitted by the analyser'
+        : reference && (reference.sex !== 'any' || reference.ageLabel)
+          ? [reference.sex !== 'any' ? reference.sex : '', reference.ageLabel ?? ''].filter(Boolean).join(' · ')
+          : null,
+      outside,
     };
   });
 
@@ -234,6 +358,8 @@ export function collectReport(db: DB, id: number): ReportData | null {
     demographics,
     parameters,
     instrumentMessages: interpretiveMessages(demographics, row.raw_message),
+    findings,
+    graphics,
   };
 }
 
@@ -281,6 +407,7 @@ export function loadTemplate(db: DB, code?: string | null): ReportTemplate {
     showLogo: Number(row.show_logo) === 1,
     showFlagLegend: Number(row.show_flag_legend) === 1,
     showInstrumentMessages: Number(row.show_instrument_messages) === 1,
+    showScattergrams: Number(row.show_scattergrams) === 1,
     showSignature: Number(row.show_signature) === 1,
     signatureLine: row.signature_line || DEFAULT_TEMPLATE.signatureLine,
     showDeliveryState: Number(row.show_delivery_state) === 1,
@@ -390,10 +517,19 @@ function parameterTable(data: ReportData, template: ReportTemplate): string {
     const meaning = flagMeaning(parameter.flag);
     const tone = meaning === 'none' ? '' : ` t-${meaning}`;
     const cell = (column: ReportColumn): string => {
-      if (column === 'parameter') return `<td class="c-parameter">${esc(parameter.analyte)}${parameter.analyte !== parameter.code ? `<span class="code">${esc(parameter.code)}</span>` : ''}</td>`;
+      /*
+       * One name per row.
+       *
+       * This printed the mapped name and the analyser's mnemonic side by side
+       * — "Haemoglobin HGB", "Neutrophils % NEUT%" — which reads as two
+       * parameters sharing a line. A laboratory report names a parameter the
+       * way the bench and the clinician both already say it, which is the
+       * abbreviation, so that is what is printed and the long name is dropped.
+       */
+      if (column === 'parameter') return `<td class="c-parameter">${esc(parameter.code || parameter.analyte)}</td>`;
       if (column === 'result') return `<td class="c-result${tone}">${show(parameter.value)}</td>`;
-      // The flag is printed as the analyser sent it, including the one that
-      // means "normal" — it is part of what was received. It is just not
+      // The flag now follows the range printed beside it, so a reader can
+      // check one against the other and always find them agreeing. "N" is not
       // shouted: a column of bold marks on an unremarkable count is how a
       // reader stops seeing the one that matters.
       if (column === 'flag') return `<td class="c-flag${tone || ' t-none'}">${parameter.flag ? esc(parameter.flag) : ''}</td>`;
@@ -410,11 +546,49 @@ function parameterTable(data: ReportData, template: ReportTemplate): string {
   return `<table class="results"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-function messagesBlock(data: ReportData, template: ReportTemplate): string {
-  if (!template.showInstrumentMessages || !data.instrumentMessages.length) return '';
-  return `<section class="messages">
-  <h4>Analyser messages</h4>
-  <ul>${data.instrumentMessages.map(line => `<li>${esc(line)}</li>`).join('')}</ul>
+/**
+ * What the analyser suspected, laid out the way its own printout lays it out.
+ *
+ * These are interpretive messages, not results: the analyser is saying what it
+ * thinks about the sample. They used to be printed as parameters, in a table
+ * headed RESULT with a reference range column beside them, which turned
+ * "Iron_Deficiency?" into something that looked measured. Here they are
+ * sentences, grouped by the part of the count they concern, with no numbers
+ * pretending to be concentrations.
+ */
+function findingsBlock(data: ReportData, template: ReportTemplate): string {
+  if (!template.showInstrumentMessages) return '';
+  const groups: MessageGroup[] = ['wbc', 'rbc', 'plt', 'other'];
+  const blocks = groups.map(group => {
+    const lines = data.findings.filter(finding => finding.group === group);
+    if (!lines.length) return '';
+    return `<div class="ipm"><h5>${esc(MESSAGE_GROUP_LABELS[group])} IP message</h5>`
+      + `<ul>${lines.map(line => `<li>${esc(line.text)}</li>`).join('')}</ul></div>`;
+  }).filter(Boolean);
+
+  // Whatever the analyser said about the sample in words of its own, which is
+  // read out of the transmission text rather than from a coded channel.
+  const spoken = data.instrumentMessages.length
+    ? `<div class="ipm"><h5>Analyser messages</h5><ul>${data.instrumentMessages.map(line => `<li>${esc(line)}</li>`).join('')}</ul></div>`
+    : '';
+  if (!blocks.length && !spoken) return '';
+  return `<section class="messages"><div class="ipm-row">${blocks.join('')}${spoken}</div></section>`;
+}
+
+/**
+ * The scattergrams and histograms, where the analyser sent them.
+ *
+ * The channel names arrive whether or not the pictures do, so a report that
+ * printed a frame per channel would print a row of empty boxes on every
+ * transmission from an analyser not configured to send graphics. Only a
+ * channel that actually carried an image is drawn.
+ */
+function graphicsBlock(data: ReportData, template: ReportTemplate): string {
+  if (!template.showScattergrams) return '';
+  const drawn = data.graphics.filter(graphic => graphic.image);
+  if (!drawn.length) return '';
+  return `<section class="graphics"><h4>Scattergrams and distributions</h4>
+  <div class="graphic-grid">${drawn.map(graphic => `<figure><img src="${esc(graphic.image ?? '')}" alt="${esc(graphic.label)}" /><figcaption>${esc(graphic.label)}</figcaption></figure>`).join('')}</div>
 </section>`;
 }
 
@@ -425,9 +599,9 @@ function legendBlock(data: ReportData, template: ReportTemplate): string {
     if (!parameter.flag) continue;
     const meaning = flagMeaning(parameter.flag);
     if (meaning === 'none') continue;
-    used.set(parameter.flag, meaning === 'high' ? 'Above the analyser’s range'
-      : meaning === 'low' ? 'Below the analyser’s range'
-      : meaning === 'critical' ? 'Critical' : 'Flagged by the analyser');
+    used.set(parameter.flag, meaning === 'high' ? 'Above the reference range'
+      : meaning === 'low' ? 'Below the reference range'
+      : meaning === 'critical' ? 'Critical' : 'Outside the reference range');
   }
   if (!used.size) return '';
   return `<p class="legend">${Array.from(used.entries()).map(([flag, meaning]) => `<span><b>${esc(flag)}</b> ${esc(meaning)}</span>`).join('')}</p>`;
@@ -460,7 +634,8 @@ export function renderReportPage(data: ReportData, template: ReportTemplate): st
   ${identityBlock(data)}
   ${parameterTable(data, template)}
   ${legendBlock(data, template)}
-  ${messagesBlock(data, template)}
+  ${findingsBlock(data, template)}
+  ${graphicsBlock(data, template)}
   ${template.disclaimer ? `<p class="disclaimer">${esc(template.disclaimer)}</p>` : ''}
   ${signatureBlock(template)}
   ${provenanceBlock(data, template)}
@@ -537,6 +712,25 @@ td.t-abnormal { color: #b45309; }
 .messages { margin-top: 10px; border-top: 1px solid #d1d5db; padding-top: 7px; }
 .messages h4 { margin: 0 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #4b5563; }
 .messages ul { margin: 0; padding-left: 16px; font-size: 10.5px; }
+/* The interpretive messages, laid out across the foot of the report the way
+   the analyser's own printout lays them out: one column per part of the
+   count, each headed as the instrument heads it. */
+.ipm-row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+.ipm { min-width: 150px; flex: 1 1 150px; }
+.ipm h5 {
+  margin: 0 0 3px; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: ${template.accentColour};
+}
+.ipm ul { margin: 0; padding-left: 14px; font-size: 10.5px; }
+.ipm li { margin: 0 0 1px; }
+/* Scattergrams, where the analyser transmits them. A fixed frame so a run of
+   them lines up, and page-break-inside so one is never cut in half. */
+.graphics { margin-top: 10px; border-top: 1px solid #d1d5db; padding-top: 7px; }
+.graphics h4 { margin: 0 0 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #4b5563; }
+.graphic-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.graphic-grid figure { margin: 0; width: 118px; page-break-inside: avoid; break-inside: avoid; }
+.graphic-grid img { width: 100%; height: 108px; object-fit: contain; border: 1px solid #d1d5db; background: #fff; }
+.graphic-grid figcaption { margin-top: 2px; font-size: 9px; text-align: center; color: #4b5563; }
 .disclaimer { margin-top: 9px; font-size: 9.5px; color: #4b5563; }
 .sign { display: flex; gap: 40px; margin-top: ${compact ? 18 : 28}px; }
 .sign > div { flex: 1; }

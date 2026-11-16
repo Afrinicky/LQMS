@@ -42,6 +42,7 @@ import type {
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 import RiskCriteriaSettings from './settings/RiskCriteriaSettings';
+import ConnectivityConsole from '../components/system/ConnectivityConsole';
 import { UNIT_KINDS, UNIT_KIND_LABELS, ADMIN_UNIT_SERVICES } from '../../shared/constants/labUnits';
 import PeopleAccessTabs from './settings/PeopleAccess';
 import Appointments, { AppointmentPointer } from '../components/settings/Appointments';
@@ -3438,6 +3439,10 @@ export function ConnectivityMode() {
     </div>
 
     {section === 'host' && <HostCard info={info} canEdit={canEdit} onChanged={load} />}
+    {/* Everything a facility configures about how it is reached, and the
+        diagnosis for when it is not. Below the summary card, because the
+        summary answers "what is it now" and this answers "what should it be". */}
+    {section === 'host' && <ConnectivityConsole info={info} canEdit={canEdit} onChanged={load} />}
     {section === 'tailscale' && <TailscaleCard info={info} canEdit={canEdit} onChanged={load} />}
     {section === 'staff' && <RemoteStaffAccess />}
     {section === 'devices' && <Devices />}

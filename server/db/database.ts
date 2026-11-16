@@ -8908,6 +8908,11 @@ CREATE TABLE IF NOT EXISTS rf_report_templates (
   show_logo INTEGER NOT NULL DEFAULT 1,
   show_flag_legend INTEGER NOT NULL DEFAULT 1,
   show_instrument_messages INTEGER NOT NULL DEFAULT 1,
+  -- Print the analyser's scattergrams and histograms. Off by default: an
+  -- analyser that is not configured to transmit pictures still names the
+  -- channels, and a report that drew a frame per channel would print a row of
+  -- empty boxes on every transmission.
+  show_scattergrams INTEGER NOT NULL DEFAULT 0,
   show_signature INTEGER NOT NULL DEFAULT 1,
   signature_line TEXT,
   show_delivery_state INTEGER NOT NULL DEFAULT 0,

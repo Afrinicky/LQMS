@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileSpreadsheet, FileText, Image, Loader2, Plus, Printer, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, Image, Loader2, Pencil, Plus, Printer, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { api, apiRead, errorText, API_BASE, getToken } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { openPrintable } from '../../services/xlsx';
@@ -261,10 +261,21 @@ function ReferenceRanges({ reference, mayEdit, busy, setBusy, onError, onNotice 
   const [rows, setRows] = useState<RangeRow[]>([]);
   const [inherited, setInherited] = useState<Array<{ analyte: string; population: string | null; lower_limit: string | null; upper_limit: string | null; unit: string | null }>>([]);
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState({
+  /*
+   * The row being changed, or null when the form is adding a new one.
+   *
+   * The register could only be added to and deleted from: correcting a single
+   * figure meant deleting the row and typing all of it again, which is how a
+   * laboratory ends up with a parameter that has no range at all because
+   * somebody was interrupted between the two halves of that. The server has
+   * always been able to update one; nothing ever asked it to.
+   */
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const EMPTY_RANGE = {
     analyte: '', sex: 'any', low: '', high: '', textValue: '', unit: '',
     ageLabel: '', fromValue: '', fromUnit: 'years' as AgeUnit, toValue: '', toUnit: 'years' as AgeUnit, note: '',
-  });
+  };
+  const [form, setForm] = useState(EMPTY_RANGE);
 
   const load = useCallback(async () => {
     try {
@@ -277,23 +288,56 @@ function ReferenceRanges({ reference, mayEdit, busy, setBusy, onError, onNotice 
 
   useEffect(() => { void load(); }, [load]);
 
-  async function add() {
+  async function save() {
     if (!form.analyte.trim()) { onError('Say which parameter the range is for.'); return; }
     setBusy('range'); onError(null);
+    const body = JSON.stringify({
+      ...form,
+      ageMinDays: form.fromValue === '' ? null : ageToDays(Number(form.fromValue), form.fromUnit),
+      ageMaxDays: form.toValue === '' ? null : ageToDays(Number(form.toValue), form.toUnit),
+    });
     try {
-      await api('/transmission-reports/ranges', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...form,
-          ageMinDays: form.fromValue === '' ? null : ageToDays(Number(form.fromValue), form.fromUnit),
-          ageMaxDays: form.toValue === '' ? null : ageToDays(Number(form.toValue), form.toUnit),
-        }),
-      });
-      onNotice(`A range for ${form.analyte} was added.`);
-      setForm(f => ({ ...f, low: '', high: '', textValue: '', ageLabel: '', fromValue: '', toValue: '', note: '' }));
+      if (editingId !== null) {
+        await api(`/transmission-reports/ranges/${editingId}`, { method: 'PUT', body });
+        onNotice(`The ${form.analyte} range was changed. Reports printed from now on use it.`);
+        setEditingId(null);
+        setForm(EMPTY_RANGE);
+      } else {
+        await api('/transmission-reports/ranges', { method: 'POST', body });
+        onNotice(`A range for ${form.analyte} was added.`);
+        // The parameter is kept so several bands can be entered one after
+        // another, which is how an age-banded parameter is actually typed in.
+        setForm(f => ({ ...f, low: '', high: '', textValue: '', ageLabel: '', fromValue: '', toValue: '', note: '' }));
+      }
       await load();
     } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
+  }
+
+  /**
+   * Put a row into the form to be changed.
+   *
+   * The age band comes back in days rather than in the unit somebody first
+   * typed, because days is what was stored and converting back to years would
+   * turn a band of 2191 days into "6 years" and silently move its edge.
+   */
+  function edit(row: RangeRow) {
+    setEditingId(row.id);
+    setForm({
+      analyte: row.analyte ?? '',
+      sex: row.sex ?? 'any',
+      low: row.low ?? '',
+      high: row.high ?? '',
+      textValue: row.text_value ?? '',
+      unit: row.unit ?? '',
+      ageLabel: row.age_label ?? '',
+      fromValue: row.age_min_days == null ? '' : String(row.age_min_days),
+      fromUnit: 'days',
+      toValue: row.age_max_days == null ? '' : String(row.age_max_days),
+      toUnit: 'days',
+      note: row.note ?? '',
+    });
+    onError(null);
   }
 
   async function remove(row: RangeRow) {
@@ -321,7 +365,9 @@ function ReferenceRanges({ reference, mayEdit, busy, setBusy, onError, onNotice 
     <>
       <Panel
         title="Reference ranges"
-        subtitle="What a printed result is read against. A parameter with no range prints a dash — never a number nobody decided on."
+        subtitle={editingId !== null
+          ? 'Changing a range. What is saved applies to every report printed from now on; reports already issued are untouched.'
+          : 'What a printed result is read against, chosen by the patient\u2019s age and sex. A parameter with no range prints a dash \u2014 never a number nobody decided on.'}
         actions={(
           <>
             <Field label="Find" value={search} onValue={setSearch} placeholder="HGB, sodium" />
@@ -366,9 +412,15 @@ function ReferenceRanges({ reference, mayEdit, busy, setBusy, onError, onNotice 
             <Field label="What this band is called" value={form.ageLabel} onValue={v => setForm(f => ({ ...f, ageLabel: v }))} placeholder="Newborn" />
             <Field label="Note" value={form.note} onValue={v => setForm(f => ({ ...f, note: v }))} wide />
             <div className="mw-actions">
-              <button className="btn" onClick={() => void add()} disabled={busy === 'range'}>
-                {busy === 'range' ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} Add this range
+              <button className="btn" onClick={() => void save()} disabled={busy === 'range'}>
+                {busy === 'range' ? <Loader2 size={13} className="spin" /> : <Plus size={13} />}
+                {editingId !== null ? ' Save this range' : ' Add this range'}
               </button>
+              {editingId !== null && (
+                <button className="btn ghost" onClick={() => { setEditingId(null); setForm(EMPTY_RANGE); }}>
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -397,7 +449,11 @@ function ReferenceRanges({ reference, mayEdit, busy, setBusy, onError, onNotice 
                   <td>{row.unit ?? ''}{row.text_value && <span className="mw-sub">{row.text_value}</span>}</td>
                   <td><span className="mw-sub">{row.source ?? '—'}</span></td>
                   <td className="mw-row-actions">
-                    {mayEdit && <button className="btn ghost" onClick={() => void remove(row)} disabled={busy === `r${row.id}`}><Trash2 size={12} /></button>}
+                    {mayEdit && (
+                      <button className="btn ghost" title="Change this range" onClick={() => edit(row)}
+                        disabled={busy === `r${row.id}`}><Pencil size={12} /></button>
+                    )}
+                    {mayEdit && <button className="btn ghost" title="Remove this range" onClick={() => void remove(row)} disabled={busy === `r${row.id}`}><Trash2 size={12} /></button>}
                   </td>
                 </tr>
               ))}
@@ -567,6 +623,10 @@ function Design({ template, reference, mayDesign, busy, setBusy, onError, onNoti
             <Switch label="Crest or logo" checked={draft.showLogo} onChange={v => set({ showLogo: v })} />
             <Switch label="Flag legend" checked={draft.showFlagLegend} onChange={v => set({ showFlagLegend: v })} />
             <Switch label="Analyser messages" checked={draft.showInstrumentMessages} onChange={v => set({ showInstrumentMessages: v })} />
+            {/* Only ever draws a channel that carried a picture, so switching
+                it on costs nothing on an analyser that sends none. */}
+            <Switch label="Scattergrams and histograms" checked={draft.showScattergrams}
+              onChange={v => set({ showScattergrams: v })} />
             <Switch label="Signature block" checked={draft.showSignature} onChange={v => set({ showSignature: v })} />
             <Switch label="Delivery state" checked={draft.showDeliveryState} onChange={v => set({ showDeliveryState: v })} />
             <Switch label="Say who a range was set for" checked={draft.showRangePopulation}

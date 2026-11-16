@@ -78,13 +78,16 @@ import { signatureRoutes } from './routes/signatures.js';
 import { qrRoutes } from './routes/qr.js';
 import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
+import http from 'node:http';
+import https from 'node:https';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { installModelRegistry } from './services/instrumentModels.js';
+import { seedShippedIntervals } from './services/resultFiller/referenceRanges.js';
 import { startBackgroundServices } from './services/backgroundJobs.js';
 import { requireMiddlewareOn } from './services/middlewareSwitch.js';
 import { seedDefaults } from './db/seed.js';
 import { config } from './config/index.js';
-import { resolveBindHost, resolvePort, recordBinding, hostIsLan, networkConfig, importLegacyChoices } from './services/hostBinding.js';
+import { resolveBindHost, resolvePort, recordBinding, hostIsLan, networkConfig, importLegacyChoices, bindHostOrFallback } from './services/hostBinding.js';
 
 /**
  * Resolve the directory that holds the built renderer (dist/index.html).
@@ -117,6 +120,17 @@ export function createApiServer() {
    * parameter gets the same answer, including the bridge.
    */
   installModelRegistry(getDb);
+  /*
+   * The reference intervals this system ships with, loaded once so a report
+   * has ranges the first time it is printed. It writes only where the
+   * laboratory holds nothing for that exact population, and never runs twice.
+   */
+  try {
+    const seeded = seedShippedIntervals(getDb(), null);
+    if (seeded.added) console.log(`[boot] ${seeded.added} reference interval(s) loaded; review them before releasing a report on them`);
+  } catch (error) {
+    console.warn('[boot] reference intervals were not loaded', (error as Error).message);
+  }
   const app = express();
   // Microsoft Office's WebDAV handoff mounts FIRST, ahead of CORS and the JSON
   // body parser. Word speaks its own dialect here — OPTIONS to discover the
@@ -281,11 +295,67 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // One small file in the laboratory's own data folder, read before anything
   // else starts. Nothing about listening depends on the database: a database
   // that is busy for a second must never be able to take the network down.
-  const { host, port, path: settingsFile, problem } = networkConfig();
+  const { port, path: settingsFile, problem, extraPorts, tls } = networkConfig();
   if (problem) console.warn(`[boot] ${problem}`);
-  createApiServer().listen(port, host, () => {
+
+  /*
+   * The address to bind, checked against the interfaces this machine has now.
+   *
+   * An administrator may bind one named adapter, and an address is a fact
+   * about the machine on the day it was chosen. A cable moves or a lease
+   * changes and it is gone — and listen() on an address a machine no longer
+   * has throws, so the laboratory would lose the whole host rather than one
+   * adapter. It falls back to every interface and says so.
+   */
+  const { host, fellBackFrom } = bindHostOrFallback();
+  if (fellBackFrom) {
+    console.warn(`[boot] this host is no longer at ${fellBackFrom}, so it is listening on every interface instead. `
+      + 'Set the address again under Settings, System.');
+  }
+
+  const app = createApiServer();
+
+  /*
+   * https, where the laboratory has supplied a certificate.
+   *
+   * Read here and not earlier so that a certificate which has been moved,
+   * renamed or has expired off the disk cannot stop the host starting: it
+   * falls back to http with the reason on the console, which keeps the
+   * laboratory working while somebody fixes the file.
+   */
+  let listener: { listen: (...args: never[]) => unknown } = app as never;
+  let scheme = 'http';
+  if (tls.enabled) {
+    try {
+      const credentials = { key: fs.readFileSync(tls.keyFile), cert: fs.readFileSync(tls.certFile) };
+      listener = https.createServer(credentials, app) as never;
+      scheme = 'https';
+    } catch (error) {
+      console.warn(`[boot] https was asked for but the certificate could not be read, so this host is on http. ${String(error)}`);
+    }
+  }
+
+  (listener as unknown as { listen: (p: number, h: string, cb: () => void) => void }).listen(port, host, () => {
     recordBinding(host, port, port);
     console.log(`[boot] connectivity read from ${settingsFile}`);
+
+    /*
+     * Any further ports this laboratory asked for. Each is its own listener on
+     * the same application, and one that cannot be taken is reported and
+     * skipped — a second port is a convenience and must never be able to stop
+     * the host coming up on its first.
+     */
+    for (const extra of extraPorts) {
+      try {
+        const another = tls.enabled && scheme === 'https'
+          ? https.createServer({ key: fs.readFileSync(tls.keyFile), cert: fs.readFileSync(tls.certFile) }, app)
+          : http.createServer(app);
+        another.on('error', (error: Error) => console.warn(`[boot] port ${extra} was not taken: ${error.message}`));
+        another.listen(extra, host, () => console.log(`[boot] also answering on ${scheme}://${host}:${extra}/`));
+      } catch (error) {
+        console.warn(`[boot] port ${extra} was not taken: ${String(error)}`);
+      }
+    }
     // A choice made while this lived in the settings table, brought across now
     // that the server is already up and nothing depends on the result.
     try { importLegacyChoices(getDb()); } catch { /* nothing to bring across */ }

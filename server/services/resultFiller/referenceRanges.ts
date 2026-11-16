@@ -9,6 +9,7 @@
  * anybody relies on it.
  */
 import { ageToDays, type RangeSex } from '../../../shared/constants/labReport.js';
+import { REFERENCE_INTERVALS } from '../../../shared/constants/referenceIntervals.js';
 import { analyteKey, canonicalAnalyte } from '../../../shared/constants/formIntelligence.js';
 
 type DB = any;
@@ -149,6 +150,89 @@ export function seedFormRanges(db: DB, userId: number | null): { added: number; 
         seed.to ? ageToDays(seed.to[0], seed.to[1]) : null,
         seed.ageLabel ?? null, seed.low ?? null, seed.high ?? null, seed.unit ?? null,
         FORM_RANGE_SOURCE, userId,
+      );
+      added++;
+    }
+  });
+  apply();
+  return { added, kept };
+}
+
+/* ============================================================================
+   The intervals this system ships with
+   ----------------------------------------------------------------------------
+   Loaded once, automatically, so a report has ranges the first time it is
+   printed rather than after somebody finds the screen that fills them in.
+
+   Two rules keep that safe to do without asking.
+
+   A row is written only where the laboratory has NOTHING for that exact
+   population — same parameter, same sex, same age band. Anything the
+   laboratory has set or edited is left exactly as it is, including a range it
+   deliberately widened or a band it invented.
+
+   And it is idempotent. Every shipped row is recognisable by its source, so a
+   second run adds nothing and a row the laboratory DELETED stays deleted —
+   quietly restoring a range somebody removed on purpose would be worse than
+   never shipping one.
+   ========================================================================= */
+
+/** The mark every shipped row carries, so a later run can recognise its own work. */
+export const SHIPPED_MARK = 'Shipped default';
+
+/** What a row is identified by: this parameter, for this population. */
+function populationKey(analyteKeyValue: string, sex: string, min: number | null, max: number | null): string {
+  return [analyteKeyValue, sex || 'any', min ?? '', max ?? ''].join('|');
+}
+
+/**
+ * Load the shipped intervals.
+ *
+ * Returns what it did, so a boot log can say it in one line and a screen can
+ * report it to somebody who pressed a button.
+ */
+export function seedShippedIntervals(db: DB, userId: number | null = null): { added: number; kept: number } {
+  let added = 0;
+  let kept = 0;
+
+  /*
+   * Everything already on the register, by population — asked once, before a
+   * single row is written. Asked per row instead, the first band of a
+   * parameter would look like a decision already taken and the rest of its
+   * bands would be skipped.
+   */
+  const existing = new Set<string>();
+  let seededBefore = false;
+  try {
+    for (const row of db.prepare('SELECT analyte_key, sex, age_min_days, age_max_days, source FROM rf_reference_ranges')
+      .all() as any[]) {
+      existing.add(populationKey(String(row.analyte_key), String(row.sex ?? 'any'),
+        row.age_min_days ?? null, row.age_max_days ?? null));
+      if (String(row.source ?? '') === SHIPPED_MARK) seededBefore = true;
+    }
+  } catch {
+    // No table yet: a database being created. The caller will try again on the
+    // next boot, by which point the schema exists.
+    return { added: 0, kept: 0 };
+  }
+
+  // Already done. A row the laboratory has since deleted stays deleted.
+  if (seededBefore) return { added: 0, kept: existing.size };
+
+  const insert = db.prepare(`INSERT INTO rf_reference_ranges
+      (analyte, analyte_key, sex, age_min_days, age_max_days, age_label, low, high, unit, source, note, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+  const apply = db.transaction(() => {
+    for (const seed of REFERENCE_INTERVALS) {
+      const key = rangeKey(seed.analyte);
+      const min = seed.fromDays ?? null;
+      const max = seed.toDays ?? null;
+      if (existing.has(populationKey(key, seed.sex ?? 'any', min, max))) { kept++; continue; }
+      insert.run(
+        seed.analyte, key, seed.sex ?? 'any', min, max, seed.ageLabel ?? null,
+        seed.low ?? null, seed.high ?? null, seed.unit ?? null,
+        SHIPPED_MARK, seed.note ? `${seed.source} — ${seed.note}` : seed.source, userId,
       );
       added++;
     }

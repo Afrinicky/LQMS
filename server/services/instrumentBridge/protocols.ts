@@ -43,6 +43,17 @@ export interface AstmResult {
   unit: string | null;
   flag: string | null;
   completedAt: string | null;
+  /**
+   * The reference range the analyser itself transmitted, verbatim.
+   *
+   * Every analyser here sends one and this system used to throw it away. It
+   * matters in exactly one situation, and it is a common one: a transmission
+   * that carried no date of birth. The laboratory's own intervals are banded
+   * by age, so none of them can be applied to a patient whose age nobody
+   * knows — and the analyser's range, whatever population it was set for, is
+   * then the only range anybody has.
+   */
+  referenceRange?: string | null;
 }
 
 export interface AnalyserMessage {
@@ -617,6 +628,8 @@ export function parseAstm(text: string): AnalyserMessage[] {
         unit: field(record, 5) || null,
         flag: field(record, 7) || null,
         completedAt: astmTime(field(record, 13) || null),
+        // R-6 in the standard's numbering: the reference ranges field.
+        referenceRange: field(record, 6) || null,
       });
       continue;
     }
@@ -709,6 +722,8 @@ export function parseHl7(text: string): AnalyserMessage[] {
         unit: (record[6] ?? '').trim() || null,
         flag: (record[8] ?? '').trim() || null,
         completedAt: hl7Time(record[14] ?? null),
+        // OBX-7, "References Range".
+        referenceRange: (record[7] ?? '').trim() || null,
       });
       continue;
     }
@@ -1561,6 +1576,48 @@ export function parseBt1500(text: string): AnalyserMessage[] {
 /** Does this text look like a BT1500 report? */
 export function looksLikeBt1500(text: string): boolean {
   return parseBt1500(text).length > 0;
+}
+
+/**
+ * The two ends of a reference range an analyser transmitted.
+ *
+ * There is no agreement at all on how to write one. ASTM suggests "low to
+ * high"; Sysmex sends "4.00 to 10.00", Mindray "4.0-10.0", some HL7 senders
+ * "4.0^10.0", and a one-sided limit arrives as "<5.0" or ">1.0". All of them
+ * are read here, and anything else is left alone rather than guessed at — half
+ * a range read wrongly is a wrong range, which is worse than none.
+ *
+ * The minus sign is the awkward one: "-1.5-3.0" is a range from minus one and
+ * a half to three, not three ranges. So a separating hyphen is only one that
+ * has a digit before it.
+ */
+export function splitReferenceRange(raw: unknown): { low: string | null; high: string | null } {
+  const text = String(raw ?? '').trim();
+  const none = { low: null, high: null };
+  if (!text || /^(n\/?a|none|-{1,2}|\.)$/i.test(text)) return none;
+
+  const clean = (value: string): string | null => {
+    const trimmed = value.trim().replace(/^\+/, '');
+    if (!trimmed) return null;
+    return Number.isFinite(Number(trimmed)) ? trimmed : null;
+  };
+
+  // One-sided: "< 5.0", "<=5.0", "> 1.0".
+  const upper = /^<=?\s*([+-]?[\d.]+)$/.exec(text);
+  if (upper) return { low: null, high: clean(upper[1]) };
+  const lower = /^>=?\s*([+-]?[\d.]+)$/.exec(text);
+  if (lower) return { low: clean(lower[1]), high: null };
+
+  // Two-sided, by whichever separator this analyser uses.
+  const pair = /^([+-]?[\d.]+)\s*(?:to|\.\.|\^|—|–|~|\/)\s*([+-]?[\d.]+)$/i.exec(text)
+    ?? /^([+-]?[\d.]+)\s*-\s*([+-]?[\d.]+)$/.exec(text)
+    ?? /^([+-]?[\d.]+)(?<=\d)-([+-]?[\d.]+)$/.exec(text);
+  if (pair) {
+    const low = clean(pair[1]);
+    const high = clean(pair[2]);
+    if (low !== null || high !== null) return { low, high };
+  }
+  return none;
 }
 
 export function parseFor(protocol: string, text: string): AnalyserMessage[] {

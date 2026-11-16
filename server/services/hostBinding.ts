@@ -34,6 +34,7 @@
  * using it.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { config } from '../config/index.js';
 
@@ -47,18 +48,70 @@ export const PORT_SETTING_KEY = 'apiPort';
 const ALL_INTERFACES = '0.0.0.0';
 const LOOPBACK = '127.0.0.1';
 
+/**
+ * Can anything other than this machine reach the host?
+ *
+ * True for every interface, and true for one named address of this machine —
+ * binding the wired card is still a laboratory on the network. Only loopback
+ * is private, and only loopback should make a screen say so.
+ */
 export function hostIsLan(host?: string | null): boolean {
-  return host === ALL_INTERFACES || host === '::';
+  const value = String(host ?? '').trim();
+  if (!value) return false;
+  if (value === LOOPBACK || value === '::1' || value.toLowerCase() === 'localhost') return false;
+  return true;
 }
 
 /* ----------------------------------------------------------------------------
    The file
    ------------------------------------------------------------------------- */
 
+/** An address this laboratory is reached at, as the admin wants it shown. */
+export type AddressEntry = {
+  /** The address or hostname itself. */
+  address: string;
+  /** What this laboratory calls it. Blank falls back to the detected name. */
+  label?: string;
+  /** Kept out of the lists benches and analysers are pointed at. */
+  hidden?: boolean;
+  /** The one address this laboratory wants everybody to use. */
+  primary?: boolean;
+  /** Typed in by hand rather than found on an interface of this machine. */
+  manual?: boolean;
+};
+
+export type TlsConfig = {
+  enabled: boolean;
+  /** Paths on this machine, so a certificate is never copied into a database. */
+  certFile: string;
+  keyFile: string;
+};
+
 export type NetworkConfig = {
-  /** '0.0.0.0' for every device on the network, '127.0.0.1' for this one. */
+  /**
+   * What to bind.
+   *
+   * '0.0.0.0' is every interface, '127.0.0.1' is this machine only, and
+   * anything else is one specific address on this machine — for a host with a
+   * wired and a wireless card on the same network, or with a hotspot adapter
+   * nobody wants it answering on.
+   */
   host: string;
   port: number;
+  /** Further ports to answer on, for a site whose policy fixes one. */
+  extraPorts: number[];
+  /**
+   * The address this laboratory tells people to use.
+   *
+   * A detected address changes when a lease changes or a cable moves, and
+   * every analyser and bench configured with the old one stops. A name the IT
+   * team controls does not, so where a facility has one, it is what every
+   * screen offers instead of whatever this machine happens to be called today.
+   */
+  publishedAddress: string;
+  tls: TlsConfig;
+  /** How detected addresses are shown, and any added by hand. */
+  addresses: AddressEntry[];
 };
 
 export type NetworkConfigState = NetworkConfig & {
@@ -73,17 +126,95 @@ export function connectivityFilePath(): string {
   return path.join(config.db.dataDir, 'config', 'connectivity.json');
 }
 
+/** A plausible IPv4 or IPv6 literal. Not whether this machine has it. */
+export function looksLikeAddress(value: unknown): boolean {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+  if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(text)) {
+    return text.split('.').every(part => Number(part) >= 0 && Number(part) <= 255);
+  }
+  return /^[0-9a-f:]+$/i.test(text) && text.includes(':');
+}
+
+/** A hostname somebody could type into a browser. */
+export function looksLikeHostname(value: unknown): boolean {
+  const text = String(value ?? '').trim();
+  if (!text || text.length > 253) return false;
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(text);
+}
+
+function port(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1024 && n <= 65535 ? n : null;
+}
+
 function sane(value: unknown): Partial<NetworkConfig> {
   const given = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   const out: Partial<NetworkConfig> = {};
+
+  /*
+   * Every interface, this machine only, or one named address of this machine.
+   *
+   * A typo must not become a listen() that throws and a laboratory that will
+   * not open, so anything unreadable is simply not taken and the caller keeps
+   * what it had. An address that IS readable but no longer exists on this
+   * machine is a different and more dangerous case, and is handled where the
+   * socket is actually opened — see `bindHostOrFallback`.
+   */
   const host = String(given.host ?? '').trim();
-  // Only the two answers this means anything for. A typo in a hand-edited file
-  // must not become a listen() that throws and a laboratory that will not open.
-  if (host === ALL_INTERFACES || host === LOOPBACK || host === '::') out.host = host;
-  const port = Number(given.port);
-  if (Number.isInteger(port) && port >= 1024 && port <= 65535) out.port = port;
+  if (host === ALL_INTERFACES || host === LOOPBACK || host === '::' || looksLikeAddress(host)) out.host = host;
+
+  const main = port(given.port);
+  if (main !== null) out.port = main;
+
+  if (Array.isArray(given.extraPorts)) {
+    const extra = given.extraPorts.map(port).filter((n): n is number => n !== null);
+    out.extraPorts = [...new Set(extra)].filter(n => n !== out.port);
+  }
+
+  const published = String(given.publishedAddress ?? '').trim();
+  if (!published || looksLikeAddress(published) || looksLikeHostname(published)) out.publishedAddress = published;
+
+  const tls = (given.tls && typeof given.tls === 'object' ? given.tls : null) as Record<string, unknown> | null;
+  if (tls) {
+    out.tls = {
+      enabled: tls.enabled === true,
+      certFile: String(tls.certFile ?? '').trim(),
+      keyFile: String(tls.keyFile ?? '').trim(),
+    };
+  }
+
+  if (Array.isArray(given.addresses)) {
+    const seen = new Set<string>();
+    out.addresses = given.addresses
+      .map(entry => (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>)
+      .map(entry => ({
+        address: String(entry.address ?? '').trim(),
+        label: String(entry.label ?? '').trim(),
+        hidden: entry.hidden === true,
+        primary: entry.primary === true,
+        manual: entry.manual === true,
+      }))
+      .filter(entry => {
+        if (!entry.address) return false;
+        const key = entry.address.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    // Exactly one primary, or none. Two would make every screen that shows
+    // "the address to use" pick whichever it happened to read first.
+    let found = false;
+    for (const entry of out.addresses) {
+      if (!entry.primary) continue;
+      if (found) entry.primary = false;
+      found = true;
+    }
+  }
   return out;
 }
+
+export const EMPTY_TLS: TlsConfig = { enabled: false, certFile: '', keyFile: '' };
 
 let cached: NetworkConfigState | null = null;
 
@@ -98,7 +229,10 @@ let cached: NetworkConfigState | null = null;
 export function networkConfig(refresh = false): NetworkConfigState {
   if (cached && !refresh) return cached;
   const file = connectivityFilePath();
-  const fromEnvironment: NetworkConfig = { host: config.api.host, port: config.api.port };
+  const fromEnvironment: NetworkConfig = {
+    host: config.api.host, port: config.api.port,
+    extraPorts: [], publishedAddress: '', tls: { ...EMPTY_TLS }, addresses: [],
+  };
 
   let problem: string | null = null;
   let parsed: Partial<NetworkConfig> = {};
@@ -115,6 +249,10 @@ export function networkConfig(refresh = false): NetworkConfigState {
   const resolved: NetworkConfig = {
     host: parsed.host ?? fromEnvironment.host,
     port: parsed.port ?? fromEnvironment.port,
+    extraPorts: parsed.extraPorts ?? [],
+    publishedAddress: parsed.publishedAddress ?? '',
+    tls: parsed.tls ?? { ...EMPTY_TLS },
+    addresses: parsed.addresses ?? [],
   };
 
   // Seed it, so the next person has something to edit and the screen has
@@ -139,15 +277,28 @@ export function writeNetworkConfig(patch: Partial<NetworkConfig>): NetworkConfig
   const next: NetworkConfig = {
     host: patch.host ?? current.host,
     port: patch.port ?? current.port,
+    extraPorts: patch.extraPorts ?? current.extraPorts,
+    publishedAddress: patch.publishedAddress ?? current.publishedAddress,
+    tls: patch.tls ?? current.tls,
+    addresses: patch.addresses ?? current.addresses,
   };
   const checked = sane(next);
   if (checked.host === undefined || checked.port === undefined) {
-    throw new Error('A connectivity setting must be an address of 0.0.0.0 or 127.0.0.1 and a port between 1024 and 65535.');
+    throw new Error('An address must be 0.0.0.0, 127.0.0.1, or one of this machine\u2019s own addresses, '
+      + 'and a port must be between 1024 and 65535.');
   }
+  const written: NetworkConfig = {
+    host: checked.host,
+    port: checked.port,
+    extraPorts: checked.extraPorts ?? [],
+    publishedAddress: checked.publishedAddress ?? '',
+    tls: checked.tls ?? { ...EMPTY_TLS },
+    addresses: checked.addresses ?? [],
+  };
   const file = connectivityFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ host: checked.host, port: checked.port }, null, 2)}\n`, 'utf8');
-  cached = { host: checked.host, port: checked.port, source: 'file', problem: null, path: file };
+  fs.writeFileSync(file, `${JSON.stringify(written, null, 2)}\n`, 'utf8');
+  cached = { ...written, source: 'file', problem: null, path: file };
   return cached;
 }
 
@@ -155,7 +306,42 @@ export function writeNetworkConfig(patch: Partial<NetworkConfig>): NetworkConfig
    What to listen on
    ------------------------------------------------------------------------- */
 
-export function resolveBindHost(): string { return networkConfig().host; }
+/**
+ * The address to actually bind, having checked this machine still has it.
+ *
+ * This is the safety net under the whole feature. An administrator can now
+ * bind one named address — the wired card rather than the wireless one, say —
+ * and that address is a fact about the machine on the day it was chosen. A
+ * cable moves, a lease changes, an IT team reorganises the network, and the
+ * address is simply gone. `listen()` on an address a machine does not have
+ * throws EADDRNOTAVAIL, the host does not come up, and the laboratory loses
+ * everything rather than one adapter.
+ *
+ * So the choice is verified against the interfaces that exist right now. If it
+ * is missing, the host falls back to every interface and SAYS SO. Falling back
+ * silently is what this file's opening comment warns against; falling back
+ * loudly keeps the laboratory on the network and still tells somebody the
+ * setting no longer matches the machine.
+ */
+export function bindHostOrFallback(): { host: string; fellBackFrom: string | null } {
+  const wanted = networkConfig().host;
+  if (wanted === ALL_INTERFACES || wanted === LOOPBACK || wanted === '::') {
+    return { host: wanted, fellBackFrom: null };
+  }
+  try {
+    const have = new Set<string>();
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const entry of list ?? []) have.add(String(entry.address));
+    }
+    if (have.has(wanted)) return { host: wanted, fellBackFrom: null };
+  } catch {
+    // If the interfaces cannot be read, binding everything is the safe answer.
+    return { host: ALL_INTERFACES, fellBackFrom: wanted };
+  }
+  return { host: ALL_INTERFACES, fellBackFrom: wanted };
+}
+
+export function resolveBindHost(): string { return bindHostOrFallback().host; }
 export function resolvePort(): number { return networkConfig().port; }
 
 /** Whether the laboratory has said other devices may reach it. */
