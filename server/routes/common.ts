@@ -10,6 +10,7 @@ import { config, type AppMode } from '../config/index.js';
 import {
   boundHost, boundPort, boundToLan, portMovedFromConfigured, askedPort,
   networkConfig, writeNetworkConfig, hostIsLan,
+  bindHostOrFallback, looksLikeAddress, looksLikeHostname,
 } from '../services/hostBinding.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -43,6 +44,7 @@ import { parseIntNullable, getCurrentStaffId, blockedForNoSignature } from './ro
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import * as tailscale from '../services/tailscale.js';
+import * as connectivity from '../services/connectivity.js';
 import * as XLSX from 'xlsx';
 import { withdrawOutstandingAttestations } from '../services/attestationScope.js';
 
@@ -293,6 +295,27 @@ const AVAILABLE = (a?: unknown) => !a || String(a).toLowerCase() === 'available'
 
 export function commonRoutes() {
   const router = Router();
+
+  /*
+   * Prove reachability from where the bench is standing.
+   *
+   * Registered BEFORE the router's own authentication, deliberately: a bench
+   * cannot sign in to a host it cannot reach, so an endpoint that required a
+   * session could never answer the question it exists to answer. It carries
+   * nothing — a product name and the time — and all it records is that
+   * something arrived and from where, which is the one fact about its own
+   * network that this host cannot work out alone.
+   */
+  router.get('/system/reach', (req, res) => {
+    connectivity.noteVisitor(req.ip ?? req.socket?.remoteAddress ?? null, req.get('user-agent'));
+    res.json({
+      ok: true,
+      product: 'SECH_LIMS',
+      reachedAt: new Date().toISOString(),
+      yourAddress: String(req.ip ?? '').replace(/^::ffff:/, ''),
+    });
+  });
+
   router.use(requireAuth);
 
   router.get('/dashboard', requireAuth, (req, res) => {
@@ -4202,6 +4225,152 @@ export function commonRoutes() {
     return urls;
   }
 
+  /**
+   * The address book: what this machine has, plus what the laboratory has said
+   * about it.
+   *
+   * Detected addresses are facts; the label, whether it is shown and which one
+   * is the one to use are decisions, and they belong to the laboratory. An
+   * address typed in by hand appears here too, for a site reached through a
+   * name its IT team created or through a reverse proxy this machine cannot
+   * see from the inside.
+   */
+  function addressBook() {
+    const settings = networkConfig();
+    const saved = new Map(settings.addresses.map(entry => [entry.address.toLowerCase(), entry]));
+    const port = boundPort();
+    const scheme = settings.tls.enabled ? 'https' : 'http';
+    const open = boundToLan();
+
+    const rows = connectivity.interfaces()
+      .filter(entry => entry.family === 'IPv4' && entry.kind !== 'loopback')
+      .map(entry => {
+        const choice = saved.get(entry.address.toLowerCase());
+        return {
+          address: entry.address,
+          label: choice?.label || (entry.kind === 'remote' ? 'Remote access' : `This network (${entry.name})`),
+          adapter: entry.name,
+          kind: entry.kind,
+          note: entry.note,
+          url: `${scheme}://${entry.address}:${port}/`,
+          reachable: open,
+          hidden: choice?.hidden === true,
+          primary: choice?.primary === true,
+          manual: false,
+        };
+      });
+
+    // Anything the laboratory added that this machine cannot see for itself.
+    for (const entry of settings.addresses) {
+      if (!entry.manual) continue;
+      if (rows.some(row => row.address.toLowerCase() === entry.address.toLowerCase())) continue;
+      rows.push({
+        address: entry.address,
+        label: entry.label || 'Added by this laboratory',
+        adapter: '', kind: 'other' as const, note: null,
+        url: `${scheme}://${entry.address}:${port}/`,
+        reachable: open,
+        hidden: entry.hidden === true,
+        primary: entry.primary === true,
+        manual: true,
+      });
+    }
+    return rows;
+  }
+
+  /** Every layer a connection has to survive, and which one is broken. */
+  router.get('/system/connectivity/diagnose', requireAuth, async (_req, res) => {
+    const settings = networkConfig();
+    res.json(await connectivity.diagnose({
+      boundHost: boundHost(), port: boundPort(), extraPorts: settings.extraPorts,
+    }));
+  });
+
+  /**
+   * Admit the port on this machine's firewall.
+   *
+   * The one thing on this screen that changes the machine, so it is a POST, it
+   * is audited, and it reports every change it made in words.
+   */
+  router.post('/system/connectivity/firewall', requirePermission('settings', 'edit'), async (req, res) => {
+    const settings = networkConfig();
+    const outcome = await connectivity.openFirewallPort(boundPort(), settings.extraPorts);
+    audit(req, { action: 'edit', entity: 'system_connectivity', entityId: 'firewall',
+      newValue: { port: boundPort(), ok: outcome.ok, changed: outcome.changed } });
+    if (!outcome.ok) return res.status(400).json({ error: outcome.error, command: outcome.command });
+    res.json({ ok: true, changed: outcome.changed, command: outcome.command });
+  });
+
+  /**
+   * Everything else about how this host is reached.
+   *
+   * Written in one call rather than a field at a time, because these settings
+   * only make sense together: a certificate without https does nothing, and a
+   * published address with no port behind it sends a bench nowhere.
+   */
+  router.put('/system/connectivity/advanced', requirePermission('settings', 'edit'), (req, res) => {
+    const body = req.body ?? {};
+    const patch: Record<string, unknown> = {};
+
+    if (body.host !== undefined) {
+      const host = String(body.host ?? '').trim();
+      if (host !== '0.0.0.0' && host !== '127.0.0.1' && host !== '::' && !looksLikeAddress(host)) {
+        return res.status(400).json({ error: 'An address must be 0.0.0.0, 127.0.0.1, or one of this machine\u2019s own addresses.' });
+      }
+      patch.host = host;
+    }
+    if (body.extraPorts !== undefined) {
+      const list = Array.isArray(body.extraPorts) ? body.extraPorts : [];
+      for (const value of list) {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n < 1024 || n > 65535) {
+          return res.status(400).json({ error: `${value} is not a port between 1024 and 65535.` });
+        }
+      }
+      patch.extraPorts = list.map(Number);
+    }
+    if (body.publishedAddress !== undefined) {
+      const value = String(body.publishedAddress ?? '').trim();
+      if (value && !looksLikeAddress(value) && !looksLikeHostname(value)) {
+        return res.status(400).json({ error: `"${value}" is not an address or a hostname a browser could open.` });
+      }
+      patch.publishedAddress = value;
+    }
+    if (body.tls !== undefined) {
+      const tls = body.tls ?? {};
+      const certFile = String(tls.certFile ?? '').trim();
+      const keyFile = String(tls.keyFile ?? '').trim();
+      if (tls.enabled === true) {
+        if (!certFile || !keyFile) {
+          return res.status(400).json({ error: 'Serving over https needs both a certificate file and a key file.' });
+        }
+        for (const [what, file] of [['certificate', certFile], ['key', keyFile]] as const) {
+          if (!fs.existsSync(file)) {
+            return res.status(400).json({ error: `The ${what} file was not found at ${file}. Nothing was saved.` });
+          }
+        }
+      }
+      patch.tls = { enabled: tls.enabled === true, certFile, keyFile };
+    }
+    if (body.addresses !== undefined) {
+      patch.addresses = Array.isArray(body.addresses) ? body.addresses : [];
+    }
+
+    try {
+      const saved = writeNetworkConfig(patch as never);
+      audit(req, { action: 'edit', entity: 'system_connectivity', entityId: 'advanced', newValue: patch });
+      res.json({
+        ok: true,
+        settings: saved,
+        restartNeeded: body.host !== undefined || body.extraPorts !== undefined || body.tls !== undefined,
+        note: 'Saved. A change to the address, the ports or https takes effect when this host is restarted; '
+          + 'the rest applies at once.',
+      });
+    } catch (error) {
+      res.status(400).json({ error: (error as Error).message });
+    }
+  });
+
   router.get('/system/connectivity', requireAuth, async (_req, res) => {
     const { mode, source } = resolveMode();
     const settings = networkConfig(true);
@@ -4247,6 +4416,22 @@ export function commonRoutes() {
       lanReady: true,
       lanUrls: lanUrls(),
       hostAddresses: hostAddresses(),
+      // Everything the administrator can now set, and what this machine
+      // actually looks like underneath it.
+      interfaces: connectivity.interfaces(),
+      addressBook: addressBook(),
+      advanced: {
+        host: settings.host,
+        extraPorts: settings.extraPorts,
+        publishedAddress: settings.publishedAddress,
+        tls: settings.tls,
+        addresses: settings.addresses,
+      },
+      // Set when the chosen address no longer exists on this machine and the
+      // host fell back to every interface rather than refusing to start.
+      bindFellBackFrom: bindHostOrFallback().fellBackFrom,
+      firewall: await connectivity.firewallState(boundPort()),
+      visitors: connectivity.recentVisitors(),
       reach,
       database: { driver: config.db.driver },
       sync: { enabled: config.sync.enabled, status: 'planned' },
