@@ -771,15 +771,31 @@ check('a parameter that needs several bands got all of them',
 
 const afterRanges = await j(`/transmission-reports/${reportId}`, { token: ADMIN });
 const hgb = (afterRanges.json?.report?.parameters ?? []).find(p => /HGB|haemoglobin/i.test(p.analyte));
+/*
+ * The range applied is the one that fits THIS patient, not merely the first
+ * one filed under the parameter.
+ *
+ * This used to expect 11.00-16.00, the single unbanded haemoglobin the
+ * laboratory's own forms carry. The register now also holds the intervals this
+ * system ships with, which are banded by age and split by sex, and the sample
+ * in this check belongs to an adult man — so the adult male band is the right
+ * answer and the unisex one would be the wrong one. The assertion is on the
+ * band being chosen, which is the behaviour worth protecting; the figures are
+ * named so that a change to either is noticed here.
+ */
 check('and a result is then read against one',
-  hgb?.referenceLow === '11.00' && hgb?.referenceHigh === '16.00',
+  hgb?.referenceLow === '13.5' && hgb?.referenceHigh === '17.5'
+  && /male/.test(hgb?.referencePopulation ?? ''),
   JSON.stringify(hgb));
 
 // The transmission in this check carries HGB; the range was set under HGB and
-// found for it however the analyser named the parameter.
+// found for it however the analyser named the parameter. Asserted against the
+// range that was actually chosen above rather than a figure written twice, so
+// the two cannot drift apart.
 const printedWithRanges = await j(`/transmission-reports/${reportId}/print`, { token: ADMIN });
-check('the printed report shows the range', printedWithRanges.text.includes('11.00'),
-  printedWithRanges.text.slice(0, 0));
+check('the printed report shows the range',
+  Boolean(hgb?.referenceLow) && printedWithRanges.text.includes(hgb.referenceLow),
+  `looking for ${hgb?.referenceLow}`);
 
 const added = await j('/transmission-reports/ranges', {
   method: 'POST', token: ADMIN,
@@ -816,10 +832,20 @@ const parameterRange = (code) => {
 };
 check('the absolute neutrophil count is read against the absolute range',
   parameterRange('NEUT#') === '2.00-7.00', `NEUT# -> ${parameterRange('NEUT#')}`);
+/*
+ * The figures moved when the shipped intervals were added — the adult
+ * differential band is 40-75% rather than the 50-70% the laboratory's forms
+ * carry — but the thing being guarded did not: the percentage must be read
+ * against a percentage and never against the absolute count's range. So both
+ * are pinned AND asserted to be different from one another, which is the
+ * failure this check exists to catch and the one a figure alone would miss.
+ */
 check('and the percentage against the percentage range',
-  parameterRange('NEUT%') === '50.0-70.0', `NEUT% -> ${parameterRange('NEUT%')}`);
+  parameterRange('NEUT%') === '40.0-75.0' && parameterRange('NEUT%') !== parameterRange('NEUT#'),
+  `NEUT% -> ${parameterRange('NEUT%')}, NEUT# -> ${parameterRange('NEUT#')}`);
 check('the same holds for the reticulocytes',
-  parameterRange('RET#') === '0.0-999.9' && parameterRange('RET%') === '0.5-2',
+  parameterRange('RET#') === '25-75' && parameterRange('RET%') === '0.5-2.0'
+  && parameterRange('RET#') !== parameterRange('RET%'),
   `RET# -> ${parameterRange('RET#')}, RET% -> ${parameterRange('RET%')}`);
 
 const ranges = await j('/transmission-reports/ranges', { token: ADMIN });
