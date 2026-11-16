@@ -19,7 +19,7 @@
     "translis:api": "tsx translis/server/index.ts",
     "build:translis": "tsc --noEmit && vite build --config translis/vite.config.ts && tsc -p tsconfig.translis.json && node scripts/copy-translis-preload.mjs",
     "dist:translis": "npm run build:translis && npm run pack:translis",
-    "pack:translis": "electron-builder --config electron-builder.translis.json --win",
+    "pack:translis": "npm run rebuild:native && electron-builder --config electron-builder.translis.json --win",
     "check:translis": "node scripts/translis-check.mjs",
     "check:translis-parity": "node scripts/translis-parity-check.mjs",
     "preview": "vite preview",
@@ -68,10 +68,10 @@
     "check:units": "node scripts/unit-and-placement-check.mjs",
     "check:monitoring": "node scripts/monitoring-check.mjs",
     "check:chart-freeze": "node scripts/chart-freeze-check.mjs",
-    "rebuild:native": "electron-builder install-app-deps",
-    "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "rebuild:native": "electron-rebuild -f --only better-sqlite3",
+    "pack": "npm run build && npm run rebuild:native && electron-builder --dir",
+    "dist": "npm run build && npm run rebuild:native && electron-builder",
+    "dist:win": "npm run build && npm run rebuild:native && electron-builder --win",
     "build:mobile": "vite build --config vite.mobile.config.ts && node scripts/prepare-capacitor.mjs",
     "build:mobile:vercel": "vite build --config vite.mobile.config.ts && node scripts/prepare-capacitor.mjs && node scripts/prepare-vercel-mobile.mjs",
     "cap:sync": "npm run build:mobile && cap sync",
@@ -170,7 +170,7 @@
     "extraMetadata": {
       "main": "dist-electron/electron/main.js"
     },
-    "npmRebuild": true,
+    "npmRebuild": false,
     "publish": null,
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*",

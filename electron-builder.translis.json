@@ -29,7 +29,7 @@
     "productName": "TransLis",
     "main": "dist-translis-electron/translis/electron/main.js"
   },
-  "npmRebuild": true,
+  "npmRebuild": false,
   "publish": null,
   "asarUnpack": [
     "node_modules/better-sqlite3/**/*",
