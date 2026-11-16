@@ -8814,3 +8814,69 @@ button.mw-chip:disabled { cursor: default; opacity: 0.65; }
   .am-actions { text-align: left; }
   .am-actions .pq-link { margin: 0 12px 0 0; }
 }
+
+/* ============================================================================
+   Network configuration console
+   ----------------------------------------------------------------------------
+   The Settings → System screen where a facility sets how it is reached, and
+   diagnoses why it is not. Sectioned rather than listed: each heading is one
+   decision, and the separators are what stop seven decisions reading as one
+   long form.
+   ========================================================================= */
+.cx-console { margin-top: 16px; }
+.cx-section { padding: 16px 0; border-top: 1px solid var(--line, #e5e7eb); }
+.cx-section:first-of-type { border-top: 0; padding-top: 6px; }
+.cx-section h4 {
+  margin: 0 0 4px; font-size: 13px; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--muted, #6b7280);
+}
+.cx-section > .hint { margin: 0 0 10px; max-width: 78ch; }
+
+.cx-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.cx-field > input, .cx-field > select { min-width: 220px; }
+.cx-field > .hint { flex: 1 1 240px; margin: 0; }
+.cx-add > input:first-child { flex: 2 1 280px; }
+.cx-add > input:nth-child(2) { flex: 1 1 160px; }
+
+.cx-check { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.cx-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 6px; }
+.cx-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+
+.cx-table { margin-top: 8px; }
+.cx-table td { vertical-align: middle; }
+.cx-table input { width: 100%; }
+.cx-row-off { opacity: .55; }
+.cx-row-actions { white-space: nowrap; text-align: right; }
+.cx-row-actions .btn { margin-left: 4px; }
+.cx-danger { color: var(--danger, #b91c1c); }
+.cx-note { display: block; font-size: 11.5px; color: var(--muted, #6b7280); margin-top: 2px; }
+.cx-chip {
+  display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 10px;
+  font-size: 11px; background: var(--chip-bg, #f1f5f9); color: var(--muted, #6b7280);
+}
+.cx-chip-primary { background: #e0edff; color: #1d4ed8; }
+
+.cx-rows { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
+.cx-row { display: flex; gap: 12px; justify-content: space-between; font-size: 13px; flex-wrap: wrap; }
+.cx-row > span:first-child { color: var(--muted, #6b7280); }
+
+.cx-findings { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cx-findings li { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; }
+.cx-findings strong { display: block; font-size: 13px; }
+.cx-findings p { margin: 2px 0 0; color: var(--muted, #6b7280); max-width: 80ch; }
+.cx-findings .cx-fix { color: var(--text, #111827); }
+.cx-icon { flex: 0 0 auto; margin-top: 1px; }
+.cx-ok .cx-icon { color: #15803d; }
+.cx-fail .cx-icon { color: #b91c1c; }
+.cx-warn .cx-icon { color: #b45309; }
+.cx-info .cx-icon { color: #6b7280; }
+
+.cx-beacon { margin-top: 16px; padding: 12px; border: 1px dashed var(--line, #d1d5db); border-radius: 8px; }
+.cx-beacon strong { font-size: 13px; }
+.cx-beacon .hint { margin: 4px 0 8px; max-width: 78ch; }
+.cx-url { display: inline-block; padding: 5px 9px; background: var(--chip-bg, #f1f5f9); border-radius: 6px; font-size: 12.5px; word-break: break-all; }
+
+@media (max-width: 720px) {
+  .cx-field > input, .cx-field > select { min-width: 0; width: 100%; }
+  .cx-row-actions { text-align: left; }
+}

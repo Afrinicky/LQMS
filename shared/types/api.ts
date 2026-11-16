@@ -59,9 +59,46 @@ export type SystemConnectivity = {
       dnsName: string | null; ip: string | null; error: string | null;
     };
   };
+  /** Every address this machine actually has, classified. */
+  interfaces?: Array<{
+    name: string; address: string; family: 'IPv4' | 'IPv6'; netmask: string;
+    kind: 'lan' | 'remote' | 'hotspot' | 'loopback' | 'other'; note: string | null;
+  }>;
+  /** The addresses as the laboratory has chosen to present them. */
+  addressBook?: Array<{
+    address: string; label: string; adapter: string; kind: string; note: string | null;
+    url: string; reachable: boolean; hidden: boolean; primary: boolean; manual: boolean;
+  }>;
+  /** Everything an administrator may set about how this host is reached. */
+  advanced?: {
+    host: string;
+    extraPorts: number[];
+    publishedAddress: string;
+    tls: { enabled: boolean; certFile: string; keyFile: string };
+    addresses: Array<{ address: string; label?: string; hidden?: boolean; primary?: boolean; manual?: boolean }>;
+  };
+  /** Set when the chosen address no longer exists and the host bound everything instead. */
+  bindFellBackFrom?: string | null;
+  firewall?: {
+    supported: boolean;
+    portAllowed: boolean | null;
+    ruleName: string | null;
+    profiles: Array<{ name: string; category: string; public: boolean }>;
+    elevated: boolean | null;
+    note: string | null;
+  };
+  /** Devices that have actually reached this host since it started. */
+  visitors?: Array<{ address: string; at: string; agent: string | null }>;
   database: { driver: 'sqlite' | 'postgres' };
   sync: { enabled: boolean; status: 'planned' | 'active' | 'disabled' };
   generatedAt: string;
+};
+
+/** One layer of the connectivity diagnosis. */
+export type ConnectivityFinding = {
+  key: string; label: string;
+  status: 'ok' | 'warn' | 'fail' | 'info';
+  detail: string; fix: string | null;
 };
 export type SyncStatus = {
   enabled: boolean;
