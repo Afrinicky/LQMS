@@ -68,7 +68,7 @@
     "check:units": "node scripts/unit-and-placement-check.mjs",
     "check:monitoring": "node scripts/monitoring-check.mjs",
     "check:chart-freeze": "node scripts/chart-freeze-check.mjs",
-    "rebuild:native": "electron-rebuild --only better-sqlite3",
+    "rebuild:native": "electron-rebuild -f --only better-sqlite3",
     "pack": "npm run build && npm run rebuild:native && electron-builder --dir",
     "dist": "npm run build && npm run rebuild:native && electron-builder",
     "dist:win": "npm run build && npm run rebuild:native && electron-builder --win",
