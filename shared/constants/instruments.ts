@@ -216,12 +216,23 @@ export function linkForwards(role?: string | null, forwardEnabled?: unknown): bo
 export const LINK_PROTOCOLS = ['astm', 'hl7', 'bt1500', 'delimited', 'auto'] as const;
 export type LinkProtocol = (typeof LINK_PROTOCOLS)[number];
 
+/*
+ * The name of the protocol, not a description of the machine that speaks it.
+ *
+ * "Biotecnica BT1500" was listed here as though it were a protocol. It is a
+ * manufacturer and a model: the protocol is a fixed-width ASCII record that
+ * the host asks for, and naming it after one instrument hides the fact that
+ * anything else speaking the same thing can be set to it. Each entry now
+ * names the protocol first, with the instrument in brackets where one is the
+ * reason the protocol is here at all. Which analysers speak each is guidance
+ * and belongs in the hint below, not in the heading.
+ */
 export const LINK_PROTOCOL_LABELS: Record<LinkProtocol, string> = {
-  astm: 'ASTM E1394 (most haematology and chemistry analysers)',
+  astm: 'ASTM E1381/E1394 — framed records with ENQ/ACK',
   hl7: 'HL7 v2 ORU^R01 over MLLP',
-  bt1500: 'Biotecnica BT1500 — fixed columns, asked for by the host',
-  delimited: 'Plain delimited text, one result per line',
-  auto: 'Work it out from what arrives',
+  bt1500: 'Fixed-width ASCII, host-polled (Biotecnica BT1500)',
+  delimited: 'Delimited text — one result per line',
+  auto: 'Detect automatically from the first message',
 };
 
 export const LINK_PROTOCOL_HINTS: Record<LinkProtocol, string> = {

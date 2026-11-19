@@ -212,14 +212,36 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     void (async () => {
-      try {
-        const [p, e, s] = await Promise.all([
-          api<{ profiles: Profile[]; lhimsMaps: LhimsMap[] }>('/instrument-links/profiles'),
-          api<Array<{ id: number; name: string; section_id?: number | null }>>('/equipment'),
-          api<Array<{ id: number; name: string }>>('/sections'),
-        ]);
-        setProfiles(p.profiles); setLhimsMaps(p.lhimsMaps ?? []); setEquipment(e); setSections(s);
-      } catch { /* the pickers are a convenience */ }
+      /*
+       * Each list is fetched on its own, and a failure in one may not empty
+       * the others.
+       *
+       * These were fetched with Promise.all inside a single catch that
+       * swallowed everything. TransLis mounts no equipment or sections
+       * routes — it is a middleware, it has no equipment register — so both
+       * of those requests answer 404, the whole Promise.all rejects, and the
+       * MODELS were discarded along with them. The Model list then rendered
+       * its group headings with nothing underneath, which reads as a product
+       * that knows no analysers at all rather than as two endpoints that are
+       * not there. The list that matters was lost to the failure of two that
+       * were never expected to answer.
+       */
+      const [p, e, s] = await Promise.allSettled([
+        api<{ profiles: Profile[]; lhimsMaps: LhimsMap[] }>('/instrument-links/profiles'),
+        api<Array<{ id: number; name: string; section_id?: number | null }>>('/equipment'),
+        api<Array<{ id: number; name: string }>>('/sections'),
+      ]);
+      if (p.status === 'fulfilled') {
+        setProfiles(p.value.profiles ?? []);
+        setLhimsMaps(p.value.lhimsMaps ?? []);
+      } else {
+        // The one list nothing else can stand in for: without it no analyser
+        // can be chosen, so it is said out loud rather than left blank.
+        setError('The analyser models could not be read, so the Model list is empty. '
+          + 'Everything else on this screen still works.');
+      }
+      if (e.status === 'fulfilled') setEquipment(e.value ?? []);
+      if (s.status === 'fulfilled') setSections(s.value ?? []);
       // What to type into the analyser. Nobody should have to find this
       // machine's address from a command prompt in another room.
       try { setHost(await api<HostInfo>('/instrument-links/host')); } catch { /* shown only when known */ }
@@ -879,18 +901,32 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             <label className="lf-wide"><span>What to call it</span>
               <TextField value={form.name} onValue={v => set('name', v)} autoFocus
                 placeholder="Haematology 2 — Sysmex XN-330" /></label>
-            <label><span>The instrument</span>
-              <select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}>
-                <option value="">Not linked to a registered instrument</option>
-                {equipment.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label><span>Unit</span>
-              <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
-                <option value="">—</option>
-                {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </label>
+            {/*
+              * The equipment register and the laboratory's units, where there
+              * are any.
+              *
+              * TransLis is the middleware on its own: it keeps no equipment
+              * register and has no units, and it serves neither route. Both
+              * boxes could therefore never hold anything but their own
+              * placeholder, and a permanently empty picker reads as a list
+              * that failed to load rather than one that does not apply here.
+              */}
+            {!IS_STANDALONE_MIDDLEWARE && (
+              <>
+                <label><span>The instrument</span>
+                  <select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}>
+                    <option value="">Not linked to a registered instrument</option>
+                    {equipment.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+                <label><span>Unit</span>
+                  <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
+                    <option value="">—</option>
+                    {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </label>
+              </>
+            )}
             {/*
               * Grouped, because the list now holds three different kinds of
               * thing. The standard sets are what "not listed" used to mean,
