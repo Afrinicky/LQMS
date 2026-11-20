@@ -268,6 +268,22 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
       remoteHost: form.remoteHost || null,
       remotePort: form.remotePort ? Number(form.remotePort) : null,
       watchPath: form.watchPath || null,
+      /*
+       * The cable, and who starts the conversation.
+       *
+       * These were collected by the form and never put in the payload, so a
+       * serial link could not be saved at all: the server fell back to the
+       * stored value, found none on a new link, and refused it for having no
+       * port. Every field the form holds is sent, and the check below keeps
+       * it that way.
+       */
+      serialPath: form.serialPath || null,
+      serialBaud: Number(form.serialBaud) || SERIAL_DEFAULTS.baudRate,
+      serialDataBits: Number(form.serialDataBits) || SERIAL_DEFAULTS.dataBits,
+      serialStopBits: Number(form.serialStopBits) || SERIAL_DEFAULTS.stopBits,
+      serialParity: form.serialParity || SERIAL_DEFAULTS.parity,
+      serialFlow: form.serialFlow || SERIAL_DEFAULTS.flowControl,
+      pollMode: form.pollMode,
       controlPatterns: form.controlPatterns.split(',').map(p => p.trim()).filter(Boolean),
       closeAfterMessage: form.closeAfterMessage,
       forwardEnabled: form.forwardEnabled,
@@ -459,8 +475,8 @@ export default function InstrumentLinksTab({ standalone = false }: { standalone?
         <LinkForm form={form} setForm={setForm} profiles={profiles} lhimsMaps={lhimsMaps}
           equipment={equipment} sections={sections} host={host}
           editing={Boolean(editing)} lastPeer={editing?.last_peer ?? null}
-          passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
-          onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); }} />
+          passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'} error={error}
+          onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); setError(null); }} />
       )}
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
       {openFiles && <FilesDialog link={openFiles} onClose={() => setOpenFiles(null)} />}
@@ -871,11 +887,13 @@ function Section({ step, title, children }: { step: number; title: string; child
    changed is that the reading is optional and the order matches the walk to
    the analyser.
    ------------------------------------------------------------------------- */
-function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, lastPeer, passwordSet, busy, host, onSave, onClose }: {
+function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, lastPeer, passwordSet, busy, host, error, onSave, onClose }: {
   form: typeof EMPTY; setForm: (fn: (f: typeof EMPTY) => typeof EMPTY) => void;
   profiles: Profile[]; lhimsMaps: LhimsMap[];
   equipment: Array<{ id: number; name: string }>; sections: Array<{ id: number; name: string }>;
   editing: boolean; lastPeer: string | null; passwordSet: boolean; busy: boolean; host: HostInfo | null;
+  /** Why the last attempt to save was refused, shown beside the button that tried. */
+  error: string | null;
   onSave: () => void; onClose: () => void;
 }) {
   const set = <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => setForm(f => ({ ...f, [key]: value }));
@@ -1298,6 +1316,17 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
             </>
           )}
         </Section>
+
+        {/*
+          * A refusal, where the person who caused it is looking.
+          *
+          * This was reported on the page BEHIND this dialog. The dialog stays
+          * open when a save is refused, so the message was drawn underneath
+          * it and the button appeared to do nothing at all — which is how a
+          * link that the server rejected for a missing serial port reads as a
+          * screen that simply ignores the Save button.
+          */}
+        {error && <Notice kind="error">{error}</Notice>}
 
         <div className="pr-btns">
           <button type="button" disabled={busy || !form.name.trim()} onClick={onSave}>

@@ -24,6 +24,14 @@ export default function MiddlewareDestinations({
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busy, setBusy] = useState<number | 'save' | null>(null);
   const [test, setTest] = useState<{ id: number; ok: boolean; detail: string; payload: string } | null>(null);
+  /*
+   * Why the last save was refused.
+   *
+   * Kept here as well as reported upward, because the page reports it on the
+   * screen BEHIND this dialog — which stays open when a save fails, so the
+   * message was drawn underneath it and Save looked like it did nothing.
+   */
+  const [failure, setFailure] = useState<string | null>(null);
 
   async function act(destination: Destination, action: 'test' | 'approve' | 'activate' | 'deactivate' | 'retire') {
     setBusy(destination.id); onError(null);
@@ -51,7 +59,7 @@ export default function MiddlewareDestinations({
 
   async function save(form: Record<string, unknown>) {
     if (!editing) return;
-    setBusy('save'); onError(null);
+    setBusy('save'); onError(null); setFailure(null);
     try {
       const outcome = await api<{ standDown?: boolean }>(`/middleware/destinations/${editing.id}`, {
         method: 'PUT', body: JSON.stringify(form),
@@ -61,7 +69,7 @@ export default function MiddlewareDestinations({
         : 'Saved.');
       setEditing(null);
       await reload();
-    } catch (e) { onError(errorText(e)); }
+    } catch (e) { const text = errorText(e); onError(text); setFailure(text); }
     finally { setBusy(null); }
   }
 
@@ -182,7 +190,8 @@ export default function MiddlewareDestinations({
           destination={editing}
           reference={reference}
           busy={busy === 'save'}
-          onClose={() => setEditing(null)}
+          error={failure}
+          onClose={() => { setEditing(null); setFailure(null); }}
           onSave={save}
         />
       )}
@@ -193,10 +202,12 @@ export default function MiddlewareDestinations({
 /* ----------------------------------------------------------------------------
    One destination's settings
    ------------------------------------------------------------------------- */
-function EditDestination({ destination, reference, busy, onClose, onSave }: {
+function EditDestination({ destination, reference, busy, error, onClose, onSave }: {
   destination: Destination;
   reference: SectionProps['reference'];
   busy: boolean;
+  /** Why the last save was refused. Shown here, not on the screen behind. */
+  error: string | null;
   onClose: () => void;
   onSave: (form: Record<string, unknown>) => Promise<void>;
 }) {
@@ -282,6 +293,8 @@ function EditDestination({ destination, reference, busy, onClose, onSave }: {
           Changing the transport, endpoint, authentication or acknowledgement policy stands an active destination down
           to awaiting approval. Nothing carries clinical results on settings nobody has signed for.
         </Note>
+        {/* The refusal, in the dialog that caused it rather than behind it. */}
+        {error && <Note tone="warn">{error}</Note>}
         <div className="pr-btns">
           <button type="button" className="btn" disabled={busy} onClick={() => void onSave(form)}>
             {busy ? <Loader2 size={13} className="pd-spin" /> : null} Save

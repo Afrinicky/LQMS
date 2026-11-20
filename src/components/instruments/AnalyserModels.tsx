@@ -243,6 +243,7 @@ export default function AnalyserModels({ canEdit }: { canEdit: boolean }) {
       {editing && (
         <ModelEditor
           model={editing.model}
+          error={error}
           startingSet={editing.isDefault}
           models={models ?? []}
           units={units}
@@ -264,9 +265,11 @@ export default function AnalyserModels({ canEdit }: { canEdit: boolean }) {
    protocol to choose — it is a set of parameters and nothing else — so those
    fields are simply not shown for it, rather than shown and ignored.
    ========================================================================= */
-function ModelEditor({ model, startingSet, models, units, protocols, disciplines, onClose, onSaved, onError }: {
+function ModelEditor({ model, startingSet, models, units, protocols, disciplines, error, onClose, onSaved, onError }: {
   model: Model | null;
   startingSet: DefaultSet | null;
+  /** Why the last save was refused. Shown here, not on the card behind. */
+  error: string | null;
   models: Model[];
   units: KnownUnit[];
   protocols: string[];
@@ -439,6 +442,16 @@ function ModelEditor({ model, startingSet, models, units, protocols, disciplines
             </tbody>
           </table>
         </div>
+
+        {/*
+          * A refusal belongs in the dialog that caused it.
+          *
+          * This was reported on the card behind, which stays covered while
+          * the editor is open — so a model rejected for a duplicate key, or
+          * for having no parameters, looked like a Save button that did
+          * nothing.
+          */}
+        {error && <Notice kind="error">{error}</Notice>}
 
         <p className="am-note">
           Only a change of scale is done automatically. A conversion that needs to know the analyte, such as

@@ -99,7 +99,8 @@
     "validate:oq": "node scripts/validation/oq-suite.mjs",
     "validate:pq": "node scripts/validation/pq-recovery.mjs",
     "validate": "npm run validate:oq && npm run validate:pq",
-    "check:iqc-series": "node scripts/iqc-series-check.mjs"
+    "check:iqc-series": "node scripts/iqc-series-check.mjs",
+    "check:link-form": "node scripts/link-form-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
